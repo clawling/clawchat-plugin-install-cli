@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+*.log
+.DS_Store
+.worktrees/
+scripts/.env.r2
+opencode.json
+docs/superpowers/

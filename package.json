@@ -1,0 +1,28 @@
+{
+  "name": "@clawling/clawchat-plugin-install",
+  "version": "0.1.1",
+  "private": true,
+  "description": "ClawChat monorepo for CLI, shared utilities, and target plugin installation.",
+  "type": "module",
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "pnpm -r build",
+    "clean": "pnpm -r clean",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "release:dry": "pnpm --filter @clawling/clawchat-plugin-install-cli release:dry"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsdown": "^0.21.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
