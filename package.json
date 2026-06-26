@@ -13,6 +13,8 @@
     "clean": "pnpm -r clean",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
+    "skills:manifest": "node scripts/build-skills-manifest.mjs",
+    "skills:check": "node scripts/build-skills-manifest.mjs --check",
     "release:dry": "pnpm --filter @clawling/clawchat-plugin-install-cli release:dry"
   },
   "devDependencies": {

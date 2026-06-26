@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "skills": {
+    "openclaw": {
+      "clawchat": {
+        "version": "1.0.0",
+        "path": "openclaw/clawchat/SKILL.md",
+        "sha256": "61bc3481f8a7c6d84f887aac097a5a23b0eed323014bac5098c69073568290cc",
+        "bytes": 7302
+      },
+      "liveware-app": {
+        "version": "1.0.0",
+        "path": "shared/liveware-app/SKILL.md",
+        "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
+        "bytes": 3574
+      }
+    },
+    "hermes": {
+      "clawchat": {
+        "version": "1.0.0",
+        "path": "hermes/clawchat/SKILL.md",
+        "sha256": "aab0f4e57931077ad14d398125e93e74d88d99191dbca06a1294b5a5984d44d7",
+        "bytes": 8666
+      },
+      "liveware-app": {
+        "version": "1.0.0",
+        "path": "shared/liveware-app/SKILL.md",
+        "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
+        "bytes": 3574
+      }
+    }
+  }
+}

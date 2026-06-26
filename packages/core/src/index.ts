@@ -8,6 +8,7 @@ export * from "./installers/run";
 export * from "./installers/types";
 export * from "./methods/registry";
 export type * from "./methods/types";
+export * from "./skills/check-update";
 export * from "./baseurl/normalize";
 export * from "./baseurl/target";
 export * from "./baseurl/write-hermes";
