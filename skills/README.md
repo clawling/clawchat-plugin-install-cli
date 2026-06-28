@@ -2,9 +2,9 @@
 
 This directory is the **single source of truth** for the ClawChat agent skill
 markdown (`SKILL.md`) shipped to the two agent adapters. The dynamic skill-update
-flow fetches these files at runtime; see
-[`clawchat-agent-plugin/docs/skill-dynamic-update-plan.md`](../../docs/skill-dynamic-update-plan.md)
-for the end-to-end design.
+flow fetches these files at runtime; for the end-to-end design see
+`skill-dynamic-update-plan.md` in the workspace ops tree
+(`ops/agent-plugin/skill-dynamic-update-plan.md`).
 
 ## Layout
 
