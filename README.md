@@ -33,8 +33,14 @@ For Hermes, `install` first fetches the remote `plugin.yaml`, checks that
 `hermes plugins install clawling/clawchat-plugin-hermes-agent --enable` (or
 `hermes plugins update clawchat` if a newer version is needed).
 
-ClawChat skill content is bundled inside the OpenClaw and Hermes plugins;
-this CLI no longer ships a separate skill.
+The published npm package does not bundle a skill of its own — each agent
+adapter ships a snapshot of its host's ClawChat skill markdown for
+offline/first-run fallback. This repository, however, **is** the canonical host
+for the skills tree those adapters fetch at runtime: `skills/` plus the generated
+`skills/manifest.json`, served from GitHub raw via the `OFFICIAL_SKILLS_BASE`
+constant in `packages/core/src/config.ts`. See
+[`skills/README.md`](skills/README.md) and the "Skills hosting subsystem" section
+of [`docs/architecture.md`](docs/architecture.md).
 
 ## Update
 

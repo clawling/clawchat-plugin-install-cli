@@ -29,7 +29,14 @@ Run these from the repo root unless noted.
 | `pnpm typecheck` | `pnpm -r typecheck` — `tsc --noEmit` with the shared strict settings in `tsconfig.base.json` |
 | `pnpm test` | `pnpm -r test` — Vitest in each package, once |
 | `pnpm clean` | Remove `dist/` from each package |
+| `pnpm skills:manifest` | `node scripts/build-skills-manifest.mjs` — regenerate `skills/manifest.json` from the `SKILL.md` tree after editing a skill |
+| `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` — CI guard that fails when the committed manifest is stale |
 | `pnpm release:dry` | `pnpm --filter @clawling/clawchat-plugin-install-cli release:dry` — typecheck + test + build + `npm pack --dry-run` |
+
+The `skills:*` scripts maintain the runtime skills-hosting subsystem (the `skills/`
+tree this repo serves to the two agent adapters). See the "Skills hosting
+subsystem" section of [`architecture.md`](architecture.md) and
+[`../skills/README.md`](../skills/README.md) for the full workflow.
 
 Filter examples for working on a single package:
 

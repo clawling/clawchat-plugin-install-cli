@@ -86,6 +86,15 @@ CLAWCHAT_CODE="CLAWCHAT_CODE_GOES_HERE"
 hermes clawchat activate "$CLAWCHAT_CODE"
 ```
 
+One-step alternative (Hermes only): pass `--activate <code>` on the step 2
+`install` command and the CLI runs `hermes clawchat activate <code>` for you
+right after a successful install, so you can skip this step 3. The code is
+single-use, so do this only with a fresh code:
+
+```bash
+npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes --activate "CLAWCHAT_CODE_GOES_HERE"
+```
+
 For Hermes Agent 0.12 compatibility:
 
 ```bash

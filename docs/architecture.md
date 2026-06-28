@@ -38,16 +38,34 @@ bundled.
 
 ## Command surface
 
-The CLI exposes exactly two commands:
+The CLI exposes exactly two commands, both defined in
+`packages/cli/src/cli.ts`:
 
-| Command | Flags | Source |
-|---------|-------|--------|
-| `clawchat install` | `--target <openclaw\|hermes>`, `--force` | `packages/cli/src/cli.ts` |
-| `clawchat update`  | `--target <openclaw\|hermes>`, `--force` | `packages/cli/src/cli.ts` |
+| Command | Flags |
+|---------|-------|
+| `clawchat install` | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--activate <code>` |
+| `clawchat update`  | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>` |
 
 Both commands require `--target`. The allowed values are defined in
 `packages/core/src/config.ts` (`TARGETS = ["openclaw", "hermes"]`); any other
 value exits non-zero with `--target must be one of: openclaw, hermes`.
+
+Flag semantics:
+
+- `--force` — reinstall/repair even when the installed version is already current.
+- `--apibaseurl` / `--wsbaseurl` / `--mediabaseurl` — override the backend
+  endpoints written for the plugin **before** install/update. A bare `host:port`
+  is normalized assuming TLS (`--wsbaseurl` → `wss://host:port/ws`, the two HTTP
+  ones → `https://host:port`) via `normalizeWsUrl` / `normalizeHttpUrl`; pass a
+  full `ws://`/`http://` URL to opt out. Both commands accept all three.
+- `--activate <code>` — **`install` only, Hermes only.** After a successful
+  Hermes install the CLI runs `hermes clawchat activate <code>` once
+  (`activateHermesAfterInstall` in `packages/core/src/installers/hermes.ts`,
+  bounded by `HERMES_ACTIVATE_TIMEOUT_MS`), so install + activation is a single
+  deterministic call. The code is single-use; the result reports `+ activated`.
+- The optional `host@ref` suffix on `--target` (e.g. `openclaw@dev`,
+  `hermes@<giturl#branch>`) is parsed by `parseTarget`; `ref` selects the npm
+  dist-tag/version or the git ref to install. Works on both commands.
 
 ## Install flow per target
 
@@ -142,6 +160,52 @@ installed. The four result statuses are:
   untracked files, the error is rewritten with the hint to retry with
   `--force` (`appendHermesForceRepairHint` in
   `packages/core/src/installers/hermes.ts`).
+
+## Skills hosting subsystem
+
+Beyond installing plugins, this repository is the **canonical host for the
+ClawChat agent skill markdown** that the two adapters fetch at runtime. The npm
+package does not ship these files; they are served straight from the GitHub raw
+endpoint.
+
+```
+skills/
+  manifest.json                  generated cross-language contract (do not hand-edit)
+  shared/<id>/SKILL.md           skills identical across hosts (e.g. liveware-app)
+  openclaw/<id>/SKILL.md         OpenClaw-specific variant (e.g. clawchat)
+  hermes/<id>/SKILL.md           Hermes-specific variant (e.g. clawchat)
+```
+
+- **`skills/manifest.json`** is keyed `skills.<target>.<skillId>` and records each
+  skill's `version` (read from the `SKILL.md` frontmatter), the raw file's
+  `sha256` and `bytes`, and its repo-relative `path`. Adapters read it to decide
+  whether a local copy is stale and verify a download's integrity before writing.
+- **`scripts/build-skills-manifest.mjs`** generates (or, with `--check`, verifies)
+  the manifest from the `SKILL.md` tree. It enforces that every file has a
+  frontmatter `version: X.Y[.Z][-build]`. Run it via the npm scripts below; never
+  hand-edit `manifest.json`.
+- **`packages/core/src/skills/check-update.ts`** is the TypeScript reference
+  implementation of the runtime contract: it builds the fetch URLs from
+  `OFFICIAL_SKILLS_BASE` + a git `ref` (default `DEFAULT_SKILLS_REF = "main"`;
+  production callers SHOULD pin an immutable `skills-vX.Y.Z` tag), parses/validates
+  the manifest (`parseSkillsManifest`), compares offered vs locally installed
+  versions (`checkSkillUpdate`), and downloads+integrity-checks a single file
+  (`fetchSkillMarkdown`, capped at `MAX_SKILL_BYTES`, exact `sha256` match
+  required). It applies nothing itself — the consuming adapter owns the consent
+  flow and the atomic overwrite. The Hermes (Python) adapter re-implements the
+  same manifest read + semver compare. The end-to-end design lives in the
+  workspace ops tree (`ops/agent-plugin/skill-dynamic-update-plan.md`).
+
+The relevant constants are all in `packages/core/src/config.ts`:
+`OFFICIAL_SKILLS_BASE` (the GitHub raw base — `clawling` is public, so fetches
+are unauthed), `DEFAULT_SKILLS_REF`, and `MAX_SKILL_BYTES`.
+
+| npm script | Command | Purpose |
+|------------|---------|---------|
+| `pnpm skills:manifest` | `node scripts/build-skills-manifest.mjs` | rewrite `skills/manifest.json` from the `SKILL.md` tree |
+| `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` | CI guard: fail if the committed manifest is stale |
+
+See [`../skills/README.md`](../skills/README.md) for the release/versioning workflow.
 
 ## Library API (currently unused by the CLI)
 
