@@ -14,8 +14,6 @@ anything not covered here, follow the documentation map below.
 - The runtime install guide consumed by end-users / AI agents —
   [`install.md`](install.md) and the context page
   [`docs/runtime-install-guide.md`](docs/runtime-install-guide.md).
-- Historical design specs and plans — [`docs/superpowers/`](docs/superpowers/)
-  (archive; do not re-execute).
 
 Before changing a feature, read the relevant `docs/` page. After changing
 behavior, update the matching `docs/` page in the same change set.
@@ -26,8 +24,6 @@ behavior, update the matching `docs/` page in the same change set.
   `@clawling/clawchat-plugin-install-cli`) and `packages/core` (workspace-private,
   inlined into the CLI bundle). Source in each package's `src/`, tests in
   `tests/`.
-- Planning artifacts live under `docs/superpowers/`. Do not mix them with
-  runtime code.
 
 ## Coding style
 

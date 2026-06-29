@@ -33,9 +33,3 @@ what you are trying to do.
 - [`dev-release.md`](dev-release.md) — how to publish a pre-release / **dev**
   build to a separate `dev` dist-tag for testing without touching `latest`.
   Emphasizes the npm rule that you must bump the version on every publish.
-
-## Historical material
-
-- [`superpowers/`](superpowers/) — design specs and implementation plans
-  from prior feature work. Archived; do not re-execute. See
-  [`superpowers/README.md`](superpowers/README.md).
