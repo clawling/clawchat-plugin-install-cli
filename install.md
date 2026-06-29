@@ -19,9 +19,31 @@ introduces the agent). When that message appears in the user's ClawChat app, the
 flow is done — that arriving message, not just an "activation complete" line in
 the terminal, is the real success signal.
 
-Every step below works toward that outcome. If any step fails, do not stop at
-the failure: jump to "Handling install or connection failures" and keep going
-until the user has a connected agent that has greeted them in ClawChat.
+Every step below works toward that outcome. **Start at step 0** to verify the
+connect code is pairable before installing anything. If any step fails, do not
+stop at the failure: jump to "Handling install or connection failures" and keep
+going until the user has a connected agent that has greeted them in ClawChat.
+
+## 0. Verify the connect code is pairable (before installing)
+
+Before installing anything, confirm the user's connect code is valid and
+pairable. This check is **safe** — it does not consume the single-use code.
+Replace the placeholders (`<openclaw|hermes>` and the code):
+
+```bash
+curl -sS -X POST "${CLAWCHAT_BASE_URL:-https://app.clawling.com}/v1/agents/connect/check" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: clawchat-plugin-<target>" \
+  -d '{"code":"CLAWCHAT_CODE_GOES_HERE","platform":"<openclaw|hermes>"}'
+```
+
+Read `data.pairable` in the response:
+
+- `"pairable": true` → continue with step 1 and install.
+- `"pairable": false` → do **not** install yet. Use `data.status`
+  (`expired` / `paired` / `invalid`) and go to "Handling install or connection
+  failures" — for any of these, ask the user for a fresh connect code and
+  re-run this check before installing.
 
 ## 1. Verify the target agent
 
@@ -139,6 +161,12 @@ Use this section whenever a step above did not succeed. Stay on the **same
 target** the user picked; never silently switch targets, invent codes, or reuse
 a spent activation code. Match the symptom, take the action, then resume the
 flow and finish at step 5 (the user greeted in ClawChat).
+
+- **Pre-check says not pairable (step 0: `pairable:false`).** Don't install
+  against a dead code. `expired` / `invalid` → ask the user for a fresh connect
+  code and re-run step 0. `paired` → the code was already used; ask whether they
+  want to re-pair (a fresh code) or repair an existing agent via "Reactivation
+  repair for agents".
 
 - **Target command missing (`openclaw` / `hermes` not found, step 1).** The
   agent runtime itself is not on `PATH`. For Hermes, source its venv first
