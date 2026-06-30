@@ -1,238 +1,190 @@
 # Install ClawChat Plugin
 
-> Runtime guide for end-users and AI agents at install time. This file is
-> published to a public R2 bucket by `scripts/upload-install-md-to-r2.sh`;
-> for context, see `docs/runtime-install-guide.md`.
+> Runtime guide for end-users and AI agents at install time. Published to a
+> public R2 bucket by `scripts/upload-install-md-to-r2.sh` (see
+> `docs/runtime-install-guide.md`).
 
-ClawChat is a chat app for communicating with supported agent runtimes.
+ClawChat is a chat app for talking to supported agent runtimes. These steps
+install and pair the ClawChat plugin for **one** target — `openclaw` **or**
+`hermes`. Each code block is one terminal call; use your target's block.
 
-Install the ClawChat plugin for OpenClaw or Hermes Agent with the published CLI through `npx`.
+**Goal:** a live, paired connection where the agent **sends the user a first
+greeting inside ClawChat**. That arriving message — not an "activation complete"
+line in the terminal — is the success signal. If a step fails, don't stop: go to
+[Troubleshooting](#troubleshooting) and work the matching case until the user has
+a connected agent that has greeted them.
 
-Each code block below is one terminal call. Pick exactly one target: `openclaw` or `hermes`.
+## 0. Check the code is pairable
 
-## Final goal
-
-The whole point of these steps is a **live, paired ClawChat connection**: once
-install + activation succeed, the agent connects to the user's ClawChat account
-and **sends the user a first message inside ClawChat** (a short greeting that
-introduces the agent). When that message appears in the user's ClawChat app, the
-flow is done — that arriving message, not just an "activation complete" line in
-the terminal, is the real success signal.
-
-Every step below works toward that outcome. **Start at step 0** to verify the
-connect code is pairable before installing anything. If any step fails, do not
-stop at the failure: jump to "Handling install or connection failures" and keep
-going until the user has a connected agent that has greeted them in ClawChat.
-
-## 0. Verify the connect code is pairable (before installing)
-
-Before installing anything, confirm the user's connect code is valid and
-pairable. This check is **safe** — it does not consume the single-use code.
-Replace the placeholders (`<openclaw|hermes>` and the code):
+Safe pre-check — does **not** consume the single-use code. Replace the target and code:
 
 ```bash
 curl -sS -X POST "${CLAWCHAT_BASE_URL:-https://app.clawling.com}/v1/agents/connect/check" \
   -H "Content-Type: application/json" \
-  -H "X-Device-Id: clawchat-plugin-<target>" \
+  -H "X-Device-Id: clawchat-plugin-<openclaw|hermes>" \
   -d '{"code":"CLAWCHAT_CODE_GOES_HERE","platform":"<openclaw|hermes>"}'
 ```
 
-Read `data.pairable` in the response:
+`data.pairable: true` → continue. `false` → don't install; read `data.status`
+(`expired` / `invalid` → ask for a fresh code and re-check; `paired` → see
+[Troubleshooting](#troubleshooting)).
 
-- `"pairable": true` → continue with step 1 and install.
-- `"pairable": false` → do **not** install yet. Use `data.status`
-  (`expired` / `paired` / `invalid`) and go to "Handling install or connection
-  failures" — for any of these, ask the user for a fresh connect code and
-  re-run this check before installing.
+## 1. Verify the target and check for an existing install
 
-## 1. Verify the target agent
-
-For OpenClaw:
+OpenClaw:
 
 ```bash
 openclaw --version
 ```
 
-For Hermes Agent:
+Hermes (source its venv first if `hermes` isn't on `PATH`):
 
 ```bash
 if ! command -v hermes >/dev/null 2>&1; then
-  if [ -d /opt/hermes/.venv/bin ]; then
-    . /opt/hermes/.venv/bin/activate
-  elif [ -d "$HOME/.hermes/hermes-agent/.venv/bin" ]; then
-    . "$HOME/.hermes/hermes-agent/.venv/bin/activate"
+  if [ -d /opt/hermes/.venv/bin ]; then . /opt/hermes/.venv/bin/activate
+  elif [ -d "$HOME/.hermes/hermes-agent/.venv/bin" ]; then . "$HOME/.hermes/hermes-agent/.venv/bin/activate"
   fi
 fi
-
 hermes --version
 ```
 
-If the selected target command is still missing, stop and report the error. Do not continue with another target unless the user asks for it.
+If the chosen command is still missing, stop and report it — don't switch
+targets. Then check whether ClawChat is already installed (`openclaw plugins
+list --json` or `hermes plugins list`). If it already shows ClawChat, skip step 2
+and run the [update](#update-or-repair-later) command instead, then go to step 3.
 
-Then check whether the ClawChat plugin is already installed for the selected target.
+## 2. Install
 
-For OpenClaw:
-
-```bash
-openclaw plugins list --json
-```
-
-For Hermes Agent:
-
-```bash
-hermes plugins list
-```
-
-If the selected target's plugin list already shows ClawChat, do not run the install command in step 2. Run the update command from "Update or repair later" for the selected target, then continue with step 3. If ClawChat is not installed, continue with step 2.
-
-## 2. Install the plugin
-
-For OpenClaw:
-
-OpenClaw plugin installation can be slow. When an agent runs this command, use a long timeout and wait patiently; do not stop or retry only because the command appears idle.
+OpenClaw (installs can be slow — wait patiently, don't retry just because it
+looks idle):
 
 ```bash
 npx -y @clawling/clawchat-plugin-install-cli@latest install --target openclaw
 ```
 
-For Hermes Agent:
+Hermes:
 
 ```bash
 npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
-For OpenClaw, `install` delegates to `openclaw plugins install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`. The ClawChat plugin is a third-party (non-catalog) plugin: on older OpenClaw this flag bypasses the install-time safety scan that would otherwise block it; on newer OpenClaw the flag is a deprecated no-op (installs are allowed by default, and any operator gating is configured via `security.installPolicy`, which the installer does not touch). Passing the flag is safe on both. For Hermes, `install` checks the remote plugin metadata and Hermes version before changing the target. ClawChat skill content is bundled inside the OpenClaw and Hermes plugins.
+The CLI delegates to the host's plugin manager (OpenClaw → `openclaw plugins
+install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`,
+safe on all versions; Hermes → checks remote metadata + Hermes version, then
+`hermes plugins install clawling/clawchat-plugin-hermes-agent`). Skill content is
+bundled in the plugin.
 
-## 3. Activate with the user-provided code
-
-Replace `CLAWCHAT_CODE_GOES_HERE` with the activation or invite code from the user. Use the target plugin's activation command exactly once. Do not invent, reuse, or retry an old activation code.
-
-For OpenClaw:
-
-```bash
-CLAWCHAT_INVITE_CODE="CLAWCHAT_CODE_GOES_HERE"
-openclaw channels add --channel clawchat-plugin-openclaw --token "$CLAWCHAT_INVITE_CODE"
-```
-
-For Hermes Agent:
+**If the install fails on a network / GitHub error** — e.g.
+`raw.githubusercontent.com` times out while npm and `git` to github.com still
+work (common in locked-down environments) — do **not** just rerun with `--force`,
+which takes the same path. Install **directly via the host**, which bypasses the
+CLI's GitHub-raw fetch:
 
 ```bash
-CLAWCHAT_CODE="CLAWCHAT_CODE_GOES_HERE"
-hermes clawchat activate "$CLAWCHAT_CODE"
+# Hermes
+hermes plugins install clawling/clawchat-plugin-hermes-agent
+# OpenClaw
+openclaw plugins install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install
 ```
 
-One-step alternative (Hermes only): pass `--activate <code>` on the step 2
-`install` command and the CLI runs `hermes clawchat activate <code>` for you
-right after a successful install, so you can skip this step 3. The code is
-single-use, so do this only with a fresh code:
+Then continue to step 3.
+
+## 3. Activate (single-use code)
+
+Use the code **once** — never invent, reuse, or retry a spent code.
+
+OpenClaw:
 
 ```bash
-npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes --activate "CLAWCHAT_CODE_GOES_HERE"
+openclaw channels add --channel clawchat-plugin-openclaw --token "CLAWCHAT_CODE_GOES_HERE"
 ```
 
-For Hermes Agent 0.12 compatibility:
+Hermes:
 
 ```bash
-python "${HERMES_HOME:-$HOME/.hermes}/plugins/clawchat/clawchat_cli.py" activate CLAWCHAT_CODE_GOES_HERE
+hermes clawchat activate "CLAWCHAT_CODE_GOES_HERE"
 ```
 
-## 4. Update the ClawChat account profile
+Hermes one-step alternative (does activation as part of install, so you skip this
+step — only with a fresh code): add `--activate "CLAWCHAT_CODE_GOES_HERE"` to the
+step 2 `install` command. Hermes 0.12 fallback:
+`python "${HERMES_HOME:-$HOME/.hermes}/plugins/clawchat/clawchat_cli.py" activate CLAWCHAT_CODE_GOES_HERE`.
 
-For either target. After activation, if the current agent has configured identity or profile information, such as a display name, bio/profile text, or avatar URL, use the agent's normal ClawChat tool capability to call `clawchat_update_account_profile`. Update the agent's own ClawChat account with the available `nickname`, `bio`, and/or `avatar_url` values so the user can identify which agent is connected.
+## 4. Restart the agent — the user must do this
 
-## 5. Greet the user and confirm the connection
+**Required.** ClawChat's tools and live connection only become usable after the
+agent process **restarts** to load the newly installed plugin and activation
+credentials. Until then, the profile and greeting calls in step 5 will fail
+because the ClawChat tools aren't registered yet.
 
-This is the final goal. Once activation reports success and the profile is set,
-use the agent's normal ClawChat messaging capability to **send the user one
-short greeting message in ClawChat** — for example, introduce the agent by name
-and say it is now connected and ready. That message is how the user confirms the
-pairing actually works end to end.
+Hermes activation schedules this restart automatically, but in many environments
+the running agent **cannot restart itself** (the restart needs the user's
+approval). Do **not** block or loop trying to self-restart.
 
-Then **remind the user**: if that greeting does not arrive in their ClawChat app,
-or the agent still shows as not connected after a short wait (roughly a minute or
-two), the current agent likely needs a restart to pick up the new ClawChat
-credentials. Tell the user to **restart the current agent** (the OpenClaw or
-Hermes process that was just activated) and then check ClawChat again. Most
-"activated but nothing showed up" cases clear after one restart.
+Instead, **ask the user to restart the agent themselves** — the OpenClaw or
+Hermes process that was just activated — and wait for it to come back. Once it's
+back up, the ClawChat tools are available; continue to step 5.
 
-## Handling install or connection failures
+## 5. Set the profile and greet the user (the success signal)
 
-Use this section whenever a step above did not succeed. Stay on the **same
-target** the user picked; never silently switch targets, invent codes, or reuse
-a spent activation code. Match the symptom, take the action, then resume the
-flow and finish at step 5 (the user greeted in ClawChat).
+After the restart, using the agent's normal ClawChat tools:
 
-- **Pre-check says not pairable (step 0: `pairable:false`).** Don't install
-  against a dead code. `expired` / `invalid` → ask the user for a fresh connect
-  code and re-run step 0. `paired` → the code was already used; ask whether they
-  want to re-pair (a fresh code) or repair an existing agent via "Reactivation
-  repair for agents".
+1. If the agent has identity info, call `clawchat_update_account_profile` with
+   any available `nickname`, `bio`, and/or `avatar_url` so the user can tell
+   which agent connected.
+2. **Send one short greeting** in ClawChat — introduce the agent and say it's
+   connected and ready. When that message appears in the user's ClawChat app, the
+   pairing is confirmed end to end. **Done.**
 
-- **Target command missing (`openclaw` / `hermes` not found, step 1).** The
-  agent runtime itself is not on `PATH`. For Hermes, source its venv first
-  (e.g. `source /opt/hermes/.venv/bin/activate`) or call the absolute binary
-  (`/opt/hermes/.venv/bin/hermes`), then retry step 1. If the target genuinely
-  is not installed, stop and report that — do not install the other target
-  instead.
+If nothing arrives after a minute or two, the step 4 restart most likely hasn't
+taken effect — ask the user to restart again and wait, then redo step 5. If it
+still won't connect, see [Troubleshooting](#troubleshooting).
 
-- **Install command fails (step 2: `npx` / network / plugin manager error).**
-  Re-read the stderr. OpenClaw installs can be slow — wait, do not retry just
-  because it looks idle. For a real error (network, registry, permissions),
-  report stderr verbatim and retry the same `install` command once. If it still
-  fails, fall back to "Update or repair later" with `--force` for the same
-  target.
+## Troubleshooting
 
-- **Plugin already installed but step 2 reports it.** Skip the install and run
-  the matching `update` command from "Update or repair later", then continue to
-  step 3.
+Stay on the **same target** the user picked; never switch targets, invent codes,
+or reuse a spent activation code. Match the symptom, act, then resume and finish
+at step 5 (the user greeted in ClawChat).
 
-- **Activation fails (step 3: `validation` / `auth` / `401` / `403`, or a
-  non-zero exit).** Activation codes are **single-use** — do not retry the same
-  code. Report the stderr or JSON response verbatim and ask the user for a fresh
-  activation code, then run the matching activation command from step 3 once and
-  continue to step 4–5.
+- **Code not pairable (step 0).** `expired` / `invalid` → ask for a fresh code
+  and re-run step 0. `paired` → already used; ask whether to re-pair with a fresh
+  code or repair the existing agent (handle as the activation/auth case below).
 
-- **Activated, but no greeting / no connection in ClawChat (the final-goal
-  failure).** Activation exited 0 but the user sees nothing in their ClawChat
-  app. First, **restart the current agent** (per step 5) and wait briefly — this
-  resolves most cases, since the running process must reload the new ClawChat
-  credentials. If it is still not connected after the restart, treat it as a
-  reactivation problem: ask for a fresh code and follow "Reactivation repair for
-  agents" below. Only after the agent is connected again, redo step 5 so the
-  user actually receives the greeting.
+- **Target command missing (step 1).** Source the Hermes venv
+  (`source /opt/hermes/.venv/bin/activate`) or call the absolute binary, then
+  retry. If the runtime genuinely isn't installed, stop and report it — don't
+  install the other target instead.
 
-- **Plugin files look missing / stale / corrupted (any step).** Run the matching
-  `update` command from "Update or repair later" for the same target; if the
-  version is already current, rerun it with `--force` to reinstall.
+- **Install fails (step 2).** Re-read stderr. OpenClaw is slow — wait, don't
+  retry on idle. On a **network / GitHub-raw error**, use the **direct host
+  install** from step 2 (not `--force`, which repeats the failing path).
+  Otherwise retry the same `install` once, then fall back to
+  [update `--force`](#update-or-repair-later).
 
-The goal is unchanged through every branch: a connected agent that has sent the
-user a greeting in ClawChat. Keep working the matching case until you get there
-or have a concrete error to hand back to the user.
+- **Activation fails (step 3: validation / auth / 401 / 403 / non-zero exit).**
+  Codes are single-use — don't retry the same one. Report the error verbatim, ask
+  for a fresh code, run the step 3 command once, continue.
 
-## Reactivation repair for agents
+- **Activated but no greeting / not connected (step 5).** Almost always the
+  step 4 restart hasn't taken effect — **ask the user to restart the agent** and
+  wait. If still disconnected after a restart, ask for a fresh code, run step 3
+  once, restart again, then redo step 5.
 
-Use this section only when ClawChat was installed before but the selected target cannot call ClawChat. Stay on the same target; do not switch targets, invent codes, or reuse old activation codes.
-
-If the error looks like missing or expired auth, permission denied, forbidden or 403, unauthorized or 401, not connected, or not bound, ask for a fresh activation code. Run the matching activation command from step 3 once, then complete step 4. If activation fails, report stderr or the JSON response verbatim and ask for a new code.
-
-If the error looks like missing, stale, or corrupted plugin files, run the update command from "Update or repair later" for the selected target.
-
-If `update` fails, report stderr verbatim and stop.
-
-If files still look corrupted while the version is current, rerun the same command with `--force`.
+- **Plugin files missing / stale / corrupted (any step).** Run
+  [update](#update-or-repair-later); if the version is already current, rerun
+  with `--force` to reinstall.
 
 ## Update or repair later
 
-Use the same target that was installed. Set `TARGET` to exactly `openclaw` or `hermes`.
+Use the same target that was installed (`openclaw` or `hermes`):
 
 ```bash
-TARGET="openclaw"
-npx -y @clawling/clawchat-plugin-install-cli@latest update --target "$TARGET"
+npx -y @clawling/clawchat-plugin-install-cli@latest update --target <openclaw|hermes>
 ```
 
-If local ClawChat plugin files look corrupted while the version is already current, rerun the same update command with `--force` to reinstall the plugin:
+If local plugin files look corrupted while the version is already current, add
+`--force` to reinstall:
 
 ```bash
-TARGET="openclaw"
-npx -y @clawling/clawchat-plugin-install-cli@latest update --target "$TARGET" --force
+npx -y @clawling/clawchat-plugin-install-cli@latest update --target <openclaw|hermes> --force
 ```
