@@ -27,7 +27,9 @@ curl -sS -X POST "${CLAWCHAT_BASE_URL:-https://app.clawling.com}/v1/agents/conne
 
 `data.pairable: true` → continue. `false` → don't install; read `data.status`
 (`expired` / `invalid` → ask for a fresh code and re-check; `paired` → see
-[Troubleshooting](#troubleshooting)).
+[Troubleshooting](#troubleshooting)). If the `curl` errors or returns HTTP 404
+(no `data.pairable` field), the backend likely predates this endpoint — skip the
+pre-check and continue to step 1; it's an optimization, not a gate.
 
 ## 1. Verify the target and check for an existing install
 
