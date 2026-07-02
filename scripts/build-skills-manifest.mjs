@@ -32,6 +32,8 @@ const LAYOUT = {
   hermes: {
     clawchat: "hermes/clawchat/SKILL.md",
     "liveware-app": "shared/liveware-app/SKILL.md",
+    // Temporary: verifies the dynamic skill-update pipeline; remove after test.
+    "clawchat-update-test": "hermes/clawchat-update-test/SKILL.md",
   },
 };
 
