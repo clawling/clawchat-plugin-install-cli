@@ -13,6 +13,12 @@
         "path": "shared/liveware-app/SKILL.md",
         "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
         "bytes": 3574
+      },
+      "clawchat-update-test": {
+        "version": "1.0.0",
+        "path": "openclaw/clawchat-update-test/SKILL.md",
+        "sha256": "bac7563646c54a34f0c948ac8fc36f3fcf1c3e62ce9186e15298ff2504f58028",
+        "bytes": 693
       }
     },
     "hermes": {
