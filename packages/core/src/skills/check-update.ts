@@ -36,6 +36,9 @@ export interface SkillManifestEntry {
 export interface SkillsManifest {
   schema: number;
   skills: Record<string, Record<string, SkillManifestEntry>>;
+  /** Tombstoned skill ids per target. An adapter deletes its LOCAL copy of an
+   * id ONLY when it appears here — absence from `skills` alone never deletes. */
+  removed: Record<string, string[]>;
 }
 
 /** Per-skill verdict from {@link checkSkillUpdate}. */
@@ -58,6 +61,8 @@ export interface CheckSkillUpdateOutcome {
   results: SkillUpdate[];
   /** True when at least one skill has a newer version available. */
   hasUpdate: boolean;
+  /** Tombstoned skill ids for this target, surfaced as-is from the manifest. */
+  removedIds: string[];
 }
 
 export interface CheckSkillUpdateOptions {
@@ -134,7 +139,25 @@ export function parseSkillsManifest(text: string): SkillsManifest {
       skills[target][skillId] = asEntry(entry, `${target}.${skillId}`);
     }
   }
-  return { schema: 1, skills };
+  const removed: SkillsManifest["removed"] = {};
+  if (data.removed !== undefined) {
+    if (!data.removed || typeof data.removed !== "object" || Array.isArray(data.removed)) {
+      throw new ClawchatError("METADATA", "skills manifest `removed` must be an object");
+    }
+    for (const [target, ids] of Object.entries(data.removed as Record<string, unknown>)) {
+      if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string" && i.trim())) {
+        throw new ClawchatError("METADATA", `skills manifest removed[${target}] must be a list of skill ids`);
+      }
+      const cleaned = ids.map((i) => (i as string).trim());
+      for (const id of cleaned) {
+        if (skills[target]?.[id]) {
+          throw new ClawchatError("METADATA", `skill ${target}.${id} is in both skills and removed`);
+        }
+      }
+      removed[target] = cleaned;
+    }
+  }
+  return { schema: 1, skills, removed };
 }
 
 async function fetchText(url: string, fetchFn: FetchLike): Promise<string> {
@@ -179,7 +202,7 @@ export async function checkSkillUpdate(options: CheckSkillUpdateOptions): Promis
       bytes: entry.bytes,
     });
   }
-  return { ref, results, hasUpdate: results.some((r) => r.hasUpdate) };
+  return { ref, results, hasUpdate: results.some((r) => r.hasUpdate), removedIds: manifest.removed[options.target] ?? [] };
 }
 
 /**

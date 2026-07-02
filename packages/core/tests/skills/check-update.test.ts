@@ -18,7 +18,7 @@ function sha256(text: string): string {
 const CLAWCHAT_MD = "---\nname: clawchat\nversion: 1.2.0\n---\n# ClawChat\n";
 const LIVEWARE_MD = "---\nname: liveware-app\nversion: 1.0.0\n---\n# liveware\n";
 
-function manifest(): string {
+function manifest(removed?: Record<string, string[]>): string {
   return JSON.stringify({
     schema: 1,
     skills: {
@@ -30,6 +30,7 @@ function manifest(): string {
         clawchat: { version: "1.2.0", path: "hermes/clawchat/SKILL.md", sha256: sha256(CLAWCHAT_MD), bytes: Buffer.byteLength(CLAWCHAT_MD) },
       },
     },
+    ...(removed !== undefined ? { removed } : {}),
   });
 }
 
@@ -129,5 +130,46 @@ describe("fetchSkillMarkdown", () => {
     await expect(
       fetchSkillMarkdown({ path: "p", sha256: sha256(huge), bytes: huge.length }, { fetchFn }),
     ).rejects.toThrow(/over the/);
+  });
+});
+
+describe("removed tombstones", () => {
+  it("parses a manifest with a removed list", () => {
+    const m = parseSkillsManifest(JSON.stringify({
+      schema: 1,
+      skills: { openclaw: {}, hermes: {} },
+      removed: { openclaw: ["retired-skill"], hermes: [] },
+    }));
+    expect(m.removed).toEqual({ openclaw: ["retired-skill"], hermes: [] });
+  });
+
+  it("defaults removed to {} when absent (backward compat)", () => {
+    const m = parseSkillsManifest(JSON.stringify({ schema: 1, skills: { openclaw: {} } }));
+    expect(m.removed).toEqual({});
+  });
+
+  it("rejects an id present in both skills and removed for the same target", () => {
+    expect(() => parseSkillsManifest(JSON.stringify({
+      schema: 1,
+      skills: { openclaw: { foo: { version: "1.0.0", path: "openclaw/foo/SKILL.md", sha256: "a".repeat(64), bytes: 1 } } },
+      removed: { openclaw: ["foo"] },
+    }))).toThrow(/both/);
+  });
+
+  it("rejects a malformed removed value", () => {
+    expect(() => parseSkillsManifest(JSON.stringify({
+      schema: 1, skills: {}, removed: { openclaw: [42] },
+    }))).toThrow(/removed/);
+  });
+
+  it("checkSkillUpdate surfaces removedIds for the target", async () => {
+    const fetchFn = vi.fn(async () => textResponse(manifest({ openclaw: ["retired-skill"], hermes: [] })));
+    const out = await checkSkillUpdate({
+      target: "openclaw",
+      current: { clawchat: "1.2.0", "liveware-app": "1.0.0" },
+      fetchFn,
+    });
+    expect(out.removedIds).toEqual(["retired-skill"]);
+    expect(out.hasUpdate).toBe(false);
   });
 });
