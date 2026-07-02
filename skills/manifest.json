@@ -29,10 +29,10 @@
         "bytes": 3574
       },
       "clawchat-update-test": {
-        "version": "1.0.0",
+        "version": "1.0.1",
         "path": "hermes/clawchat-update-test/SKILL.md",
-        "sha256": "666560b5c9a25dc9318d9c99a6c5dca1535972df3ef11fabc4c8a9ed9f3f3433",
-        "bytes": 566
+        "sha256": "4ece2c6337ff88803d2bc1133d79ecdfa2cd5a8450bb0f17511de2477721e176",
+        "bytes": 663
       }
     }
   }
