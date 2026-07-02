@@ -15,10 +15,16 @@
         "bytes": 3574
       },
       "clawchat-update-test": {
-        "version": "1.0.0",
+        "version": "1.0.1",
         "path": "openclaw/clawchat-update-test/SKILL.md",
-        "sha256": "bac7563646c54a34f0c948ac8fc36f3fcf1c3e62ce9186e15298ff2504f58028",
-        "bytes": 693
+        "sha256": "8ff718105fc425b71cac02ebce5dc7777bb1acc159ff61f67797e7d7d0885d1d",
+        "bytes": 679
+      },
+      "clawchat-update-test-2": {
+        "version": "1.0.0",
+        "path": "openclaw/clawchat-update-test-2/SKILL.md",
+        "sha256": "efc1502cbf3f9d5b712366cdfd8fa74cd352948e0a3b0075143e739986ff4081",
+        "bytes": 561
       }
     },
     "hermes": {
