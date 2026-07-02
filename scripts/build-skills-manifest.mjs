@@ -28,15 +28,10 @@ const LAYOUT = {
   openclaw: {
     clawchat: "openclaw/clawchat/SKILL.md",
     "liveware-app": "shared/liveware-app/SKILL.md",
-    // Temporary: verifies the dynamic skill-update pipeline; remove after test.
-    "clawchat-update-test": "openclaw/clawchat-update-test/SKILL.md",
-    "clawchat-update-test-2": "openclaw/clawchat-update-test-2/SKILL.md",
   },
   hermes: {
     clawchat: "hermes/clawchat/SKILL.md",
     "liveware-app": "shared/liveware-app/SKILL.md",
-    // Temporary: verifies the dynamic skill-update pipeline; remove after test.
-    "clawchat-update-test": "hermes/clawchat-update-test/SKILL.md",
   },
 };
 
