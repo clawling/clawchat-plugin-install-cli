@@ -29,5 +29,9 @@
         "bytes": 3574
       }
     }
+  },
+  "removed": {
+    "openclaw": [],
+    "hermes": []
   }
 }

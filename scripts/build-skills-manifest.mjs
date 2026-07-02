@@ -9,7 +9,9 @@
 //
 // Each entry records the skill `version` (read from the SKILL.md frontmatter,
 // the file's own source of truth), the `sha256` and `bytes` of the file (so an
-// adapter can integrity-check a download), and the repo-relative `path`.
+// adapter can integrity-check a download), and the repo-relative `path`. The
+// top-level `removed` field lists skill ids retired from each target and is the
+// only signal that makes an adapter delete its locally installed copy.
 //
 // Usage:
 //   node scripts/build-skills-manifest.mjs           # write skills/manifest.json
@@ -33,6 +35,17 @@ const LAYOUT = {
     clawchat: "hermes/clawchat/SKILL.md",
     "liveware-app": "shared/liveware-app/SKILL.md",
   },
+};
+
+// (target) -> skill ids RETIRED from that target. A tombstone is the ONLY
+// signal that makes an adapter delete its locally installed copy — absence
+// from LAYOUT alone never deletes anything on an agent. Tombstones are kept
+// forever (they are tiny) so an agent reconnecting after any downtime still
+// converges. To "un-retire" a skill, move the id back into LAYOUT and out of
+// REMOVED. An id must never be in both for the same target.
+const REMOVED = {
+  openclaw: [],
+  hermes: [],
 };
 
 function frontmatterVersion(text, file) {
@@ -71,7 +84,16 @@ function build() {
       };
     }
   }
-  return { schema: 1, skills };
+  const removed = {};
+  for (const [target, ids] of Object.entries(REMOVED)) {
+    for (const id of ids) {
+      if (LAYOUT[target]?.[id]) {
+        throw new Error(`skill ${target}.${id} is in both LAYOUT and REMOVED`);
+      }
+    }
+    removed[target] = [...ids].sort();
+  }
+  return { schema: 1, skills, removed };
 }
 
 const manifest = build();
