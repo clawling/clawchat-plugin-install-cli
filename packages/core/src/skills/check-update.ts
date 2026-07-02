@@ -18,6 +18,21 @@ import { isVersionOlder } from "../installers/metadata";
  * read + semver compare; the OpenClaw (TypeScript) adapter and this CLI can
  * reuse this module. Nothing here applies an update — the consuming adapter
  * owns the consent flow and the atomic file overwrite.
+ *
+ * IMPORTANT — this is NOT how the two already-deployed adapters decide
+ * "needs update": both the openclaw and hermes adapters converge on sha256,
+ * i.e. they compare the sha256 of the raw bytes of the locally installed
+ * `SKILL.md` against `manifest.json`'s `sha256` for that skill; any mismatch
+ * means an update is needed, full stop. That sha-convergence check lives in
+ * each adapter's own installer code, not in this file.
+ *
+ * `isVersionOlder()` below performs a semantic-version comparison and is used
+ * only for CLI-local/display purposes in *this* repo (e.g. deciding what to
+ * print, or building `SkillUpdate.hasUpdate` for callers of this reference
+ * module) — it is NOT the source of truth for the actual update decision made
+ * by the deployed adapters. If this comparison logic is ever ported into an
+ * adapter, the adapter MUST keep using sha256 convergence (not
+ * `isVersionOlder`) as the source of truth for whether to update.
  */
 
 /** One skill row inside `skills/manifest.json`, under `skills.<target>.<id>`. */

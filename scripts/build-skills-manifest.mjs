@@ -86,12 +86,15 @@ function build() {
   }
   const removed = {};
   for (const [target, ids] of Object.entries(REMOVED)) {
+    if (!(target in LAYOUT)) {
+      throw new Error(`REMOVED has target "${target}" which is not a valid LAYOUT target (typo?)`);
+    }
     for (const id of ids) {
       if (LAYOUT[target]?.[id]) {
         throw new Error(`skill ${target}.${id} is in both LAYOUT and REMOVED`);
       }
     }
-    removed[target] = [...ids].sort();
+    removed[target] = [...new Set(ids)].sort();
   }
   return { schema: 1, skills, removed };
 }
