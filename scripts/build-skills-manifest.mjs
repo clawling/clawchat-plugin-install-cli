@@ -30,10 +30,12 @@ const LAYOUT = {
   openclaw: {
     clawchat: "openclaw/clawchat/SKILL.md",
     "liveware-app": "shared/liveware-app/SKILL.md",
+    "e2e-probe": "shared/e2e-probe/SKILL.md",
   },
   hermes: {
     clawchat: "hermes/clawchat/SKILL.md",
     "liveware-app": "shared/liveware-app/SKILL.md",
+    "e2e-probe": "shared/e2e-probe/SKILL.md",
   },
 };
 
