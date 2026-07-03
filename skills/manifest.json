@@ -13,12 +13,6 @@
         "path": "shared/liveware-app/SKILL.md",
         "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
         "bytes": 3574
-      },
-      "e2e-probe": {
-        "version": "1.0.0",
-        "path": "shared/e2e-probe/SKILL.md",
-        "sha256": "229fc930cfdc0eccd65eae9895b6b005f1f3f5f248fdf1be85c2dc5ac899282a",
-        "bytes": 639
       }
     },
     "hermes": {
@@ -33,12 +27,6 @@
         "path": "shared/liveware-app/SKILL.md",
         "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
         "bytes": 3574
-      },
-      "e2e-probe": {
-        "version": "1.0.0",
-        "path": "shared/e2e-probe/SKILL.md",
-        "sha256": "229fc930cfdc0eccd65eae9895b6b005f1f3f5f248fdf1be85c2dc5ac899282a",
-        "bytes": 639
       }
     }
   },
