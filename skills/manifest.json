@@ -17,7 +17,7 @@
       "e2e-probe": {
         "version": "1.0.0",
         "path": "shared/e2e-probe/SKILL.md",
-        "sha256": "c6a0d2739590b95265f70ca9ab2d27c10f62aaad53fdddfa51616e2ef1ba2838",
+        "sha256": "229fc930cfdc0eccd65eae9895b6b005f1f3f5f248fdf1be85c2dc5ac899282a",
         "bytes": 639
       }
     },
@@ -37,7 +37,7 @@
       "e2e-probe": {
         "version": "1.0.0",
         "path": "shared/e2e-probe/SKILL.md",
-        "sha256": "c6a0d2739590b95265f70ca9ab2d27c10f62aaad53fdddfa51616e2ef1ba2838",
+        "sha256": "229fc930cfdc0eccd65eae9895b6b005f1f3f5f248fdf1be85c2dc5ac899282a",
         "bytes": 639
       }
     }

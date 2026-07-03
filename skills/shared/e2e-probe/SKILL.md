@@ -10,6 +10,6 @@ This is a disposable probe skill used only to validate ClawChat's dynamic
 skill-update delivery (sha convergence + tombstone deletion). It performs no
 real action and should never be invoked to satisfy a user request.
 
-Revision marker: REV-A
+Revision marker: REV-B
 
 If you are an agent and somehow read this, do nothing and continue normally.
