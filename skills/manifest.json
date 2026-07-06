@@ -13,6 +13,12 @@
         "path": "shared/liveware-app/SKILL.md",
         "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
         "bytes": 3574
+      },
+      "set-greeting": {
+        "version": "1.0.0",
+        "path": "shared/set-greeting/SKILL.md",
+        "sha256": "28c6f4643eb750df625e23a09ff087c4410463138823695aa1527a0f5c0fcbca",
+        "bytes": 2307
       }
     },
     "hermes": {
@@ -27,6 +33,12 @@
         "path": "shared/liveware-app/SKILL.md",
         "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
         "bytes": 3574
+      },
+      "set-greeting": {
+        "version": "1.0.0",
+        "path": "shared/set-greeting/SKILL.md",
+        "sha256": "28c6f4643eb750df625e23a09ff087c4410463138823695aa1527a0f5c0fcbca",
+        "bytes": 2307
       }
     }
   },
