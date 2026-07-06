@@ -16,9 +16,9 @@ skills/
   hermes/<id>/SKILL.md           # Hermes-specific variant
 ```
 
-The `clawchat` skill is **host-specific** (it teaches each host's own CLI:
+The `clawchat-core` skill is **host-specific** (it teaches each host's own CLI:
 `openclaw channels …` / `SOUL.md` sync vs `hermes clawchat activate` /
-`/clawchat-activate`), so it lives once per host. `liveware-app` is identical
+`/clawchat-activate`), so it lives once per host. `clawchat-liveware` is identical
 across hosts and lives once under `shared/`.
 
 > The plugin repos (`clawchat-plugin-openclaw`, `clawchat-plugin-hermes-agent`)
@@ -48,3 +48,6 @@ pnpm skills:check       # CI: fail if the manifest is stale
 3. Sync the bundled snapshot in the affected plugin repo(s).
 4. Tag the repo `skills-vX.Y.Z` (decoupled from the CLI's npm release) so an
    update trigger can pin an immutable `ref`. Tracking `main` is for dev only.
+
+2026-07-06: skills were renamed to `clawchat-*` ids; the old ids (`clawchat`,
+`liveware-app`, `set-greeting`) are permanent tombstones in `REMOVED`.

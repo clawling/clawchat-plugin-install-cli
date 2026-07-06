@@ -171,9 +171,9 @@ endpoint.
 ```
 skills/
   manifest.json                  generated cross-language contract (do not hand-edit)
-  shared/<id>/SKILL.md           skills identical across hosts (e.g. liveware-app)
-  openclaw/<id>/SKILL.md         OpenClaw-specific variant (e.g. clawchat)
-  hermes/<id>/SKILL.md           Hermes-specific variant (e.g. clawchat)
+  shared/<id>/SKILL.md           skills identical across hosts (e.g. clawchat-liveware)
+  openclaw/<id>/SKILL.md         OpenClaw-specific variant (e.g. clawchat-core)
+  hermes/<id>/SKILL.md           Hermes-specific variant (e.g. clawchat-core)
 ```
 
 - **`skills/manifest.json`** is keyed `skills.<target>.<skillId>` and records each

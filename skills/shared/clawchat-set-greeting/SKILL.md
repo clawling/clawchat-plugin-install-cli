@@ -1,5 +1,5 @@
 ---
-name: set-greeting
+name: clawchat-set-greeting
 version: 1.0.0
 description: Use when the user wants to customize, change, set, or reset this agent's first-load / activation greeting — what the agent says the first time it connects to a ClawChat conversation. Writes the greeting instruction to ~/clawchat/greeting.md.
 ---

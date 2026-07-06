@@ -4,8 +4,8 @@
 // The manifest is the cross-language contract consumed by the two ClawChat
 // agent adapters (openclaw TS, hermes Python) to decide whether their locally
 // installed skill markdown is out of date. It is keyed by host target so the
-// host-specific `clawchat` skill can diverge (OpenClaw vs Hermes CLI) while a
-// genuinely shared skill (`liveware-app`) is stored once under `shared/`.
+// host-specific `clawchat-core` skill can diverge (OpenClaw vs Hermes CLI) while a
+// genuinely shared skill (`clawchat-liveware`) is stored once under `shared/`.
 //
 // Each entry records the skill `version` (read from the SKILL.md frontmatter,
 // the file's own source of truth), the `sha256` and `bytes` of the file (so an
@@ -28,14 +28,14 @@ const MANIFEST_PATH = path.join(SKILLS_DIR, "manifest.json");
 // referenced by more than one target on purpose (single source, no drift).
 const LAYOUT = {
   openclaw: {
-    clawchat: "openclaw/clawchat/SKILL.md",
-    "liveware-app": "shared/liveware-app/SKILL.md",
-    "set-greeting": "shared/set-greeting/SKILL.md",
+    "clawchat-core": "openclaw/clawchat-core/SKILL.md",
+    "clawchat-liveware": "shared/clawchat-liveware/SKILL.md",
+    "clawchat-set-greeting": "shared/clawchat-set-greeting/SKILL.md",
   },
   hermes: {
-    clawchat: "hermes/clawchat/SKILL.md",
-    "liveware-app": "shared/liveware-app/SKILL.md",
-    "set-greeting": "shared/set-greeting/SKILL.md",
+    "clawchat-core": "hermes/clawchat-core/SKILL.md",
+    "clawchat-liveware": "shared/clawchat-liveware/SKILL.md",
+    "clawchat-set-greeting": "shared/clawchat-set-greeting/SKILL.md",
   },
 };
 
@@ -46,8 +46,8 @@ const LAYOUT = {
 // converges. To "un-retire" a skill, move the id back into LAYOUT and out of
 // REMOVED. An id must never be in both for the same target.
 const REMOVED = {
-  openclaw: [],
-  hermes: [],
+  openclaw: ["clawchat", "liveware-app", "set-greeting"],
+  hermes: ["clawchat", "liveware-app", "set-greeting"],
 };
 
 function frontmatterVersion(text, file) {

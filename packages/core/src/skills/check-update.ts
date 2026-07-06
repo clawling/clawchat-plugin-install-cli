@@ -39,7 +39,7 @@ import { isVersionOlder } from "../installers/metadata";
 export interface SkillManifestEntry {
   /** Skill version (matches the SKILL.md frontmatter `version`). */
   version: string;
-  /** Repo-relative path under `skills/`, e.g. `openclaw/clawchat/SKILL.md`. */
+  /** Repo-relative path under `skills/`, e.g. `openclaw/clawchat-core/SKILL.md`. */
   path: string;
   /** Lowercase hex sha256 of the raw `SKILL.md` bytes. */
   sha256: string;

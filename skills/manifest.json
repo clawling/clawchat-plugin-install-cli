@@ -2,48 +2,56 @@
   "schema": 1,
   "skills": {
     "openclaw": {
-      "clawchat": {
+      "clawchat-core": {
         "version": "1.0.0",
-        "path": "openclaw/clawchat/SKILL.md",
-        "sha256": "61bc3481f8a7c6d84f887aac097a5a23b0eed323014bac5098c69073568290cc",
-        "bytes": 7302
+        "path": "openclaw/clawchat-core/SKILL.md",
+        "sha256": "9b911a33640a6ba79f6323755a8541a366fddb9a74282d3d21512e0defda3fbc",
+        "bytes": 7307
       },
-      "liveware-app": {
+      "clawchat-liveware": {
         "version": "1.0.0",
-        "path": "shared/liveware-app/SKILL.md",
-        "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
-        "bytes": 3574
+        "path": "shared/clawchat-liveware/SKILL.md",
+        "sha256": "d88ae5520590b46d1827b261bcc37d3621e252f419cc4f28e7f47ae79b237780",
+        "bytes": 3579
       },
-      "set-greeting": {
+      "clawchat-set-greeting": {
         "version": "1.0.0",
-        "path": "shared/set-greeting/SKILL.md",
-        "sha256": "28c6f4643eb750df625e23a09ff087c4410463138823695aa1527a0f5c0fcbca",
-        "bytes": 2307
+        "path": "shared/clawchat-set-greeting/SKILL.md",
+        "sha256": "435470becd56ae25dcee58f626afe1e2aadecc6252af9b93a761e31de7467816",
+        "bytes": 2316
       }
     },
     "hermes": {
-      "clawchat": {
+      "clawchat-core": {
         "version": "1.0.0",
-        "path": "hermes/clawchat/SKILL.md",
-        "sha256": "aab0f4e57931077ad14d398125e93e74d88d99191dbca06a1294b5a5984d44d7",
-        "bytes": 8666
+        "path": "hermes/clawchat-core/SKILL.md",
+        "sha256": "9c286e63f52f0d2436b95a13cda12b154e180f7127cd70b31cc3d1c56b331649",
+        "bytes": 8671
       },
-      "liveware-app": {
+      "clawchat-liveware": {
         "version": "1.0.0",
-        "path": "shared/liveware-app/SKILL.md",
-        "sha256": "84cac47c3aea2d435b40ea2aab2a2dbd71e39630d2853593e1d0d57f01f3666e",
-        "bytes": 3574
+        "path": "shared/clawchat-liveware/SKILL.md",
+        "sha256": "d88ae5520590b46d1827b261bcc37d3621e252f419cc4f28e7f47ae79b237780",
+        "bytes": 3579
       },
-      "set-greeting": {
+      "clawchat-set-greeting": {
         "version": "1.0.0",
-        "path": "shared/set-greeting/SKILL.md",
-        "sha256": "28c6f4643eb750df625e23a09ff087c4410463138823695aa1527a0f5c0fcbca",
-        "bytes": 2307
+        "path": "shared/clawchat-set-greeting/SKILL.md",
+        "sha256": "435470becd56ae25dcee58f626afe1e2aadecc6252af9b93a761e31de7467816",
+        "bytes": 2316
       }
     }
   },
   "removed": {
-    "openclaw": [],
-    "hermes": []
+    "openclaw": [
+      "clawchat",
+      "liveware-app",
+      "set-greeting"
+    ],
+    "hermes": [
+      "clawchat",
+      "liveware-app",
+      "set-greeting"
+    ]
   }
 }
