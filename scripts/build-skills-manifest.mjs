@@ -31,6 +31,7 @@ const LAYOUT = {
     "clawchat-core": "openclaw/clawchat-core/SKILL.md",
     "clawchat-liveware": "shared/clawchat-liveware/SKILL.md",
     "clawchat-set-greeting": "shared/clawchat-set-greeting/SKILL.md",
+    "clawchat-liveware-sample": "openclaw/clawchat-liveware-sample/SKILL.md",
   },
   hermes: {
     "clawchat-core": "hermes/clawchat-core/SKILL.md",
