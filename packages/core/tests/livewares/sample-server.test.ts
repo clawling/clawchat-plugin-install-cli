@@ -9,6 +9,18 @@ const SAMPLE_SRC = path.resolve(__dirname, "../../../../livewares/openclaw/livew
 let child: ChildProcess | null = null;
 let tmpDir = "";
 
+async function waitForEventLines(file: string, count: number, timeoutMs = 5_000): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+      if (lines.length >= count) return lines;
+    } catch { /* not written yet */ }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`events.jsonl did not reach ${count} line(s) within ${timeoutMs}ms`);
+}
+
 async function startSample(): Promise<number> {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "liveware-sample-"));
   for (const f of fs.readdirSync(SAMPLE_SRC)) {
@@ -58,7 +70,7 @@ describe("liveware-sample server.mjs", () => {
       body: JSON.stringify({ type: "click", payload: { button: "like" } }),
     });
     expect((await post.json()).ok).toBe(true);
-    const events = fs.readFileSync(path.join(tmpDir, "events.jsonl"), "utf8").trim().split("\n");
+    const events = await waitForEventLines(path.join(tmpDir, "events.jsonl"), 1);
     expect(JSON.parse(events[0]!)).toMatchObject({ type: "click", payload: { button: "like" } });
 
     // SSE: subscribe, then mutate state.json, expect a `state` event with new title.
@@ -120,11 +132,7 @@ describe("liveware-sample server.mjs", () => {
     });
     expect((await post.json()).ok).toBe(true);
 
-    // Wait for the async file write to complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    const eventsContent = fs.readFileSync(path.join(tmpDir, "events.jsonl"), "utf8").trim();
-    const events = eventsContent.split("\n").filter((l) => l.length > 0);
+    const events = await waitForEventLines(path.join(tmpDir, "events.jsonl"), 1);
     const lastEvent = JSON.parse(events[events.length - 1]!);
     expect(lastEvent.type).toBe("note");
     expect(lastEvent.payload.text).toBe(chineseText);
