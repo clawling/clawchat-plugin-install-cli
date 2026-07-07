@@ -24,7 +24,9 @@ across hosts and lives once under `shared/`.
 > The plugin repos (`clawchat-plugin-openclaw`, `clawchat-plugin-hermes-agent`)
 > keep a **bundled snapshot** of their own host's files for offline / first-run
 > fallback. That snapshot must be kept in sync with this directory — this tree
-> wins on any divergence.
+> wins on any divergence. Bundled snapshots now include **every** skill for that
+> target plus `manifest.json`; each plugin repo has a consistency test that fails
+> CI on drift.
 
 ## `manifest.json` (generated — do not hand-edit)
 
@@ -45,7 +47,9 @@ pnpm skills:check       # CI: fail if the manifest is stale
 1. Edit the relevant `SKILL.md` and **bump its frontmatter `version:`**
    (semver `X.Y.Z`, optional `-<build>`).
 2. `pnpm skills:manifest` to refresh `manifest.json`.
-3. Sync the bundled snapshot in the affected plugin repo(s).
+3. `pnpm skills:sync` to copy the tree + manifest into the sibling plugin
+   repos (flags `--hermes/--openclaw` override the default sibling paths),
+   then commit the synced files in each plugin repo.
 4. Tag the repo `skills-vX.Y.Z` (decoupled from the CLI's npm release) so an
    update trigger can pin an immutable `ref`. Tracking `main` is for dev only.
 

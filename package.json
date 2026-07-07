@@ -15,6 +15,8 @@
     "typecheck": "pnpm -r typecheck",
     "skills:manifest": "node scripts/build-skills-manifest.mjs",
     "skills:check": "node scripts/build-skills-manifest.mjs --check",
+    "skills:sync": "node scripts/sync-skills.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs",
     "release:dry": "pnpm --filter @clawling/clawchat-plugin-install-cli release:dry"
   },
   "devDependencies": {
