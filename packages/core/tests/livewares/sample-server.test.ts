@@ -172,4 +172,32 @@ describe("liveware-sample server.mjs", () => {
     expect(JSON.parse(lastLine)).toMatchObject({ type: "after-cap", payload: { marker: true } });
     expect(size).toBeLessThan(3 * 1024 * 1024);
   }, 30_000);
+
+  it("rejects an oversized /event payload and does not persist it", async () => {
+    const port = await startSample();
+    const base = `http://127.0.0.1:${port}`;
+    const hugeText = "y".repeat(70 * 1024); // > 64KB MAX_EVENT_BYTES cap in server.mjs
+    const body = JSON.stringify({ type: "note", payload: { text: hugeText } });
+
+    try {
+      const res = await fetch(`${base}/event`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      // If the request somehow completed, the server must still refuse it.
+      expect(res.status).not.toBe(200);
+    } catch (err) {
+      // Expected path: the server destroys the connection mid-request once
+      // the byte cap is exceeded, so fetch rejects with a network error.
+      expect(err).toBeInstanceOf(Error);
+    }
+
+    // Give the server a moment to settle, then confirm the oversized
+    // payload never made it into events.jsonl.
+    await new Promise((r) => setTimeout(r, 300));
+    const eventsPath = path.join(tmpDir, "events.jsonl");
+    const content = fs.existsSync(eventsPath) ? fs.readFileSync(eventsPath, "utf8") : "";
+    expect(content).not.toContain(hugeText);
+  }, 15_000);
 });

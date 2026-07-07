@@ -21,10 +21,10 @@
         "bytes": 2316
       },
       "clawchat-liveware-sample": {
-        "version": "1.0.0",
+        "version": "1.0.1",
         "path": "openclaw/clawchat-liveware-sample/SKILL.md",
-        "sha256": "c13495e14d13ce3d5834fd8e341a3a438cb363118d12bdab93bd5d20c40a7b67",
-        "bytes": 2282
+        "sha256": "6945550b752b8b6ac351f478457c04307b725b791504502e1329468323a492ca",
+        "bytes": 2439
       }
     },
     "hermes": {
