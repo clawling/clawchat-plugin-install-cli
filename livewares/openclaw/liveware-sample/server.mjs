@@ -76,17 +76,19 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.method === "POST" && url === "/event") {
-    let body = "";
+    let chunks = [];
+    let received = 0;
     let overflow = false;
     req.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > MAX_EVENT_BYTES) { overflow = true; req.destroy(); }
+      received += chunk.length;
+      if (received > MAX_EVENT_BYTES) { overflow = true; req.destroy(); return; }
+      chunks.push(chunk);
     });
     req.on("end", () => {
       if (overflow) return;
       let parsed;
       try {
-        parsed = JSON.parse(body);
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       } catch {
         res.writeHead(400, { "content-type": "application/json" }).end('{"error":"bad json"}');
         return;

@@ -107,4 +107,26 @@ describe("liveware-sample server.mjs", () => {
       child2.kill("SIGTERM");
     }
   }, 30_000);
+
+  it("handles Chinese text in payload and maintains round-trip integrity", async () => {
+    const port = await startSample();
+    const base = `http://127.0.0.1:${port}`;
+    const chineseText = "你好，Liveware 演示！";
+
+    const post = await fetch(`${base}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "note", payload: { text: chineseText } }),
+    });
+    expect((await post.json()).ok).toBe(true);
+
+    // Wait for the async file write to complete
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const eventsContent = fs.readFileSync(path.join(tmpDir, "events.jsonl"), "utf8").trim();
+    const events = eventsContent.split("\n").filter((l) => l.length > 0);
+    const lastEvent = JSON.parse(events[events.length - 1]!);
+    expect(lastEvent.type).toBe("note");
+    expect(lastEvent.payload.text).toBe(chineseText);
+  });
 });
