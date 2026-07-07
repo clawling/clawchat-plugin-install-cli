@@ -55,3 +55,7 @@ pnpm skills:check       # CI: fail if the manifest is stale
 
 2026-07-06: skills were renamed to `clawchat-*` ids; the old ids (`clawchat`,
 `liveware-app`, `set-greeting`) are permanent tombstones in `REMOVED`.
+
+Tombstoned skill ids are permanently retired and must never be reused for a
+new skill: old installs apply the shipped tombstones at every load, so a
+revived id would have its managed copy deleted on next sync.
