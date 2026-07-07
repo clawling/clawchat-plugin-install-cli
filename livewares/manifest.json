@@ -22,8 +22,8 @@
           },
           {
             "path": "openclaw/liveware-sample/server.mjs",
-            "sha256": "6ac5a9382e9c5dc54cdce51519d3ed01db8c541503d677ecb29dc3a406f7de62",
-            "bytes": 4252
+            "sha256": "ce080081835e21efad06663da8ec3c65c69f62314f37b66dd94026440d73f5c3",
+            "bytes": 5403
           },
           {
             "path": "openclaw/liveware-sample/state.json",

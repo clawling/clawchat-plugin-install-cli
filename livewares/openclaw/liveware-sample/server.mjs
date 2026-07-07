@@ -20,7 +20,38 @@ const startPort = Number(arg("port", "43110"));
 const STATE_FILE = path.join(dir, "state.json");
 const EVENTS_FILE = path.join(dir, "events.jsonl");
 const MAX_EVENT_BYTES = 64 * 1024;
+const MAX_EVENTS_BYTES = 5 * 1024 * 1024;
 const PORT_PROBE_ATTEMPTS = 20;
+
+// events.jsonl is appended to on every /event POST (unauthenticated, reachable
+// through the public tunnel). Cap its growth: once it exceeds MAX_EVENTS_BYTES,
+// keep only the newest ~half (by lines) before the next append.
+function capEventsFileIfNeeded() {
+  let stat;
+  try {
+    stat = fs.statSync(EVENTS_FILE);
+  } catch {
+    return; // file doesn't exist yet — nothing to cap
+  }
+  if (stat.size <= MAX_EVENTS_BYTES) return;
+  try {
+    const content = fs.readFileSync(EVENTS_FILE, "utf8");
+    const lines = content.split("\n").filter((l) => l.length > 0);
+    const targetBytes = MAX_EVENTS_BYTES / 2;
+    let kept = [];
+    let bytes = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const lineBytes = Buffer.byteLength(lines[i], "utf8") + 1;
+      if (bytes + lineBytes > targetBytes) break;
+      kept.push(lines[i]);
+      bytes += lineBytes;
+    }
+    kept.reverse();
+    fs.writeFileSync(EVENTS_FILE, kept.length ? kept.join("\n") + "\n" : "");
+  } catch {
+    // best-effort; if truncation fails, leave the file as-is rather than lose data
+  }
+}
 
 const sseClients = new Set();
 
@@ -98,6 +129,7 @@ const server = http.createServer((req, res) => {
         type: typeof parsed.type === "string" ? parsed.type : "unknown",
         payload: parsed.payload ?? null,
       });
+      capEventsFileIfNeeded();
       fs.appendFile(EVENTS_FILE, line + "\n", () => {});
       res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
     });

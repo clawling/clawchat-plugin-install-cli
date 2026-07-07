@@ -21,11 +21,12 @@ async function waitForEventLines(file: string, count: number, timeoutMs = 5_000)
   throw new Error(`events.jsonl did not reach ${count} line(s) within ${timeoutMs}ms`);
 }
 
-async function startSample(): Promise<number> {
+async function startSample(beforeSpawn?: (dir: string) => void): Promise<number> {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "liveware-sample-"));
   for (const f of fs.readdirSync(SAMPLE_SRC)) {
     fs.copyFileSync(path.join(SAMPLE_SRC, f), path.join(tmpDir, f));
   }
+  beforeSpawn?.(tmpDir);
   child = spawn(process.execPath, [
     path.join(tmpDir, "server.mjs"), "--dir", tmpDir, "--port", "0",
   ], { stdio: ["ignore", "pipe", "pipe"] });
@@ -137,4 +138,38 @@ describe("liveware-sample server.mjs", () => {
     expect(lastEvent.type).toBe("note");
     expect(lastEvent.payload.text).toBe(chineseText);
   });
+
+  it("caps events.jsonl growth when it exceeds the size threshold", async () => {
+    const fillerLine = JSON.stringify({ ts: 0, type: "filler", payload: { blob: "x".repeat(200) } });
+    const port = await startSample((dir) => {
+      const eventsPath = path.join(dir, "events.jsonl");
+      const lineWithNewline = fillerLine + "\n";
+      const targetBytes = 6 * 1024 * 1024;
+      const repeats = Math.ceil(targetBytes / Buffer.byteLength(lineWithNewline, "utf8"));
+      fs.writeFileSync(eventsPath, lineWithNewline.repeat(repeats));
+      expect(fs.statSync(eventsPath).size).toBeGreaterThan(5 * 1024 * 1024);
+    });
+    const base = `http://127.0.0.1:${port}`;
+
+    const post = await fetch(`${base}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "after-cap", payload: { marker: true } }),
+    });
+    expect((await post.json()).ok).toBe(true);
+
+    const eventsPath = path.join(tmpDir, "events.jsonl");
+    const deadline = Date.now() + 5_000;
+    let lastLine = "";
+    let size = Infinity;
+    while (Date.now() < deadline) {
+      size = fs.statSync(eventsPath).size;
+      const lines = fs.readFileSync(eventsPath, "utf8").trim().split("\n").filter(Boolean);
+      lastLine = lines[lines.length - 1] ?? "";
+      if (size < 3 * 1024 * 1024 && JSON.parse(lastLine).type === "after-cap") break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(JSON.parse(lastLine)).toMatchObject({ type: "after-cap", payload: { marker: true } });
+    expect(size).toBeLessThan(3 * 1024 * 1024);
+  }, 30_000);
 });
