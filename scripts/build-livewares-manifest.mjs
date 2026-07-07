@@ -17,9 +17,13 @@ import { fileURLToPath } from "node:url";
 const LIVEWARES_DIR = path.resolve(fileURLToPath(new URL("../livewares", import.meta.url)));
 const MANIFEST_PATH = path.join(LIVEWARES_DIR, "manifest.json");
 
-// (target) -> sample ids published for that target.
+// (target) -> { sampleId: repo-relative dir under livewares/ }.
+// The sample app is host-agnostic (pure node). hermes reuses openclaw's
+// physical files (single source, no drift); it just gets its own manifest
+// target entry so the plugin fetches by its own target key.
 const LAYOUT = {
-  openclaw: ["liveware-sample"],
+  openclaw: { "liveware-sample": "openclaw/liveware-sample" },
+  hermes: { "liveware-sample": "openclaw/liveware-sample" },
 };
 
 function listFilesRecursive(root) {
@@ -34,10 +38,10 @@ function listFilesRecursive(root) {
 
 function buildManifest() {
   const livewares = {};
-  for (const [target, ids] of Object.entries(LAYOUT)) {
+  for (const [target, idToDirMap] of Object.entries(LAYOUT)) {
     livewares[target] = {};
-    for (const id of ids) {
-      const sampleDir = path.join(LIVEWARES_DIR, target, id);
+    for (const [id, relDir] of Object.entries(idToDirMap)) {
+      const sampleDir = path.join(LIVEWARES_DIR, relDir);
       const metaPath = path.join(sampleDir, "liveware.json");
       const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
       if (typeof meta.version !== "string" || !meta.version) {

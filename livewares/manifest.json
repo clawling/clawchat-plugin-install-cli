@@ -32,6 +32,38 @@
           }
         ]
       }
+    },
+    "hermes": {
+      "liveware-sample": {
+        "version": "1.0.0",
+        "files": [
+          {
+            "path": "openclaw/liveware-sample/app.js",
+            "sha256": "e80def1525881c1e903daed6fd4bf78333be0d595dc3295af1d08803557d4abb",
+            "bytes": 1227
+          },
+          {
+            "path": "openclaw/liveware-sample/index.html",
+            "sha256": "756759722c9b271c81807709409ec625f0bfacee2a28e286a7dc07db62ce894f",
+            "bytes": 1501
+          },
+          {
+            "path": "openclaw/liveware-sample/liveware.json",
+            "sha256": "453658840d53a2e99535b08c31b42fc4367487aed5444d7ed91e5beef5bd14bf",
+            "bytes": 54
+          },
+          {
+            "path": "openclaw/liveware-sample/server.mjs",
+            "sha256": "ce080081835e21efad06663da8ec3c65c69f62314f37b66dd94026440d73f5c3",
+            "bytes": 5403
+          },
+          {
+            "path": "openclaw/liveware-sample/state.json",
+            "sha256": "b3bc0b74989177bb46cc03aacc618ce5bac1d50c6087e29622f4f6b409de9be4",
+            "bytes": 191
+          }
+        ]
+      }
     }
   }
 }
