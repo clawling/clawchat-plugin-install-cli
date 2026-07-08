@@ -17,6 +17,8 @@
     "skills:check": "node scripts/build-skills-manifest.mjs --check",
     "skills:sync": "node scripts/sync-skills.mjs",
     "test:scripts": "node --test scripts/*.test.mjs",
+    "livewares:manifest": "node scripts/build-livewares-manifest.mjs",
+    "livewares:check": "node scripts/build-livewares-manifest.mjs --check",
     "release:dry": "pnpm --filter @clawling/clawchat-plugin-install-cli release:dry"
   },
   "devDependencies": {
