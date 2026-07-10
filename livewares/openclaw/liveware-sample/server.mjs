@@ -28,8 +28,15 @@ function stateWithMeta(state) {
   // field — only the supervisor-provided CLI value may populate it, so strip
   // any `agentId` key an agent (or a malicious /event-adjacent write) put
   // directly into state.json before merging in the trusted CLI value.
-  const { agentId: _ignored, ...rest } = state;
-  return agentId ? { ...rest, agentId } : rest;
+  // `iconSvg` is likewise stripped: the page must never receive raw SVG (it
+  // could get inlined into the DOM someday) — it gets a content-hash
+  // `iconVersion` instead and loads the icon via <img src="/icon.svg?v=…">,
+  // keeping the SVG in an image context where scripts never execute.
+  const { agentId: _ignored, iconSvg, ...rest } = state;
+  const out = agentId ? { ...rest, agentId } : rest;
+  const icon = validateIconSvg(iconSvg);
+  if (icon) out.iconVersion = iconHash(icon);
+  return out;
 }
 
 const STATE_FILE = path.join(dir, "state.json");
@@ -150,6 +157,16 @@ function serveIndexHtml(res) {
     const title = typeof state?.title === "string" ? state.title.trim() : "";
     let html = buf.toString("utf8");
     if (title) html = html.replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
+    // The ClawChat client resolves a liveware's icon from the served HTML's
+    // <link rel=icon> (no JS execution) — like <title>, it must be rendered
+    // server-side or every client surface stays on the ✦ fallback.
+    const icon = validateIconSvg(state?.iconSvg);
+    if (icon) {
+      html = html.replace(
+        "</head>",
+        `  <link rel="icon" type="image/svg+xml" href="/icon.svg?v=${iconHash(icon)}" />\n</head>`,
+      );
+    }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(html);
   });
 }

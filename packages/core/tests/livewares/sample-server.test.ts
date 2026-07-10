@@ -358,4 +358,71 @@ describe("liveware-sample server.mjs", () => {
       tmpDir = "";
     }
   }, 60_000);
+
+  it("renders a versioned <link rel=icon> and exposes iconVersion (never raw iconSvg) via /state + SSE", async () => {
+    const port = await startSample(stateWithIcon(GOOD_SVG));
+    const base = `http://127.0.0.1:${port}`;
+
+    const html = await (await fetch(`${base}/`)).text();
+    const m = html.match(
+      /<link rel="icon" type="image\/svg\+xml" href="\/icon\.svg\?v=([0-9a-f]{8})" \/>/,
+    );
+    expect(m).not.toBeNull();
+
+    const state = await (await fetch(`${base}/state`)).json();
+    expect(state.iconVersion).toBe(m![1]);
+    expect("iconSvg" in state).toBe(false);
+
+    // SSE: subscribe, swap in a DIFFERENT svg, expect the frame to carry a
+    // NEW iconVersion and never the raw markup.
+    const controller = new AbortController();
+    const sse = await fetch(`${base}/sse`, { signal: controller.signal });
+    const reader = sse.body!.getReader();
+    const BLUE_SVG =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#1E66F5"/></svg>';
+    fs.writeFileSync(
+      path.join(tmpDir, "state.json"),
+      JSON.stringify({ title: "Changed by agent", body: "b", theme: "#000000", iconSvg: BLUE_SVG }),
+    );
+    const received = await new Promise<string>(async (resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no SSE event")), 10_000);
+      let acc = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += Buffer.from(value).toString();
+        if (acc.includes("Changed by agent")) { clearTimeout(timer); resolve(acc); return; }
+      }
+      clearTimeout(timer);
+      reject(new Error("stream ended"));
+    });
+    controller.abort();
+    expect(received).toContain('"iconVersion":"');
+    expect(received).not.toContain("iconSvg");
+
+    // Content change → different hash (the cache-busting contract).
+    const state2 = await (await fetch(`${base}/state`)).json();
+    expect(state2.iconVersion).toMatch(/^[0-9a-f]{8}$/);
+    expect(state2.iconVersion).not.toBe(state.iconVersion);
+  }, 30_000);
+
+  it("omits <link rel=icon> and iconVersion when iconSvg is missing or invalid", async () => {
+    const portNone = await startSample();
+    const htmlNone = await (await fetch(`http://127.0.0.1:${portNone}/`)).text();
+    expect(htmlNone).not.toContain('rel="icon"');
+    const stateNone = await (await fetch(`http://127.0.0.1:${portNone}/state`)).json();
+    expect("iconVersion" in stateNone).toBe(false);
+    child?.kill("SIGTERM");
+    child = null;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmpDir = "";
+
+    const portBad = await startSample(
+      stateWithIcon('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'),
+    );
+    const htmlBad = await (await fetch(`http://127.0.0.1:${portBad}/`)).text();
+    expect(htmlBad).not.toContain('rel="icon"');
+    const stateBad = await (await fetch(`http://127.0.0.1:${portBad}/state`)).json();
+    expect("iconVersion" in stateBad).toBe(false);
+  });
 });
