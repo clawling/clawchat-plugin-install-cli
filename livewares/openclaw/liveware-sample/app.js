@@ -21,6 +21,10 @@
   function render(state) {
     document.getElementById("title").textContent = state.title || "";
     document.getElementById("body").textContent = state.body || "";
+    // Keep document.title in sync too: the container chrome live-tracks it,
+    // and the served <title> (server-rendered from state.json) is what names
+    // this liveware on every ClawChat surface.
+    if (state.title) document.title = state.title;
     if (state.theme) document.documentElement.style.setProperty("--theme", state.theme);
     applyAgentId(state.agentId);
   }

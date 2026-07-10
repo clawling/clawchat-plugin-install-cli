@@ -60,7 +60,9 @@ describe("liveware-sample server.mjs", () => {
     expect(health).toEqual({ ok: true });
 
     const html = await (await fetch(`${base}/`)).text();
-    expect(html).toContain("Liveware Sample");
+    // <title> is server-rendered from state.json (the client names liveware
+    // surfaces by fetching it), so the default state title shows here.
+    expect(html).toContain("<title>Hello from your agent</title>");
 
     const state = await (await fetch(`${base}/state`)).json();
     expect(state.title).toBe("Hello from your agent");
@@ -264,5 +266,42 @@ describe("liveware-sample server.mjs", () => {
     const portWithFlag = await startSample(spoofState, "usr_test123");
     const stateWithFlag = await (await fetch(`http://127.0.0.1:${portWithFlag}/state`)).json();
     expect(stateWithFlag.agentId).toBe("usr_test123");
+  });
+
+  it("renders the current state.json title into the served <title> tag", async () => {
+    // The ClawChat client resolves a liveware's display name by fetching the
+    // page HTML and parsing <title> (no JS execution) — a rename via state.json
+    // must therefore be server-rendered, or every client surface stays stale.
+    const port = await startSample((dir) => {
+      fs.writeFileSync(
+        path.join(dir, "state.json"),
+        JSON.stringify({ title: "氪星球", body: "b", theme: "#FF812A" }),
+      );
+    });
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    expect(html).toContain("<title>氪星球</title>");
+    expect(html).not.toContain("<title>Liveware Sample</title>");
+  });
+
+  it("HTML-escapes the state.json title and falls back to the static tag when state is unreadable", async () => {
+    const port = await startSample((dir) => {
+      fs.writeFileSync(
+        path.join(dir, "state.json"),
+        JSON.stringify({ title: '<script>alert(1)</script>&"', body: "b", theme: "#FF812A" }),
+      );
+    });
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;&amp;&quot;");
+    child?.kill("SIGTERM");
+    child = null;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    // Unparseable state.json → serve index.html untouched (static fallback title).
+    const portBroken = await startSample((dir) => {
+      fs.writeFileSync(path.join(dir, "state.json"), "{not json");
+    });
+    const htmlBroken = await (await fetch(`http://127.0.0.1:${portBroken}/`)).text();
+    expect(htmlBroken).toContain("<title>Liveware Sample</title>");
   });
 });

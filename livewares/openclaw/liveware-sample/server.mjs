@@ -100,10 +100,37 @@ function serveFile(res, filename, mime) {
   });
 }
 
+function escapeHtml(s) {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+// The ClawChat client names every liveware surface (launcher tile, 活件卡,
+// container chrome) from the page HTML's <title> — fetched without running
+// JS. A rename via state.json must therefore be rendered server-side, or the
+// client keeps resolving the stale static title.
+function serveIndexHtml(res) {
+  fs.readFile(path.join(dir, "index.html"), (err, buf) => {
+    if (err) {
+      res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+      return;
+    }
+    const state = readStateJson();
+    const title = typeof state?.title === "string" ? state.title.trim() : "";
+    let html = buf.toString("utf8");
+    if (title) html = html.replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(html);
+  });
+}
+
 const server = http.createServer((req, res) => {
   const url = (req.url || "/").split("?")[0];
 
-  if (req.method === "GET" && url === "/") return serveFile(res, "index.html", "text/html; charset=utf-8");
+  if (req.method === "GET" && url === "/") return serveIndexHtml(res);
   if (req.method === "GET" && url === "/app.js") return serveFile(res, "app.js", "text/javascript; charset=utf-8");
   if (req.method === "GET" && url === "/state") {
     const state = readStateJson();
