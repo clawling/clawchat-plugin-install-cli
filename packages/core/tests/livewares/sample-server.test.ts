@@ -345,6 +345,7 @@ describe("liveware-sample server.mjs", () => {
       ["data: URI", '<svg xmlns="http://www.w3.org/2000/svg"><image href="data:image/png;base64,AAAA"/></svg>'],
       ["image element even with fragment href", '<svg xmlns="http://www.w3.org/2000/svg"><image href="#local"/></svg>'],
       ["trailing content after root", '<svg xmlns="http://www.w3.org/2000/svg"></svg><b>tail</b>'],
+      ["double svg root", '<svg xmlns="http://www.w3.org/2000/svg"></svg><svg xmlns="http://www.w3.org/2000/svg"></svg>'],
       ["not an svg root", "<div>hi</div>"],
       ["oversize", `<svg xmlns="http://www.w3.org/2000/svg"><desc>${"x".repeat(17 * 1024)}</desc></svg>`],
     ];

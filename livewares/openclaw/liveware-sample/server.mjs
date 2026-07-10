@@ -59,6 +59,9 @@ function validateIconSvg(value) {
   const svg = value.trim();
   if (!svg || Buffer.byteLength(svg, "utf8") > ICON_MAX_BYTES) return null;
   if (!/^<svg[\s>]/i.test(svg) || !/<\/svg>$/i.test(svg)) return null;
+  // Exactly one <svg> element: the boundary check above admits
+  // "<svg>…</svg><svg>…</svg>", so count opening tags (also bans nested svg).
+  if ((svg.match(/<svg[\s>]/gi) || []).length !== 1) return null;
   if (ICON_REJECT_RE.test(svg)) return null;
   for (const m of svg.matchAll(ICON_HREF_RE)) {
     const v = (m[2] ?? m[3] ?? m[4] ?? "").trim();
@@ -179,8 +182,9 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && url === "/state") {
     const state = readStateJson();
     // state.json may be mid-write (torn read). NEVER stream the raw file —
-    // it bypasses stateWithMeta's iconSvg/agentId stripping. A 503 keeps the
-    // page on its existing catch/SSE-recovery path.
+    // it bypasses stateWithMeta's iconSvg/agentId stripping. The page treats
+    // a non-ok /state as a failed load (catch path); SSE recovers once the
+    // agent's write completes.
     if (state == null) {
       return res
         .writeHead(503, { "content-type": "application/json; charset=utf-8" })

@@ -72,7 +72,7 @@
   }
 
   fetch("/state")
-    .then(function (r) { return r.json(); })
+    .then(function (r) { if (!r.ok) throw new Error("state " + r.status); return r.json(); })
     .then(render)
     .catch(function () { applyAgentId(null); });
 
