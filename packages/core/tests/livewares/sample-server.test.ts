@@ -21,15 +21,15 @@ async function waitForEventLines(file: string, count: number, timeoutMs = 5_000)
   throw new Error(`events.jsonl did not reach ${count} line(s) within ${timeoutMs}ms`);
 }
 
-async function startSample(beforeSpawn?: (dir: string) => void): Promise<number> {
+async function startSample(beforeSpawn?: (dir: string) => void, agentId?: string): Promise<number> {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "liveware-sample-"));
   for (const f of fs.readdirSync(SAMPLE_SRC)) {
     fs.copyFileSync(path.join(SAMPLE_SRC, f), path.join(tmpDir, f));
   }
   beforeSpawn?.(tmpDir);
-  child = spawn(process.execPath, [
-    path.join(tmpDir, "server.mjs"), "--dir", tmpDir, "--port", "0",
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  const args = [path.join(tmpDir, "server.mjs"), "--dir", tmpDir, "--port", "0"];
+  if (agentId) args.push("--agent-id", agentId);
+  child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
   return await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("server did not report port")), 10_000);
     let buf = "";
@@ -200,4 +200,69 @@ describe("liveware-sample server.mjs", () => {
     const content = fs.existsSync(eventsPath) ? fs.readFileSync(eventsPath, "utf8") : "";
     expect(content).not.toContain(hugeText);
   }, 15_000);
+
+  it("merges --agent-id into /state and SSE state frames, alongside state.json fields", async () => {
+    const port = await startSample(undefined, "usr_test123");
+    const base = `http://127.0.0.1:${port}`;
+
+    const state = await (await fetch(`${base}/state`)).json();
+    expect(state).toMatchObject({
+      title: "Hello from your agent",
+      agentId: "usr_test123",
+    });
+
+    // SSE: subscribe, then mutate state.json, expect the pushed frame to
+    // carry agentId alongside the new state fields.
+    const controller = new AbortController();
+    const sse = await fetch(`${base}/sse`, { signal: controller.signal });
+    const reader = sse.body!.getReader();
+    const newState = { title: "Changed by agent", body: "b", theme: "#000000" };
+    fs.writeFileSync(path.join(tmpDir, "state.json"), JSON.stringify(newState));
+    const received = await new Promise<string>(async (resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no SSE event")), 10_000);
+      let acc = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += Buffer.from(value).toString();
+        if (acc.includes("Changed by agent")) { clearTimeout(timer); resolve(acc); return; }
+      }
+      clearTimeout(timer);
+      reject(new Error("stream ended"));
+    });
+    controller.abort();
+    expect(received).toContain("event: state");
+    expect(received).toContain('"agentId":"usr_test123"');
+  }, 30_000);
+
+  it("omits agentId from /state when spawned without --agent-id", async () => {
+    const port = await startSample();
+    const base = `http://127.0.0.1:${port}`;
+
+    const state = await (await fetch(`${base}/state`)).json();
+    expect(state.title).toBe("Hello from your agent");
+    expect("agentId" in state).toBe(false);
+  });
+
+  it("never passes a state.json-supplied agentId through — only the CLI value counts", async () => {
+    const spoofState = (dir: string) => {
+      fs.writeFileSync(
+        path.join(dir, "state.json"),
+        JSON.stringify({ title: "Hello from your agent", body: "b", theme: "#000000", agentId: "usr_evil" }),
+      );
+    };
+
+    // Without --agent-id: the spoofed key must not surface at all.
+    const portNoFlag = await startSample(spoofState);
+    const stateNoFlag = await (await fetch(`http://127.0.0.1:${portNoFlag}/state`)).json();
+    expect("agentId" in stateNoFlag).toBe(false);
+    child?.kill("SIGTERM");
+    child = null;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    // With --agent-id: only the CLI-provided value must show, never the spoofed one.
+    const portWithFlag = await startSample(spoofState, "usr_test123");
+    const stateWithFlag = await (await fetch(`http://127.0.0.1:${portWithFlag}/state`)).json();
+    expect(stateWithFlag.agentId).toBe("usr_test123");
+  });
 });

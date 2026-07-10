@@ -23,7 +23,12 @@ const startPort = Number(arg("port", "43110"));
 const agentId = String(arg("agent-id", "")).trim();
 
 function stateWithMeta(state) {
-  return agentId ? { ...state, agentId } : state;
+  // state.json is agent-writable and the page renders a deep link from this
+  // field — only the supervisor-provided CLI value may populate it, so strip
+  // any `agentId` key an agent (or a malicious /event-adjacent write) put
+  // directly into state.json before merging in the trusted CLI value.
+  const { agentId: _ignored, ...rest } = state;
+  return agentId ? { ...rest, agentId } : rest;
 }
 
 const STATE_FILE = path.join(dir, "state.json");
