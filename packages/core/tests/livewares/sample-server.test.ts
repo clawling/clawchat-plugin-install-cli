@@ -51,6 +51,18 @@ afterEach(() => {
   tmpDir = "";
 });
 
+const GOOD_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#FF812A"/><circle cx="32" cy="32" r="14" fill="#FFF"/></svg>';
+
+function stateWithIcon(iconSvg: string) {
+  return (dir: string) => {
+    fs.writeFileSync(
+      path.join(dir, "state.json"),
+      JSON.stringify({ title: "Hello from your agent", body: "b", theme: "#FF812A", iconSvg }),
+    );
+  };
+}
+
 describe("liveware-sample server.mjs", () => {
   it("serves page, state, records events, pushes SSE on state change", async () => {
     const port = await startSample();
@@ -304,4 +316,46 @@ describe("liveware-sample server.mjs", () => {
     const htmlBroken = await (await fetch(`http://127.0.0.1:${portBroken}/`)).text();
     expect(htmlBroken).toContain("<title>Liveware Sample</title>");
   });
+
+  it("serves a valid iconSvg at /icon.svg with image-context security headers", async () => {
+    const port = await startSample(stateWithIcon(GOOD_SVG));
+    const res = await fetch(`http://127.0.0.1:${port}/icon.svg`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/svg+xml");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'",
+    );
+    expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(await res.text()).toBe(GOOD_SVG);
+  });
+
+  it("404s /icon.svg when state.json has no iconSvg", async () => {
+    const port = await startSample();
+    expect((await fetch(`http://127.0.0.1:${port}/icon.svg`)).status).toBe(404);
+  });
+
+  it("rejects unsafe or malformed iconSvg values with a 404 (whole-value reject, no sanitize-and-serve)", async () => {
+    const bad: Array<[string, string]> = [
+      ["script element", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'],
+      ["event handler attribute", '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'],
+      ["foreignObject", '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject>x</foreignObject></svg>'],
+      ["external href", '<svg xmlns="http://www.w3.org/2000/svg"><a href="https://evil.example">x</a></svg>'],
+      ["external xlink:href", '<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="https://evil.example/s.svg#i"/></svg>'],
+      ["data: URI", '<svg xmlns="http://www.w3.org/2000/svg"><image href="data:image/png;base64,AAAA"/></svg>'],
+      ["image element even with fragment href", '<svg xmlns="http://www.w3.org/2000/svg"><image href="#local"/></svg>'],
+      ["trailing content after root", '<svg xmlns="http://www.w3.org/2000/svg"></svg><b>tail</b>'],
+      ["not an svg root", "<div>hi</div>"],
+      ["oversize", `<svg xmlns="http://www.w3.org/2000/svg"><desc>${"x".repeat(17 * 1024)}</desc></svg>`],
+    ];
+    for (const [label, svg] of bad) {
+      const port = await startSample(stateWithIcon(svg));
+      const res = await fetch(`http://127.0.0.1:${port}/icon.svg`);
+      expect(res.status, label).toBe(404);
+      child?.kill("SIGTERM");
+      child = null;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      tmpDir = "";
+    }
+  }, 60_000);
 });

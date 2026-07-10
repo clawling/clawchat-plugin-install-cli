@@ -3,7 +3,7 @@
 // Contract (consumed by the ClawChat plugin supervisor):
 //   node server.mjs --dir <dir> --port <startPort> [--agent-id <clawchat user id>]
 //   * prints ONE stdout line `{"port":N}` once listening
-//   * GET / , /app.js , /state , /sse , /healthz ; POST /event
+//   * GET / , /app.js , /state , /sse , /healthz , /icon.svg ; POST /event
 // state.json edits (by the agent) are pushed to the page via SSE;
 // page interactions are appended to events.jsonl (read by the agent).
 // --agent-id (the agent's own ClawChat user id) is merged into /state
@@ -12,6 +12,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -36,6 +37,32 @@ const EVENTS_FILE = path.join(dir, "events.jsonl");
 const MAX_EVENT_BYTES = 64 * 1024;
 const MAX_EVENTS_BYTES = 5 * 1024 * 1024;
 const PORT_PROBE_ATTEMPTS = 20;
+const ICON_MAX_BYTES = 16 * 1024;
+// Reject-list, case-insensitive. A hit rejects the WHOLE value — no
+// sanitize-and-rewrite (rewriting untrusted markup is where sanitizers fail).
+// The SVG is agent-authored, but an agent can be talked into copying hostile
+// markup from the conversation, so the enforcement point is here at the exit.
+const ICON_REJECT_RE =
+  /<script|<foreignobject|<iframe|<embed|<image|<!doctype|<!entity|<\?|javascript:|data:|\bon[a-z]+\s*=/i;
+// Every href / xlink:href value must be a local fragment (#…) — no external fetches.
+const ICON_HREF_RE = /(?:xlink:)?href\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+
+function validateIconSvg(value) {
+  if (typeof value !== "string") return null;
+  const svg = value.trim();
+  if (!svg || Buffer.byteLength(svg, "utf8") > ICON_MAX_BYTES) return null;
+  if (!/^<svg[\s>]/i.test(svg) || !/<\/svg>$/i.test(svg)) return null;
+  if (ICON_REJECT_RE.test(svg)) return null;
+  for (const m of svg.matchAll(ICON_HREF_RE)) {
+    const v = (m[2] ?? m[3] ?? m[4] ?? "").trim();
+    if (!v.startsWith("#")) return null;
+  }
+  return svg;
+}
+
+function iconHash(svg) {
+  return crypto.createHash("sha256").update(svg, "utf8").digest("hex").slice(0, 8);
+}
 
 // events.jsonl is appended to on every /event POST (unauthenticated, reachable
 // through the public tunnel). Cap its growth: once it exceeds MAX_EVENTS_BYTES,
@@ -141,6 +168,20 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "GET" && url === "/healthz") {
     return res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
+  }
+  if (req.method === "GET" && url === "/icon.svg") {
+    const icon = validateIconSvg(readStateJson()?.iconSvg);
+    if (!icon) return res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+    return res
+      .writeHead(200, {
+        "content-type": "image/svg+xml",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+        // The <link>/<img> URL always carries the content hash (?v=), so
+        // long-lived immutable caching is safe.
+        "cache-control": "public, max-age=31536000, immutable",
+      })
+      .end(icon);
   }
   if (req.method === "GET" && url === "/sse") {
     res.writeHead(200, {
