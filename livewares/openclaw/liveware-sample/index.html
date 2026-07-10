@@ -46,13 +46,18 @@
     .hint { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
     .say { background: var(--brand-light); border-radius: 8px; padding: 8px 10px; font-size: 14px;
            color: var(--text-primary); margin-top: 8px; }
+    .icon-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+    .icon-box { width: 48px; height: 48px; border-radius: 12px; background: var(--brand-light);
+                display: flex; align-items: center; justify-content: center; flex: none;
+                color: var(--brand); font-size: 22px; overflow: hidden; }
+    .icon-box img { width: 100%; height: 100%; display: block; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1 id="title"></h1>
     <p id="body"></p>
-    <p class="lead">这是一个 Liveware 使用引导页。Liveware 是由你的 agent 托管、能和聊天联动的小应用 —— 下面三个例子带你体验它和对话的双向联动。</p>
+    <p class="lead">这是一个 Liveware 使用引导页。Liveware 是由你的 agent 托管、能和聊天联动的小应用 —— 下面四个例子带你体验它和对话的双向联动。</p>
 
     <section>
       <h2>① 让 agent 改这个页面</h2>
@@ -81,6 +86,17 @@
       </div>
       <p class="hint" id="nav-fallback" hidden>当前版本暂不支持一键返回 —— 点左上角 ‹ 即可回到聊天。</p>
       <p class="hint">输入的内容会作为一条页面事件记录下来,回到聊天后同样可以问 agent。</p>
+    </section>
+
+    <section>
+      <h2>④ 让 agent 换个图标</h2>
+      <div class="icon-row">
+        <span id="icon-box" class="icon-box" aria-hidden="true">✦</span>
+        <p class="hint" id="icon-hint">还没有图标 —— 这个 liveware 在聊天里显示的是默认的 ✦。</p>
+      </div>
+      <p class="hint">回到对话页,对 agent 说(怎么描述都行,agent 会现场画一个 SVG):</p>
+      <p class="say">把你的图标换成一个火箭穿过星环的样子</p>
+      <p class="hint">上方图标会实时变化。聊天里的活件卡和启动器图标最长 30 分钟后自动更新;在容器菜单里点「强制刷新」可立即生效。</p>
     </section>
   </div>
   <script src="/app.js"></script>

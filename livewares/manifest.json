@@ -7,13 +7,13 @@
         "files": [
           {
             "path": "openclaw/liveware-sample/app.js",
-            "sha256": "0e7234eb79cadb0857de451aa71b95755281a0be44c8e8bf0d15804297febc88",
-            "bytes": 2653
+            "sha256": "3952a6f0c6dff490604e5c0164df8202db723280e35249fc15724f7e6ad546e4",
+            "bytes": 3833
           },
           {
             "path": "openclaw/liveware-sample/index.html",
-            "sha256": "2017afd604fe5f61fa564f3f274abda14b3ce74bc5d480ff59160f1e5aeae883",
-            "bytes": 4230
+            "sha256": "58d601859e17238da307c1b129bd962161efe8e938fc065789203da3515a74ef",
+            "bytes": 5320
           },
           {
             "path": "openclaw/liveware-sample/liveware.json",
@@ -27,7 +27,7 @@
           },
           {
             "path": "openclaw/liveware-sample/state.json",
-            "sha256": "2d52596d0aebbcc5a22232ec34609add0b7892c0ccf4c2a662d41d1d96598921",
+            "sha256": "16843d249b3e044aa38ba15737ed6c7f2b7089507c58c84b31b72033a565cf61",
             "bytes": 195
           }
         ]
@@ -39,13 +39,13 @@
         "files": [
           {
             "path": "openclaw/liveware-sample/app.js",
-            "sha256": "0e7234eb79cadb0857de451aa71b95755281a0be44c8e8bf0d15804297febc88",
-            "bytes": 2653
+            "sha256": "3952a6f0c6dff490604e5c0164df8202db723280e35249fc15724f7e6ad546e4",
+            "bytes": 3833
           },
           {
             "path": "openclaw/liveware-sample/index.html",
-            "sha256": "2017afd604fe5f61fa564f3f274abda14b3ce74bc5d480ff59160f1e5aeae883",
-            "bytes": 4230
+            "sha256": "58d601859e17238da307c1b129bd962161efe8e938fc065789203da3515a74ef",
+            "bytes": 5320
           },
           {
             "path": "openclaw/liveware-sample/liveware.json",
@@ -59,7 +59,7 @@
           },
           {
             "path": "openclaw/liveware-sample/state.json",
-            "sha256": "2d52596d0aebbcc5a22232ec34609add0b7892c0ccf4c2a662d41d1d96598921",
+            "sha256": "16843d249b3e044aa38ba15737ed6c7f2b7089507c58c84b31b72033a565cf61",
             "bytes": 195
           }
         ]

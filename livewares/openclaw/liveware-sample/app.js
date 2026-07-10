@@ -18,6 +18,36 @@
     }
   }
 
+  var iconVersion = null;
+  function applyIcon(v) {
+    if (v === iconVersion) return;
+    iconVersion = v;
+    var box = document.getElementById("icon-box");
+    var hint = document.getElementById("icon-hint");
+    if (typeof v === "string" && v) {
+      var src = "/icon.svg?v=" + encodeURIComponent(v);
+      box.innerHTML = "";
+      var img = document.createElement("img");
+      img.alt = "";
+      img.src = src;
+      box.appendChild(img);
+      hint.textContent = "这就是当前的图标 —— 聊天里的活件卡、启动器磁贴用的同一张。";
+      // Keep the document favicon in sync too (visible when previewing in a
+      // desktop browser tab; ClawChat surfaces re-fetch the served <link>).
+      var link = document.querySelector('link[rel="icon"]');
+      if (!link) {
+        link = document.createElement("link");
+        link.rel = "icon";
+        link.type = "image/svg+xml";
+        document.head.appendChild(link);
+      }
+      link.href = src;
+    } else {
+      box.textContent = "✦";
+      hint.textContent = "还没有图标 —— 这个 liveware 在聊天里显示的是默认的 ✦。";
+    }
+  }
+
   function render(state) {
     document.getElementById("title").textContent = state.title || "";
     document.getElementById("body").textContent = state.body || "";
@@ -26,6 +56,7 @@
     // this liveware on every ClawChat surface.
     if (state.title) document.title = state.title;
     if (state.theme) document.documentElement.style.setProperty("--theme", state.theme);
+    applyIcon(state.iconVersion);
     applyAgentId(state.agentId);
   }
 
