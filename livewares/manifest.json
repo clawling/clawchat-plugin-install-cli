@@ -3,7 +3,7 @@
   "livewares": {
     "openclaw": {
       "liveware-sample": {
-        "version": "1.1.1",
+        "version": "1.1.2",
         "files": [
           {
             "path": "openclaw/liveware-sample/app.js",
@@ -12,12 +12,12 @@
           },
           {
             "path": "openclaw/liveware-sample/index.html",
-            "sha256": "46536a6cad7f19d344bcd901490a35a5e222a36e857e830fdceec2577ac50a22",
-            "bytes": 3111
+            "sha256": "2017afd604fe5f61fa564f3f274abda14b3ce74bc5d480ff59160f1e5aeae883",
+            "bytes": 4230
           },
           {
             "path": "openclaw/liveware-sample/liveware.json",
-            "sha256": "a2b91b9d75de82afda8bdf03e6f7983d533d95dd6c3df595bd19213c756829b6",
+            "sha256": "d16ff04b8f4414c831c65b1b21eb3b96d2bc0f76cb2b26f12000b6bc105d5e62",
             "bytes": 54
           },
           {
@@ -27,7 +27,7 @@
           },
           {
             "path": "openclaw/liveware-sample/state.json",
-            "sha256": "808ede325f6ea67c1fd1be726c41ebe8b61a4a16678c3a2ef214a0e5fb48c681",
+            "sha256": "2d52596d0aebbcc5a22232ec34609add0b7892c0ccf4c2a662d41d1d96598921",
             "bytes": 195
           }
         ]
@@ -35,7 +35,7 @@
     },
     "hermes": {
       "liveware-sample": {
-        "version": "1.1.1",
+        "version": "1.1.2",
         "files": [
           {
             "path": "openclaw/liveware-sample/app.js",
@@ -44,12 +44,12 @@
           },
           {
             "path": "openclaw/liveware-sample/index.html",
-            "sha256": "46536a6cad7f19d344bcd901490a35a5e222a36e857e830fdceec2577ac50a22",
-            "bytes": 3111
+            "sha256": "2017afd604fe5f61fa564f3f274abda14b3ce74bc5d480ff59160f1e5aeae883",
+            "bytes": 4230
           },
           {
             "path": "openclaw/liveware-sample/liveware.json",
-            "sha256": "a2b91b9d75de82afda8bdf03e6f7983d533d95dd6c3df595bd19213c756829b6",
+            "sha256": "d16ff04b8f4414c831c65b1b21eb3b96d2bc0f76cb2b26f12000b6bc105d5e62",
             "bytes": 54
           },
           {
@@ -59,7 +59,7 @@
           },
           {
             "path": "openclaw/liveware-sample/state.json",
-            "sha256": "808ede325f6ea67c1fd1be726c41ebe8b61a4a16678c3a2ef214a0e5fb48c681",
+            "sha256": "2d52596d0aebbcc5a22232ec34609add0b7892c0ccf4c2a662d41d1d96598921",
             "bytes": 195
           }
         ]

@@ -5,22 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Liveware Sample</title>
   <style>
+    /* Palette mirrors the ClawChat mobile app's design tokens
+       (clawchat-mobile core/theme/app_theme.dart — AppColors light/dark). */
+    :root {
+      --brand: #FF812A;          /* AppColors.brand */
+      --brand-light: #FFF3EA;    /* AppColors.brandLight — tint bg */
+      --bg: #FAFAF8;             /* AppColors.bgWarm */
+      --card: #FFFFFF;           /* AppColors.cardWhite */
+      --surface-muted: #F5F3EE;  /* AppColors.surfaceMuted — input bg */
+      --text-primary: #1A1A18;
+      --text-secondary: #5A5A55;
+      --line: #E8E6E0;           /* AppColors.border / divider */
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --brand-light: #4A2E18;
+        --bg: #1F1D1A;
+        --card: #28251F;
+        --surface-muted: #2F2C25;
+        --text-primary: #F4EFE7;
+        --text-secondary: #B3ADA2;
+        --line: #3A3630;
+      }
+    }
     body { margin: 0; font-family: system-ui, sans-serif; min-height: 100vh;
-           display: flex; align-items: center; justify-content: center; background: #f5f6fa; }
-    .card { background: #fff; border-radius: 16px; padding: 28px; max-width: 420px; width: 90%;
-            margin: 24px 0; box-shadow: 0 8px 30px rgba(0,0,0,.08); border-top: 6px solid var(--theme, #4f7cff); }
-    h1 { margin: 0 0 12px; font-size: 24px; }
-    p { color: #555; line-height: 1.6; margin: 0; }
+           display: flex; align-items: center; justify-content: center; background: var(--bg); }
+    .card { background: var(--card); border-radius: 16px; padding: 28px; max-width: 420px; width: 90%;
+            margin: 24px 0; box-shadow: 0 8px 30px rgba(0,0,0,.08); border-top: 6px solid var(--theme, var(--brand)); }
+    h1 { margin: 0 0 12px; font-size: 24px; color: var(--text-primary); }
+    p { color: var(--text-secondary); line-height: 1.6; margin: 0; }
     .row { display: flex; gap: 8px; margin-top: 12px; }
     button, a.btn { border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer;
-             background: var(--theme, #4f7cff); color: #fff; font-size: 15px;
+             background: var(--theme, var(--brand)); color: #fff; font-size: 15px;
              text-decoration: none; text-align: center; white-space: nowrap; }
-    input { flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 10px; font-size: 15px; min-width: 0; }
+    input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 15px;
+            min-width: 0; background: var(--surface-muted); color: var(--text-primary); }
     .lead { margin-top: 12px; font-size: 14px; }
-    section { margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; }
-    section h2 { margin: 0 0 8px; font-size: 16px; }
-    .hint { font-size: 13px; color: #888; margin-top: 8px; }
-    .say { background: #f0f3ff; border-radius: 8px; padding: 8px 10px; font-size: 14px; color: #333; margin-top: 8px; }
+    section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+    section h2 { margin: 0 0 8px; font-size: 16px; color: var(--text-primary); }
+    .hint { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+    .say { background: var(--brand-light); border-radius: 8px; padding: 8px 10px; font-size: 14px;
+           color: var(--text-primary); margin-top: 8px; }
   </style>
 </head>
 <body>
