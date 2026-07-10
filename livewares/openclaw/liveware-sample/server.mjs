@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // ClawChat liveware sample — zero-dependency demo web service.
 // Contract (consumed by the ClawChat plugin supervisor):
-//   node server.mjs --dir <dir> --port <startPort>
+//   node server.mjs --dir <dir> --port <startPort> [--agent-id <clawchat user id>]
 //   * prints ONE stdout line `{"port":N}` once listening
 //   * GET / , /app.js , /state , /sse , /healthz ; POST /event
 // state.json edits (by the agent) are pushed to the page via SSE;
 // page interactions are appended to events.jsonl (read by the agent).
+// --agent-id (the agent's own ClawChat user id) is merged into /state
+// responses and SSE frames as `agentId` — never written into state.json —
+// so the page can mint its back-to-chat deep link.
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -17,6 +20,12 @@ function arg(name, fallback) {
 
 const dir = path.resolve(arg("dir", "."));
 const startPort = Number(arg("port", "43110"));
+const agentId = String(arg("agent-id", "")).trim();
+
+function stateWithMeta(state) {
+  return agentId ? { ...state, agentId } : state;
+}
+
 const STATE_FILE = path.join(dir, "state.json");
 const EVENTS_FILE = path.join(dir, "events.jsonl");
 const MAX_EVENT_BYTES = 64 * 1024;
@@ -71,7 +80,7 @@ fs.watch(dir, (_event, filename) => {
   notifyTimer = setTimeout(() => {
     const state = readStateJson();
     if (state == null) return;
-    const frame = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
+    const frame = `event: state\ndata: ${JSON.stringify(stateWithMeta(state))}\n\n`;
     for (const res of sseClients) res.write(frame);
   }, 100);
 });
@@ -91,7 +100,13 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && url === "/") return serveFile(res, "index.html", "text/html; charset=utf-8");
   if (req.method === "GET" && url === "/app.js") return serveFile(res, "app.js", "text/javascript; charset=utf-8");
-  if (req.method === "GET" && url === "/state") return serveFile(res, "state.json", "application/json; charset=utf-8");
+  if (req.method === "GET" && url === "/state") {
+    const state = readStateJson();
+    if (state == null) return serveFile(res, "state.json", "application/json; charset=utf-8");
+    return res
+      .writeHead(200, { "content-type": "application/json; charset=utf-8" })
+      .end(JSON.stringify(stateWithMeta(state)));
+  }
   if (req.method === "GET" && url === "/healthz") {
     return res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
   }
