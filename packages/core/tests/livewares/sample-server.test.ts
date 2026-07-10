@@ -425,4 +425,18 @@ describe("liveware-sample server.mjs", () => {
     const stateBad = await (await fetch(`http://127.0.0.1:${portBad}/state`)).json();
     expect("iconVersion" in stateBad).toBe(false);
   });
+
+  it("never streams raw state.json bytes from /state when the file is unparsable", async () => {
+    const port = await startSample((dir) => {
+      fs.writeFileSync(
+        path.join(dir, "state.json"),
+        '{not json "iconSvg": "<svg onload=evil()>"',
+      );
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/state`);
+    expect(res.status).toBe(503);
+    const body = await res.text();
+    expect(body).not.toContain("iconSvg");
+    expect(body).not.toContain("<svg");
+  });
 });

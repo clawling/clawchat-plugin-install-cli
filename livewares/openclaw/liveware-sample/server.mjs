@@ -178,7 +178,14 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && url === "/app.js") return serveFile(res, "app.js", "text/javascript; charset=utf-8");
   if (req.method === "GET" && url === "/state") {
     const state = readStateJson();
-    if (state == null) return serveFile(res, "state.json", "application/json; charset=utf-8");
+    // state.json may be mid-write (torn read). NEVER stream the raw file —
+    // it bypasses stateWithMeta's iconSvg/agentId stripping. A 503 keeps the
+    // page on its existing catch/SSE-recovery path.
+    if (state == null) {
+      return res
+        .writeHead(503, { "content-type": "application/json; charset=utf-8" })
+        .end('{"error":"state unavailable"}');
+    }
     return res
       .writeHead(200, { "content-type": "application/json; charset=utf-8" })
       .end(JSON.stringify(stateWithMeta(state)));
