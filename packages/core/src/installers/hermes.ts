@@ -17,13 +17,31 @@ import {
 import { isTransientCommandError, withRetry } from "./retry";
 import { captureCommand, type CommandCapturer, type CommandRunner, runCommand } from "./run";
 import { applyBaseUrlOverrides, type BaseUrlWriter, type InstallActionResult, type InstallProgressReporter, type InstallerOptions } from "./types";
+import { resolveHermesProfileHome, withHermesProfileArgs } from "./hermes-profile";
 
-const defaultHermesBaseUrlWriter: BaseUrlWriter = (values) =>
-  writeHermesBaseUrls({
-    CLAWCHAT_BASE_URL: values.apiBaseUrl,
-    CLAWCHAT_WEBSOCKET_URL: values.wsBaseUrl,
-    CLAWCHAT_MEDIA_BASE_URL: values.mediaBaseUrl,
-  });
+function hermesBaseUrlWriter(profileHome: string): BaseUrlWriter {
+  return (values) =>
+    writeHermesBaseUrls(
+      {
+        CLAWCHAT_BASE_URL: values.apiBaseUrl,
+        CLAWCHAT_WEBSOCKET_URL: values.wsBaseUrl,
+        CLAWCHAT_MEDIA_BASE_URL: values.mediaBaseUrl,
+      },
+      { env: { HERMES_HOME: profileHome } },
+    );
+}
+
+function hermesRunners(options: InstallerOptions): { run: CommandRunner; capture: CommandCapturer } {
+  const baseRun = options.run ?? runCommand;
+  const baseCapture = options.capture ?? captureCommand;
+  const profile = options.profile;
+  const mapArgs = (cmd: string, args: readonly string[]): string[] =>
+    cmd === "hermes" ? withHermesProfileArgs(profile, args) : [...args];
+  return {
+    run: (cmd, args, o) => baseRun(cmd, mapArgs(cmd, args), o),
+    capture: (cmd, args, o) => baseCapture(cmd, mapArgs(cmd, args), o),
+  };
+}
 
 const HERMES_FORCE_REPAIR_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes --force";
 const HERMES_INSTALL_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes";
@@ -236,8 +254,7 @@ function installCanonical(run: CommandRunner, force: boolean, progress?: Install
 }
 
 async function readHermesInstallerContext(options: InstallerOptions = {}): Promise<HermesInstallerContext> {
-  const run = options.run ?? runCommand;
-  const capture = options.capture ?? captureCommand;
+  const { run, capture } = hermesRunners(options);
   const force = options.force ?? false;
   const progress = options.onProgress;
 
@@ -258,8 +275,7 @@ async function readHermesInstallerContext(options: InstallerOptions = {}): Promi
 }
 
 async function installHermesFromRef(options: InstallerOptions, action: "installed" | "updated" = "installed"): Promise<InstallActionResult> {
-  const run = options.run ?? runCommand;
-  const capture = options.capture ?? captureCommand;
+  const { run, capture } = hermesRunners(options);
   const progress = options.onProgress;
   const spec = options.ref as string;
   const parsed = parseHermesGitRef(spec);
@@ -325,7 +341,7 @@ async function maybeActivateHermes(options: InstallerOptions, result: InstallAct
   if (!code) {
     return result;
   }
-  const run = options.run ?? runCommand;
+  const { run } = hermesRunners(options);
   options.onProgress?.("activating ClawChat with the provided code");
   await run("hermes", ["clawchat", "activate", code], { timeoutMs: HERMES_ACTIVATE_TIMEOUT_MS });
   options.onProgress?.("activation complete");
@@ -344,7 +360,10 @@ export async function installHermesPlugin(options: InstallerOptions = {}): Promi
 }
 
 async function installHermesPluginCore(options: InstallerOptions = {}): Promise<InstallActionResult> {
-  applyBaseUrlOverrides(options, defaultHermesBaseUrlWriter);
+  applyBaseUrlOverrides(
+    options,
+    hermesBaseUrlWriter(resolveHermesProfileHome(options.profile, { homeDir: options.homeDir })),
+  );
   if (options.ref) {
     return installHermesFromRef(options);
   }
@@ -420,7 +439,10 @@ export async function updateHermesPlugin(options: InstallerOptions = {}): Promis
 }
 
 async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<InstallActionResult> {
-  applyBaseUrlOverrides(options, defaultHermesBaseUrlWriter);
+  applyBaseUrlOverrides(
+    options,
+    hermesBaseUrlWriter(resolveHermesProfileHome(options.profile, { homeDir: options.homeDir })),
+  );
   if (options.ref) {
     return installHermesFromRef(options, "updated");
   }

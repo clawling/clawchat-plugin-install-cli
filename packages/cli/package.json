@@ -1,6 +1,6 @@
 {
   "name": "@clawling/clawchat-plugin-install-cli",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "CLI for ClawChat plugin installation and updates.",
   "author": "CLAWLING PTE. LTD.",
   "homepage": "https://github.com/clawling/clawchat-plugin-install-cli#readme",

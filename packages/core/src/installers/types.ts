@@ -56,6 +56,13 @@ export interface InstallerOptions {
    * instead of a separate agent-driven step. Single-use: it is never retried.
    */
   activateCode?: string;
+  /**
+   * Target Hermes profile name. When set to a non-default profile, the Hermes
+   * installer passes `-p <profile>` to every delegated `hermes` call and points
+   * base-url/.env writes at that profile's HERMES_HOME. Unset / "default" keeps
+   * the legacy ambient-HERMES_HOME behavior. Hermes-only; ignored for OpenClaw.
+   */
+  profile?: string;
 }
 
 export function applyBaseUrlOverrides(options: InstallerOptions, defaultWriter: BaseUrlWriter): void {

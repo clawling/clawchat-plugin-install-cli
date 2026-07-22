@@ -33,6 +33,11 @@ For Hermes, `install` first fetches the remote `plugin.yaml`, checks that
 `hermes plugins install clawling/clawchat-plugin-hermes-agent --enable` (or
 `hermes plugins update clawchat` if a newer version is needed).
 
+For Hermes, `--profile <name>` (Hermes only) targets a specific Hermes profile:
+the CLI passes `-p <name>` to the delegated `hermes` calls and writes base URLs
+to that profile's `$HERMES_HOME/.env`. Omit it to target the active/default
+profile.
+
 The published npm package does not bundle a skill of its own — each agent
 adapter ships a snapshot of its host's ClawChat skill markdown for
 offline/first-run fallback. This repository, however, **is** the canonical host
