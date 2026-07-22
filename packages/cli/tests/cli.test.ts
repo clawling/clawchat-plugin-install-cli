@@ -211,6 +211,6 @@ describe("runClawchatCli install/update", () => {
 
     expect(code).toBe(0);
     expect(installHermesPlugin).toHaveBeenCalledTimes(1);
-    expect(installHermesPlugin.mock.calls[0][0]).toMatchObject({ profile: "coder" });
+    expect(installHermesPlugin).toHaveBeenCalledWith(expect.objectContaining({ profile: "coder" }));
   });
 });
