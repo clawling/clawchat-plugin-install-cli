@@ -193,4 +193,24 @@ describe("runClawchatCli install/update", () => {
       }),
     );
   });
+
+  it("forwards --profile to the Hermes installer", async () => {
+    const io = createIo();
+    const installHermesPlugin = vi.fn(async () => ({
+      kind: "plugin" as const,
+      target: "hermes" as const,
+      status: "installed" as const,
+      version: "1.0.0",
+      previousVersion: null,
+    }));
+
+    const code = await runClawchatCli(
+      ["install", "--target", "hermes", "--profile", "coder"],
+      { ...io.io, installHermesPlugin },
+    );
+
+    expect(code).toBe(0);
+    expect(installHermesPlugin).toHaveBeenCalledTimes(1);
+    expect(installHermesPlugin.mock.calls[0][0]).toMatchObject({ profile: "coder" });
+  });
 });
