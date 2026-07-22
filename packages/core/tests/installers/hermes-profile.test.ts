@@ -50,9 +50,15 @@ describe("resolveHermesProfileHome", () => {
     );
   });
 
-  it("resolves ~/.hermes/profiles/<name> for a named profile", () => {
-    expect(resolveHermesProfileHome("coder", { homeDir, env: { HERMES_HOME: "/ignored" } })).toBe(
+  it("resolves <homeDir>/.hermes/profiles/<name> for a named profile with no HERMES_HOME", () => {
+    expect(resolveHermesProfileHome("coder", { homeDir, env: {} })).toBe(
       path.join(homeDir, ".hermes", "profiles", "coder"),
+    );
+  });
+
+  it("honors a custom base HERMES_HOME for a named profile", () => {
+    expect(resolveHermesProfileHome("coder", { homeDir, env: { HERMES_HOME: "/custom/root" } })).toBe(
+      path.join("/custom/root", "profiles", "coder"),
     );
   });
 

@@ -22,7 +22,9 @@ export function withHermesProfileArgs(profile: string | undefined, args: readonl
 /**
  * Resolve a profile name to its HERMES_HOME directory, mirroring Hermes'
  * layout: the default profile is `~/.hermes` (or an explicit `HERMES_HOME`);
- * a named profile is `~/.hermes/profiles/<name>`.
+ * a named profile is `~/.hermes/profiles/<name>`. A custom `HERMES_HOME`
+ * (trimmed, if set) is honored as the base root for both the default and
+ * named profile cases.
  */
 export function resolveHermesProfileHome(
   profile: string | undefined,
@@ -30,8 +32,9 @@ export function resolveHermesProfileHome(
 ): string {
   const env = opts.env ?? process.env;
   const homeDir = opts.homeDir ?? os.homedir();
+  const baseRoot = env.HERMES_HOME?.trim() || path.join(homeDir, ".hermes");
   if (isDefaultProfile(profile)) {
-    return env.HERMES_HOME?.trim() || path.join(homeDir, ".hermes");
+    return baseRoot;
   }
-  return path.join(homeDir, ".hermes", "profiles", (profile as string).trim());
+  return path.join(baseRoot, "profiles", (profile as string).trim());
 }
