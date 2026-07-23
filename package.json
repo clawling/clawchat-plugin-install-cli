@@ -25,10 +25,16 @@
     "@types/node": "^20.11.0",
     "tsdown": "^0.21.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.4.0"
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=18"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "^6.4.3",
+      "esbuild": "^0.25.0"
+    }
   },
   "license": "MIT"
 }

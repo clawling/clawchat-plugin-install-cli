@@ -30,7 +30,7 @@ afterEach(() => {
 describe("upload methods", () => {
   it("uploads avatar image as multipart field file", async () => {
     const filePath = tmpFile();
-    const fetchFn = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>(
+    const fetchFn = vi.fn<typeof fetch>(
       async () => jsonResponse({ url: "http://file" }),
     );
 
@@ -53,7 +53,7 @@ describe("upload methods", () => {
 
   it("uploads media file to /media/upload", async () => {
     const filePath = tmpFile();
-    const fetchFn = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>(
+    const fetchFn = vi.fn<typeof fetch>(
       async () => jsonResponse({ url: "http://file" }),
     );
 

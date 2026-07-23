@@ -1,2 +1,9 @@
 packages:
   - "packages/*"
+
+# Security overrides: force patched versions of transitive dev-tooling deps
+# (vite/esbuild come in via vitest). Duplicated in package.json "pnpm.overrides"
+# so both pnpm 9 (reads package.json) and pnpm 10+ (reads this file) honor them.
+overrides:
+  vite: "^6.4.3"
+  esbuild: "^0.25.0"
