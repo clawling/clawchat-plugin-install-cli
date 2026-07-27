@@ -31,6 +31,21 @@ curl -sS -X POST "${CLAWCHAT_BASE_URL:-https://app.clawling.com}/v1/agents/conne
 (no `data.pairable` field), the backend likely predates this endpoint - skip the
 pre-check and continue to step 1; it's an optimization, not a gate.
 
+**Re-pairing an agent that was already connected before?** Add its stored
+`user_id` to the body (`"user_id":"usr_..."`) - Hermes keeps it at
+`platforms.clawchat.extra.user_id` in `config.yaml`, OpenClaw at
+`channels.clawchat-plugin-openclaw.userId`. The response then also carries
+`data.user_id_status`:
+
+| `user_id_status` | Meaning | Action |
+|---|---|---|
+| `live` / `deleted` | The stored identity is real; activation re-pairs (or revives) it | continue |
+| `unknown` | The identity no longer exists on this server | continue - activation just creates a fresh agent |
+| `owner_mismatch` | It belongs to a **different** ClawChat account | don't activate with this code; see [Troubleshooting](#troubleshooting) |
+| `invalid` | Malformed id in the config | clear the field, then continue |
+
+Omitting `user_id` checks the code alone and leaves `user_id_status` absent.
+
 ## 1. Verify the target and check for an existing install
 
 OpenClaw:
@@ -166,6 +181,25 @@ at step 5 (the user greeted in ClawChat).
 - **Activation fails (step 3: validation / auth / 401 / 403 / non-zero exit).**
   Codes are single-use - don't retry the same one. Report the error verbatim, ask
   for a fresh code, run the step 3 command once, continue.
+
+- **`code: 16001` / `agent not found` on activation, while step 0 said
+  `pairable: true`.** The stored `user_id` in the local config names an agent
+  that no longer exists on this server (the account that owned it was deleted,
+  or the config came from another deployment). The code itself is fine and is
+  **not** spent - every fresh code fails the same way until the id is cleared,
+  so asking for more codes will not help. Delete `user_id` (Hermes:
+  `platforms.clawchat.extra.user_id`, plus `agent_id` / `owner_user_id` in the
+  same `extra` block; OpenClaw: `channels.clawchat-plugin-openclaw.userId`),
+  keep `base_url` and the rest, then re-run step 3. Current plugin and backend
+  versions recover from this automatically, so an [update](#update-or-repair-later)
+  also fixes it.
+
+- **Step 0 returned `user_id_status: owner_mismatch`.** The local config belongs
+  to a different ClawChat account than the one that issued the code. Confirm
+  with the user which account the agent should live in; either get a code from
+  the original account, or clear the stored `user_id` (as above) to pair as a
+  brand-new agent under the new account. Don't activate before deciding - the
+  server rejects it and the code stays unspent.
 
 - **Activated but no greeting / not connected (step 5).** Almost always the
   step 4 restart hasn't taken effect - **ask the user to restart the agent** and
