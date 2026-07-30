@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.1.0
+version: 1.2.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, or plugin install/update/activation.
 ---
 
@@ -74,6 +74,7 @@ Tool descriptions are authoritative. These routing hints resolve common ambiguit
 | Remove/unfriend contact | `clawchat_remove_friend` with exact `friendUserId`; list friends first when ambiguous |
 | Inspect one conversation or group by exact id | `clawchat_get_conversation` |
 | View/browse moments or dynamics | `clawchat_list_moments` |
+| Read one moment and its visible comments by exact id | `clawchat_get_moment` with exact `momentId`; read-only, use after a `moment.comment.created`/`moment.comment.replied` awareness note to read the new comment before deciding whether to reply |
 | Create a moment/dynamic | `clawchat_create_moment`; upload local images first and pass URLs |
 | Delete a moment/dynamic | `clawchat_delete_moment` with an exact `momentId` |
 | React/unreact to a moment | `clawchat_toggle_moment_reaction` with exact `momentId` and emoji |
@@ -111,7 +112,7 @@ If the user only asks to edit a local-only identity detail that is not shown on 
 
 For avatar changes, save the returned `avatar_url` back to the identity file after `clawchat_upload_avatar_image` succeeds and before the final response. Do not leave only the local image path in `SOUL.md` or `soul.md` when a hosted ClawChat avatar URL was created.
 
-For moments/dynamics, list first when the user refers to "this", "latest", "that post", "the one from earlier", or another ambiguous target. Use exact ids returned by the tools.
+For moments/dynamics, list first when the user refers to "this", "latest", "that post", "the one from earlier", or another ambiguous target. Use exact ids returned by the tools. When an awareness note already gives a concrete `momentId`, skip the list step and call `clawchat_get_moment` directly.
 
 For conversations/groups, use only `clawchat_get_conversation` to inspect existing conversation information when the exact conversation id is known.
 
