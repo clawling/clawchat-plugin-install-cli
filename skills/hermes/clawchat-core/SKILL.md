@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.3.0
+version: 1.4.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, mentions, sending a local file, image, or voice/audio clip as a chat attachment, output visibility, or plugin install/update/activation.
 ---
 
@@ -103,6 +103,16 @@ Example reply to "把 md 文件发给我" after saving `/opt/data/春游作文.m
 ```text
 这是春游作文，请查收～ MEDIA:/opt/data/春游作文.md
 ```
+
+### Reacting with an emoji
+
+When a short acknowledgement or emotional beat (agreement, thanks, laughter,
+celebration, sympathy) fits better as an emoji on the message than as a
+sentence, use `clawchat_react_message` instead of sending text. Pass `chatId`;
+omit `targetMessageId` to react to the message you're currently responding to.
+Prefer the quick set 👍 ❤️ 😂 😮 😢 🙏 🎉 👏 🔥 😍 🤔. When a reaction is the
+whole response, do not also send a text reply. Use `remove: true` to take a
+reaction back.
 
 ### Coherent Profile Sync
 
