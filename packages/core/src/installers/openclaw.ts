@@ -47,7 +47,12 @@ function normalizePathOutput(value: string): string {
 }
 
 function isStaleContainerWorkspace(workspace: string): boolean {
-  return normalizePathOutput(workspace) === CONTAINER_OPENCLAW_WORKSPACE && process.env.HOME !== "/home/node";
+  // The container workspace path is only meaningful inside the OpenClaw image,
+  // whose home is /home/node. Anywhere else it is a leftover from a config
+  // copied off that image. Read USERPROFILE too: Windows normally leaves HOME
+  // unset, and an unset HOME must not be mistaken for "we are that container".
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  return normalizePathOutput(workspace) === CONTAINER_OPENCLAW_WORKSPACE && home !== "/home/node";
 }
 
 async function repairStaleOpenClawWorkspace(run: CommandRunner, capture: CommandCapturer): Promise<void> {

@@ -1,0 +1,19 @@
+# Pin LF on checkout so a Windows clone with the default core.autocrlf=true does
+# not rewrite files whose bytes matter: the skills/ tree is hashed against
+# livewares/manifest.json and skills/manifest.json (sha256 over raw bytes), and
+# install-clawchat.sh must stay LF to run under bash / WSL / Git Bash.
+* text=auto eol=lf
+
+# The PowerShell installer is the one file Windows users may open in Notepad;
+# CRLF is idiomatic there and PowerShell accepts either.
+*.ps1 text eol=crlf
+
+# Never line-ending normalise these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.tgz binary
+*.zip binary
