@@ -21,13 +21,22 @@ function hermesList(version: string | null, status = "enabled") {
  */
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/**
+ * Proxy env vars select the curl transport, and a developer machine or CI image
+ * may well have them set — without this the suite silently exercises a
+ * different code path there than it does on a clean host.
+ */
+const PROXY_ENV_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"];
+
 beforeEach(() => {
+  for (const name of PROXY_ENV_VARS) vi.stubEnv(name, undefined as unknown as string);
   fetchMock = vi.fn(async () => new Response(pluginYaml()));
   vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 function createCapture(installedVersion: string | null, hostVersion = "Hermes Agent v0.12.0\n", status = "enabled") {
@@ -113,6 +122,29 @@ describe("Hermes installer", () => {
     expect(fetchMock).toHaveBeenCalledWith(HERMES_PLUGIN_YAML_URL, expect.anything());
     expect(capture.mock.calls.some((c) => c[0] === "curl")).toBe(false);
     expectRemoteInstall(run, { force: false });
+  });
+
+  it("falls back to curl when a proxy is configured, which fetch would ignore", async () => {
+    // undici does not read http_proxy/HTTPS_PROXY. On a locked-down network
+    // that is not a missing optimisation — it is a lost route, and the install
+    // fails where curl would have succeeded.
+    const run = vi.fn(async () => undefined);
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "curl") return pluginYaml();
+      if (cmd === "hermes" && args[0] === "--version") return "Hermes Agent v0.12.0\n";
+      if (cmd === "hermes" && args.join(" ") === "plugins list") return "";
+      throw new Error(`unexpected capture: ${cmd} ${args.join(" ")}`);
+    });
+
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.internal:3128");
+    try {
+      await expect(installHermesPlugin({ run, capture })).resolves.toMatchObject({ status: "installed" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(capture.mock.calls.some((c) => c[0] === "curl" && c[1].includes(HERMES_PLUGIN_YAML_URL))).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("still activates after a skipped canonical install when --activate is given", async () => {

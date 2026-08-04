@@ -8,12 +8,18 @@ let home: string;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "hermes-profile-"));
+  // A proxy in the ambient environment routes the metadata read through curl
+  // instead of fetch; clear them so the transport is the same on every host.
+  for (const name of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]) {
+    vi.stubEnv(name, undefined as unknown as string);
+  }
   // A minimal plugin.yaml so metadata parsing succeeds without network.
   vi.stubGlobal("fetch", vi.fn(async () => new Response("version: 9.9.9\n")));
 });
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 function fakeCapture() {

@@ -52,11 +52,21 @@ const HERMES_INSTALL_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cl
 // network fails fast (bounded retries with short per-attempt caps) instead of
 // hanging on OS/git defaults. Worst-case total stays comfortably under 3 min.
 
-/** Per-attempt cap on the plugin.yaml read (was curl's `--max-time 15`). */
+/** Per-attempt cap on the plugin.yaml read (matches curl's `--max-time 15`). */
 const PLUGIN_YAML_TIMEOUT_MS = 15_000;
 /** One retry, 2s apart — the same budget curl's `--retry 1 --retry-delay 2` had. */
 const PLUGIN_YAML_RETRIES = 1;
 const PLUGIN_YAML_BACKOFF_MS = [2_000] as const;
+/** curl flags for the proxied fallback: fail fast, with curl's own bounded retry. */
+const CURL_NET_OPTS = [
+  "--connect-timeout", "5",
+  "--max-time", "15",
+  "--retry", "1",
+  "--retry-delay", "2",
+  "--retry-connrefused",
+] as const;
+/** Backstop above curl's own --max-time*(--retry+1)+delay budget. */
+const CURL_TIMEOUT_MS = 45_000;
 /** Fast local subprocesses (version / list / enable). */
 const HERMES_FAST_TIMEOUT_MS = 30_000;
 /** `plugins update` does a network git pull. */
@@ -188,14 +198,38 @@ async function fetchPluginYamlOnce(url: string, fetchFn: FetchLike): Promise<str
   return await response.text();
 }
 
+/** Proxy env vars curl honours and Node's global fetch does not. */
+const PROXY_ENV_VARS = [
+  "HTTPS_PROXY", "https_proxy",
+  "HTTP_PROXY", "http_proxy",
+  "ALL_PROXY", "all_proxy",
+] as const;
+
+export function isProxyConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return PROXY_ENV_VARS.some((name) => (env[name] ?? "").trim() !== "");
+}
+
 /**
- * Read the remote plugin.yaml, failing fast on a dead network with bounded
- * retry. Uses Node's own `fetch` rather than spawning `curl`: curl is missing on
- * Windows builds older than 10/1803, and shelling out to fetch a constant URL
- * bought nothing over an in-process HTTP call.
+ * Read the remote plugin.yaml, failing fast on a dead network with bounded retry.
+ *
+ * Prefers Node's own `fetch`: curl is missing on Windows builds older than
+ * 10/1803, and shelling out to GET a constant URL buys nothing.
+ *
+ * EXCEPT behind a proxy. undici does not read http_proxy/HTTPS_PROXY, and
+ * NODE_USE_ENV_PROXY is Node 24+ while this package supports 18+ — so on a
+ * locked-down network (the case install.md explicitly documents) fetch would not
+ * merely skip the proxy, it would lose egress altogether and fail an install
+ * that used to work. curl honours those vars, so it stays the transport for
+ * exactly that case.
  */
-function fetchPluginYaml(url: string, fetchFn: FetchLike = fetch): Promise<string> {
-  return withRetry(() => fetchPluginYamlOnce(url, fetchFn), {
+function fetchPluginYaml(
+  url: string,
+  deps: { fetchFn?: FetchLike; capture: CommandCapturer },
+): Promise<string> {
+  if (!deps.fetchFn && isProxyConfigured()) {
+    return deps.capture("curl", ["-fsL", ...CURL_NET_OPTS, url], { timeoutMs: CURL_TIMEOUT_MS });
+  }
+  return withRetry(() => fetchPluginYamlOnce(url, deps.fetchFn ?? fetch), {
     retries: PLUGIN_YAML_RETRIES,
     backoffMs: PLUGIN_YAML_BACKOFF_MS,
     shouldRetry: (err) =>
@@ -294,7 +328,7 @@ async function readHermesInstallerContext(options: InstallerOptions = {}): Promi
   const progress = options.onProgress;
 
   progress?.("Checking Hermes plugin metadata...");
-  const pluginYaml = await fetchPluginYaml(HERMES_PLUGIN_YAML_URL, options.fetchFn);
+  const pluginYaml = await fetchPluginYaml(HERMES_PLUGIN_YAML_URL, { fetchFn: options.fetchFn, capture });
   const artifact = parseHermesPluginYaml(pluginYaml);
   progress?.(`Downloaded Hermes plugin metadata ${artifact.version}`);
 

@@ -128,7 +128,11 @@ installer should set on the user's behalf.
    `https://raw.githubusercontent.com/clawling/clawchat-plugin-hermes-agent/main/plugin.yaml`
    (constant `HERMES_PLUGIN_YAML_URL`) with Node's own `fetch` (15s per-attempt
    cap, one retry; 4xx is not retried). Injectable via `InstallerOptions.fetchFn`.
-   Deliberately not `curl`: it is absent on Windows builds older than 10/1803.
+   Preferred over `curl`, which is absent on Windows builds older than 10/1803 —
+   **except** when a proxy env var (`HTTPS_PROXY`, `http_proxy`, `ALL_PROXY`, …)
+   is set, which falls back to `curl -fsL`. undici does not read those vars and
+   `NODE_USE_ENV_PROXY` needs Node 24+, so on a locked-down network `fetch`
+   would lose egress entirely rather than merely skip the proxy.
 2. Parse the artifact `version` and the optional `requires.hermes` range
    (only `>=X.Y[.Z[.W]]` is supported — see `assertVersionSatisfiesRange` in
    `packages/core/src/installers/metadata.ts`).
