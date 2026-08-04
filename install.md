@@ -8,6 +8,17 @@ ClawChat is a chat app for talking to supported agent runtimes. These steps
 install and pair the ClawChat plugin for **one** target - `openclaw` **or**
 `hermes`. Each code block is one terminal call; use your target's block.
 
+**On Windows, use PowerShell** - not `cmd.exe`. The `npx`, `openclaw`, and
+`hermes` commands below are identical there; only three blocks differ and each
+has a *(Windows)* twin right next to the bash one: the step 0 pre-check, the
+Hermes venv activation in step 1, and the Hermes 0.12 fallback in step 3. Never
+use PowerShell's `curl` - it is an alias for `Invoke-WebRequest` and takes
+entirely different flags. If you would rather not run steps 1-2 by hand, the
+one-shot script `install-clawchat.ps1` published alongside this guide does them
+for you (bash equivalent: `install-clawchat.sh`); run it as
+`powershell -ExecutionPolicy Bypass -File .\install-clawchat.ps1 <openclaw|hermes>`,
+then pick up at step 3.
+
 **Goal:** a live, paired connection where the agent **sends the user a first
 greeting inside ClawChat**. That arriving message - not an "activation complete"
 line in the terminal - is the success signal. If a step fails, don't stop: go to
@@ -25,11 +36,24 @@ curl -sS -X POST "${CLAWCHAT_BASE_URL:-https://app.clawling.com}/v1/agents/conne
   -d '{"code":"CLAWCHAT_CODE_GOES_HERE","platform":"<openclaw|hermes>"}'
 ```
 
+*(Windows)*
+
+```powershell
+$base = if ($env:CLAWCHAT_BASE_URL) { $env:CLAWCHAT_BASE_URL } else { 'https://app.clawling.com' }
+$body = @{ code = 'CLAWCHAT_CODE_GOES_HERE'; platform = '<openclaw|hermes>' } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Post -Uri "$base/v1/agents/connect/check" `
+  -ContentType 'application/json' `
+  -Headers @{ 'X-Device-Id' = 'clawchat-plugin-<openclaw|hermes>' } `
+  -Body $body | ConvertTo-Json -Depth 5
+```
+
 `data.pairable: true` -> continue. `false` -> don't install; read `data.status`
 (`expired` / `invalid` -> ask for a fresh code and re-check; `paired` -> see
-[Troubleshooting](#troubleshooting)). If the `curl` errors or returns HTTP 404
+[Troubleshooting](#troubleshooting)). If the request errors or returns HTTP 404
 (no `data.pairable` field), the backend likely predates this endpoint - skip the
-pre-check and continue to step 1; it's an optimization, not a gate.
+pre-check and continue to step 1; it's an optimization, not a gate. On Windows
+note that `Invoke-RestMethod` **throws** on a 404 instead of printing a body -
+that throw is the same "skip the pre-check" signal, not a reason to stop.
 
 **Re-pairing an agent that was already connected before?** Add its stored
 `user_id` to the body (`"user_id":"usr_..."`) - Hermes keeps it at
@@ -62,6 +86,17 @@ if ! command -v hermes >/dev/null 2>&1; then
   elif [ -d "$HOME/.hermes/hermes-agent/.venv/bin" ]; then . "$HOME/.hermes/hermes-agent/.venv/bin/activate"
   fi
 fi
+hermes --version
+```
+
+*(Windows)* - the venv lives in `.venv\Scripts\`, not `.venv/bin/`:
+
+```powershell
+if (-not (Get-Command hermes -ErrorAction SilentlyContinue)) {
+  $root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:USERPROFILE '.hermes' }
+  $scripts = Join-Path $root 'hermes-agent\.venv\Scripts'
+  if (Test-Path $scripts) { $env:PATH = "$scripts;$env:PATH" }
+}
 hermes --version
 ```
 
@@ -127,6 +162,13 @@ step - only with a fresh code): add `--activate "CLAWCHAT_CODE_GOES_HERE"` to th
 step 2 `install` command. Hermes 0.12 fallback:
 `python "${HERMES_HOME:-$HOME/.hermes}/plugins/clawchat/clawchat_cli.py" activate CLAWCHAT_CODE_GOES_HERE`.
 
+*(Windows)* same 0.12 fallback:
+
+```powershell
+$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:USERPROFILE '.hermes' }
+python (Join-Path $root 'plugins\clawchat\clawchat_cli.py') activate CLAWCHAT_CODE_GOES_HERE
+```
+
 ## 4. Restart the agent - the user must do this
 
 **Required.** ClawChat's tools and live connection only become usable after the
@@ -168,7 +210,8 @@ at step 5 (the user greeted in ClawChat).
   code or repair the existing agent (handle as the activation/auth case below).
 
 - **Target command missing (step 1).** Source the Hermes venv
-  (`source /opt/hermes/.venv/bin/activate`) or call the absolute binary, then
+  (`source /opt/hermes/.venv/bin/activate`; on Windows use the step 1 *(Windows)*
+  block, which puts `.venv\Scripts` on `PATH`) or call the absolute binary, then
   retry. If the runtime genuinely isn't installed, stop and report it - don't
   install the other target instead.
 

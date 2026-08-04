@@ -16,7 +16,10 @@ delivery pipeline ships to its consumers.
 `install.md` is uploaded to a public R2 bucket by
 [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh).
 The script copies the local file to the key `clawchat/install.md` under the
-configured bucket. The release procedure in [`release.md`](release.md)
+configured bucket, alongside the two one-shot installer scripts —
+`clawchat/install-clawchat.sh` and `clawchat/install-clawchat.ps1`. All three
+are published together; adding a step to the guide that a script also performs
+means updating both scripts. The release procedure in [`release.md`](release.md)
 describes when to run this upload.
 
 The bucket configuration lives in `scripts/.env.r2` (template:
@@ -48,6 +51,13 @@ documented repair path.
 - `install.md` is the canonical wording for everything end-users see at
   install time. Keep it short, imperative, and target-symmetric (OpenClaw
   block + Hermes block per step).
+- Windows readers use PowerShell. Do **not** add a *(Windows)* twin for a
+  block that runs verbatim there — `npx`, `openclaw`, and `hermes` calls all
+  do. Only shell-specific constructs need one: POSIX parameter expansion
+  (`${VAR:-default}`), `command -v`, `source`, `.venv/bin` paths, and `curl`
+  (a `Invoke-WebRequest` alias in PowerShell, with different flags). The
+  intro lists which blocks have a twin — keep that list in sync when adding
+  or removing one.
 - Any factual change (commands, flags, environment variables, activation
   syntax) must match the actual CLI behavior in `packages/cli/src/cli.ts`
   and the installers in `packages/core/src/installers/`. The CLI-facing

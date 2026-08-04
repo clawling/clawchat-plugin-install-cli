@@ -10,9 +10,10 @@ usage() {
   cat >&2 <<'EOF'
 Usage: scripts/upload-install-md-to-r2.sh [--no-upload]
 
-Uploads install.md and install-clawchat.sh to the ClawChat R2 public prefix:
+Uploads install.md and both one-shot install scripts to the ClawChat R2 public prefix:
   clawchat/install.md
   clawchat/install-clawchat.sh
+  clawchat/install-clawchat.ps1
 
 Environment:
   AWS_ACCESS_KEY_ID      required, or set in scripts/.env.r2
@@ -56,8 +57,10 @@ fi
 
 SOURCE_PATH="$REPO_ROOT/install.md"
 SCRIPT_SOURCE_PATH="$REPO_ROOT/scripts/install-clawchat.sh"
+PS_SCRIPT_SOURCE_PATH="$REPO_ROOT/scripts/install-clawchat.ps1"
 OBJECT_KEY="${R2_PREFIX%/}/install.md"
 SCRIPT_OBJECT_KEY="${R2_PREFIX%/}/install-clawchat.sh"
+PS_SCRIPT_OBJECT_KEY="${R2_PREFIX%/}/install-clawchat.ps1"
 
 if [[ ! -f "$SOURCE_PATH" ]]; then
   echo "install.md not found at $SOURCE_PATH" >&2
@@ -67,13 +70,20 @@ if [[ ! -f "$SCRIPT_SOURCE_PATH" ]]; then
   echo "install-clawchat.sh not found at $SCRIPT_SOURCE_PATH" >&2
   exit 1
 fi
+if [[ ! -f "$PS_SCRIPT_SOURCE_PATH" ]]; then
+  echo "install-clawchat.ps1 not found at $PS_SCRIPT_SOURCE_PATH" >&2
+  exit 1
+fi
 
 SIZE_BYTES="$(wc -c < "$SOURCE_PATH" | tr -d ' ')"
 SCRIPT_SIZE_BYTES="$(wc -c < "$SCRIPT_SOURCE_PATH" | tr -d ' ')"
+PS_SCRIPT_SIZE_BYTES="$(wc -c < "$PS_SCRIPT_SOURCE_PATH" | tr -d ' ')"
 echo "==> Prepared install.md (${SIZE_BYTES} bytes)" >&2
 echo "==> Prepared install-clawchat.sh (${SCRIPT_SIZE_BYTES} bytes)" >&2
+echo "==> Prepared install-clawchat.ps1 (${PS_SCRIPT_SIZE_BYTES} bytes)" >&2
 echo "==> R2 object: s3://${R2_BUCKET:-<R2_BUCKET>}/${OBJECT_KEY}" >&2
 echo "==> R2 object: s3://${R2_BUCKET:-<R2_BUCKET>}/${SCRIPT_OBJECT_KEY}" >&2
+echo "==> R2 object: s3://${R2_BUCKET:-<R2_BUCKET>}/${PS_SCRIPT_OBJECT_KEY}" >&2
 
 if [[ "$NO_UPLOAD" == "true" ]]; then
   echo "==> Skipping R2 upload (--no-upload)" >&2
@@ -105,7 +115,15 @@ aws s3 cp \
   --content-type text/x-shellscript >&2
 
 echo "==> R2 upload OK: ${SCRIPT_OBJECT_KEY}" >&2
+aws s3 cp \
+  "$PS_SCRIPT_SOURCE_PATH" \
+  "s3://${R2_BUCKET}/${PS_SCRIPT_OBJECT_KEY}" \
+  --endpoint-url "$R2_ENDPOINT" \
+  --content-type text/plain >&2
+
+echo "==> R2 upload OK: ${PS_SCRIPT_OBJECT_KEY}" >&2
 if [[ -n "${R2_PUBLIC_BASE_URL:-}" ]]; then
   echo "==> Public URL: ${R2_PUBLIC_BASE_URL%/}/${OBJECT_KEY}" >&2
   echo "==> Public URL: ${R2_PUBLIC_BASE_URL%/}/${SCRIPT_OBJECT_KEY}" >&2
+  echo "==> Public URL: ${R2_PUBLIC_BASE_URL%/}/${PS_SCRIPT_OBJECT_KEY}" >&2
 fi
