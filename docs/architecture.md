@@ -126,7 +126,9 @@ installer should set on the user's behalf.
 
 1. Fetch `plugin.yaml` from
    `https://raw.githubusercontent.com/clawling/clawchat-plugin-hermes-agent/main/plugin.yaml`
-   (constant `HERMES_PLUGIN_YAML_URL`) via `curl -fsL`.
+   (constant `HERMES_PLUGIN_YAML_URL`) with Node's own `fetch` (15s per-attempt
+   cap, one retry; 4xx is not retried). Injectable via `InstallerOptions.fetchFn`.
+   Deliberately not `curl`: it is absent on Windows builds older than 10/1803.
 2. Parse the artifact `version` and the optional `requires.hermes` range
    (only `>=X.Y[.Z[.W]]` is supported — see `assertVersionSatisfiesRange` in
    `packages/core/src/installers/metadata.ts`).
@@ -193,8 +195,9 @@ skills/
   (`fetchSkillMarkdown`, capped at `MAX_SKILL_BYTES`, exact `sha256` match
   required). It applies nothing itself — the consuming adapter owns the consent
   flow and the atomic overwrite. The Hermes (Python) adapter re-implements the
-  same manifest read + semver compare. The end-to-end design lives in the
-  workspace ops tree (`ops/agent-plugin/skill-dynamic-update-plan.md`).
+  same manifest read + semver compare. Each adapter documents its own end of the
+  flow — the Hermes plugin repo's `docs/skill-updates.md` and the OpenClaw plugin
+  repo's `docs/clawchat-plugin-openclaw.md` §"Conversational skill hot-update".
 
 The relevant constants are all in `packages/core/src/config.ts`:
 `OFFICIAL_SKILLS_BASE` (the GitHub raw base — `clawling` is public, so fetches

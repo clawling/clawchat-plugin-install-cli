@@ -8,18 +8,19 @@ let home: string;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "hermes-profile-"));
+  // A minimal plugin.yaml so metadata parsing succeeds without network.
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("version: 9.9.9\n")));
 });
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
+  vi.unstubAllGlobals();
 });
 
-// A minimal plugin.yaml so metadata parsing succeeds without network.
 function fakeCapture() {
   return vi.fn(async (_cmd: string, args: readonly string[]) => {
     if (args.includes("--version")) return "hermes 0.13.0";
     if (args.includes("list")) return ""; // plugin not installed -> canonical install
-    // fetchPluginYaml pipes a curl of plugin.yaml; return version + no requirement.
-    return "version: 9.9.9\n";
+    throw new Error(`unexpected capture: ${args.join(" ")}`);
   });
 }
 

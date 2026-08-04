@@ -5,6 +5,7 @@ import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "
 import { writeHermesBaseUrls } from "../baseurl/write-hermes";
 import { parseHermesGitRef } from "../baseurl/target";
 import { ClawchatError } from "../errors";
+import type { FetchLike } from "../http/client";
 import {
   assertVersionSatisfiesRange,
   type HermesInstalledPlugin,
@@ -51,16 +52,11 @@ const HERMES_INSTALL_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cl
 // network fails fast (bounded retries with short per-attempt caps) instead of
 // hanging on OS/git defaults. Worst-case total stays comfortably under 3 min.
 
-/** curl flags: fail fast on a dead network, with curl's own bounded retry. */
-const CURL_NET_OPTS = [
-  "--connect-timeout", "5",
-  "--max-time", "15",
-  "--retry", "1",
-  "--retry-delay", "2",
-  "--retry-connrefused",
-] as const;
-/** Backstop above curl's own --max-time*(--retry+1)+delay budget. */
-const CURL_TIMEOUT_MS = 45_000;
+/** Per-attempt cap on the plugin.yaml read (was curl's `--max-time 15`). */
+const PLUGIN_YAML_TIMEOUT_MS = 15_000;
+/** One retry, 2s apart — the same budget curl's `--retry 1 --retry-delay 2` had. */
+const PLUGIN_YAML_RETRIES = 1;
+const PLUGIN_YAML_BACKOFF_MS = [2_000] as const;
 /** Fast local subprocesses (version / list / enable). */
 const HERMES_FAST_TIMEOUT_MS = 30_000;
 /** `plugins update` does a network git pull. */
@@ -163,9 +159,48 @@ function appendHermesConfigBusyHint(err: unknown): Error {
   return err instanceof ClawchatError ? new ClawchatError(err.code, hinted) : new Error(hinted);
 }
 
-/** Fetch a URL with curl, applying fast-fail timeouts and bounded retry. */
-function fetchPluginYaml(capture: CommandCapturer, url: string): Promise<string> {
-  return capture("curl", ["-fsL", ...CURL_NET_OPTS, url], { timeoutMs: CURL_TIMEOUT_MS });
+/**
+ * One plugin.yaml GET, with a hard per-attempt cap.
+ *
+ * A 4xx is deterministic (wrong URL, deleted branch) so it is raised as
+ * PRECONDITION and never retried; transport faults and 5xx stay retryable.
+ */
+async function fetchPluginYamlOnce(url: string, fetchFn: FetchLike): Promise<string> {
+  let response: Response;
+  try {
+    response = await fetchFn(url, { signal: AbortSignal.timeout(PLUGIN_YAML_TIMEOUT_MS) });
+  } catch (err) {
+    const name = (err as Error)?.name;
+    const timedOut = name === "TimeoutError" || name === "AbortError";
+    throw new ClawchatError(
+      timedOut ? "TIMEOUT" : "HTTP_ERROR",
+      timedOut
+        ? `GET ${url} timed out after ${PLUGIN_YAML_TIMEOUT_MS}ms`
+        : `GET ${url} failed: ${(err as Error).message}`,
+    );
+  }
+  if (!response.ok) {
+    throw new ClawchatError(
+      response.status < 500 ? "PRECONDITION" : "HTTP_ERROR",
+      `GET ${url} returned status ${response.status}`,
+    );
+  }
+  return await response.text();
+}
+
+/**
+ * Read the remote plugin.yaml, failing fast on a dead network with bounded
+ * retry. Uses Node's own `fetch` rather than spawning `curl`: curl is missing on
+ * Windows builds older than 10/1803, and shelling out to fetch a constant URL
+ * bought nothing over an in-process HTTP call.
+ */
+function fetchPluginYaml(url: string, fetchFn: FetchLike = fetch): Promise<string> {
+  return withRetry(() => fetchPluginYamlOnce(url, fetchFn), {
+    retries: PLUGIN_YAML_RETRIES,
+    backoffMs: PLUGIN_YAML_BACKOFF_MS,
+    shouldRetry: (err) =>
+      err instanceof ClawchatError && (err.code === "TIMEOUT" || err.code === "HTTP_ERROR"),
+  });
 }
 
 /**
@@ -259,7 +294,7 @@ async function readHermesInstallerContext(options: InstallerOptions = {}): Promi
   const progress = options.onProgress;
 
   progress?.("Checking Hermes plugin metadata...");
-  const pluginYaml = await fetchPluginYaml(capture, HERMES_PLUGIN_YAML_URL);
+  const pluginYaml = await fetchPluginYaml(HERMES_PLUGIN_YAML_URL, options.fetchFn);
   const artifact = parseHermesPluginYaml(pluginYaml);
   progress?.(`Downloaded Hermes plugin metadata ${artifact.version}`);
 

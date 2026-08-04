@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "../../src/config";
 import { ClawchatError } from "../../src/errors";
 import { installHermesPlugin, updateHermesPlugin } from "../../src/installers/hermes";
@@ -15,11 +15,23 @@ function hermesList(version: string | null, status = "enabled") {
   return version ? `│ clawchat       │ ${status.padEnd(11)} │ ${version.padEnd(7)} │ ClawChat gateway integration for Hermes Agent. │ git     │` : "";
 }
 
+/**
+ * plugin.yaml is read over HTTP (Node `fetch`), not by shelling out to curl, so
+ * the metadata seam is the global fetch rather than the command capturer.
+ */
+let fetchMock: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  fetchMock = vi.fn(async () => new Response(pluginYaml()));
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 function createCapture(installedVersion: string | null, hostVersion = "Hermes Agent v0.12.0\n", status = "enabled") {
   return vi.fn(async (cmd: string, args: readonly string[]) => {
-    if (cmd === "curl") {
-      return pluginYaml();
-    }
     if (cmd === "hermes" && args[0] === "--version") {
       return hostVersion;
     }
@@ -98,7 +110,8 @@ describe("Hermes installer", () => {
       previousVersion: null,
     });
 
-    expect(capture.mock.calls.some((c) => c[0] === "curl" && c[1].includes(HERMES_PLUGIN_YAML_URL))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(HERMES_PLUGIN_YAML_URL, expect.anything());
+    expect(capture.mock.calls.some((c) => c[0] === "curl")).toBe(false);
     expectRemoteInstall(run, { force: false });
   });
 
@@ -317,7 +330,7 @@ function captureVersionOnly(hostVersion = "hermes 0.12.0\n") {
 }
 
 describe("Hermes installer with @ref", () => {
-  it("clones the requested branch and reads plugin.yaml from the checkout (no curl)", async () => {
+  it("clones the requested branch and reads plugin.yaml from the checkout (no metadata fetch)", async () => {
     const run = runThatClones();
     const capture = captureVersionOnly();
 
@@ -325,8 +338,8 @@ describe("Hermes installer with @ref", () => {
 
     expect(result).toMatchObject({ kind: "plugin", target: "hermes", status: "installed", version: "0.14.0-22" });
     expectLocalClone(run, { branch: "dev", force: true });
-    // The redundant raw.githubusercontent.com fetch is gone — version comes from the clone.
-    expect(capture.mock.calls.some((c) => c[0] === "curl")).toBe(false);
+    // The redundant raw.githubusercontent.com read is gone — version comes from the clone.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("runs `hermes clawchat activate` right after a ref install when --activate is given", async () => {

@@ -2,9 +2,9 @@
 
 This directory is the **single source of truth** for the ClawChat agent skill
 markdown (`SKILL.md`) shipped to the two agent adapters. The dynamic skill-update
-flow fetches these files at runtime; for the end-to-end design see
-`skill-dynamic-update-plan.md` in the workspace ops tree
-(`ops/agent-plugin/skill-dynamic-update-plan.md`).
+flow fetches these files at runtime; each adapter documents its own end of that
+flow — the Hermes plugin repo's `docs/skill-updates.md` and the OpenClaw plugin
+repo's `docs/clawchat-plugin-openclaw.md` §"Conversational skill hot-update".
 
 ## Layout
 

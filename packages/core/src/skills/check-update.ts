@@ -13,8 +13,9 @@ import { isVersionOlder } from "../installers/metadata";
  * Skill-version check against the canonical, official skill source.
  *
  * This is the TypeScript reference implementation of the cross-language
- * contract documented in `ops/agent-plugin/skill-dynamic-update-plan.md`
- * (§3, §6.6). The Hermes (Python) adapter re-implements the same `manifest.json`
+ * contract; the canonical skill source and `manifest.json` shape are documented
+ * in this repo's `skills/README.md`.
+ * The Hermes (Python) adapter re-implements the same `manifest.json`
  * read + semver compare; the OpenClaw (TypeScript) adapter and this CLI can
  * reuse this module. Nothing here applies an update — the consuming adapter
  * owns the consent flow and the atomic file overwrite.

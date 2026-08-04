@@ -1,4 +1,5 @@
 // packages/core/src/installers/types.ts
+import type { FetchLike } from "../http/client";
 import type { CommandCapturer, CommandRunner } from "./run";
 
 export type InstallActionStatus = "installed" | "updated" | "skipped";
@@ -29,6 +30,13 @@ export type BaseUrlWriter = (values: BaseUrlOverrides) => void;
 export interface InstallerOptions {
   run?: CommandRunner;
   capture?: CommandCapturer;
+  /**
+   * HTTP GET used for the Hermes `plugin.yaml` metadata read. Defaults to the
+   * global `fetch`. This read used to shell out to `curl`, which is absent on
+   * Windows builds older than 10/1803 and needlessly routed a URL through a
+   * shell; Node's own fetch has neither problem. Injectable as a test seam.
+   */
+  fetchFn?: FetchLike;
   force?: boolean;
   onProgress?: InstallProgressReporter;
   /** `@<ref>` from the target: npm version/dist-tag (openclaw) or git url#branch (hermes). */
