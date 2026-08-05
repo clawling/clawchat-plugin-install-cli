@@ -50,8 +50,19 @@ pnpm skills:check       # CI: fail if the manifest is stale
 3. `pnpm skills:sync` to copy the tree + manifest into the sibling plugin
    repos (flags `--hermes/--openclaw` override the default sibling paths),
    then commit the synced files in each plugin repo.
-4. Tag the repo `skills-vX.Y.Z` (decoupled from the CLI's npm release) so an
-   update trigger can pin an immutable `ref`. Tracking `main` is for dev only.
+4. Tag the repo `skills-vX.Y.Z` (decoupled from the CLI's npm release). **Both
+   adapters read a pinned tag, not `main`**, so the tag is what agents fetch.
+5. Move the pin in each consumer and release it — a new tag reaches nobody
+   until this happens:
+   - `clawchat-plugin-hermes-agent`: `clawchat_gateway/skill_update.py`
+     `DEFAULT_SKILLS_REF`, then bump `plugin.yaml` / `__version__`.
+   - `clawchat-plugin-openclaw`: `src/skill-update.ts` `DEFAULT_SKILLS_REF`,
+     then release to npm.
+   - this repo: `packages/core/src/config.ts` `DEFAULT_SKILLS_REF` (library
+     default; the published CLI bundle does not include the skills subsystem).
+
+   Both adapters share the constant with their `liveware-sample` module, so the
+   `livewares/` tree is pinned to the same tag — verify it exists there too.
 
 2026-07-06: skills were renamed to `clawchat-*` ids; the old ids (`clawchat`,
 `liveware-app`, `set-greeting`) are permanent tombstones in `REMOVED`.
