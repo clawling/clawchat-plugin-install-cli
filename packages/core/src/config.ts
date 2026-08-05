@@ -18,9 +18,12 @@ export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 // that maps to `ref`. `clawling` is a public org so raw fetches are unauthed.
 export const OFFICIAL_SKILLS_BASE =
   "https://raw.githubusercontent.com/clawling/clawchat-plugin-install-cli";
-// Default git ref for the skills tree. Production callers SHOULD pin an
-// immutable `skills-vX.Y.Z` tag instead of tracking the moving `main`.
-export const DEFAULT_SKILLS_REF = "main";
+// Default git ref for the skills tree — an immutable `skills-vX.Y.Z` tag, not
+// the moving `main`, so a caller that omits `ref` still reads a fixed tree
+// rather than whatever has landed here since. Both agent adapters pin the same
+// tag in their own copies of this constant; move all three together when a new
+// skills tag ships.
+export const DEFAULT_SKILLS_REF = "skills-v1.6.0";
 // Refuse to treat an absurdly large response as a skill file (defence in depth
 // against a poisoned/oversized download before it is hashed and written).
 export const MAX_SKILL_BYTES = 256 * 1024;
