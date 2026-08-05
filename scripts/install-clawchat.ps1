@@ -62,6 +62,10 @@ function Enable-HermesVenv {
     $roots = New-Object System.Collections.ArrayList
     if ($env:HERMES_DIR)  { [void] $roots.Add($env:HERMES_DIR) }
     if ($env:HERMES_HOME) { [void] $roots.Add((Join-Path $env:HERMES_HOME 'hermes-agent')) }
+    # Native Windows keeps the Hermes home at %LOCALAPPDATA%\hermes
+    # (hermes_constants._get_platform_default_hermes_home); %USERPROFILE%\.hermes
+    # is the POSIX/WSL layout and stays only as a last-resort candidate.
+    if ($env:LOCALAPPDATA) { [void] $roots.Add((Join-Path $env:LOCALAPPDATA 'hermes\hermes-agent')) }
     if ($env:USERPROFILE) { [void] $roots.Add((Join-Path $env:USERPROFILE '.hermes\hermes-agent')) }
 
     foreach ($root in $roots) {

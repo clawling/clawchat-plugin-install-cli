@@ -93,8 +93,13 @@ hermes --version
 
 ```powershell
 if (-not (Get-Command hermes -ErrorAction SilentlyContinue)) {
-  $root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:USERPROFILE '.hermes' }
+  # Native Windows keeps the Hermes home at %LOCALAPPDATA%\hermes, NOT
+  # %USERPROFILE%\.hermes (that is the POSIX / WSL2 layout).
+  $root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
   $scripts = Join-Path $root 'hermes-agent\.venv\Scripts'
+  if (-not (Test-Path $scripts)) {
+    $scripts = Join-Path $env:USERPROFILE '.hermes\hermes-agent\.venv\Scripts'
+  }
   if (Test-Path $scripts) { $env:PATH = "$scripts;$env:PATH" }
 }
 hermes --version
@@ -116,14 +121,34 @@ cat "$HOME/.hermes/active_profile" 2>/dev/null || echo "active_profile=default"
 hermes profile list
 ```
 
+*(Windows)* - the Hermes root is `%LOCALAPPDATA%\hermes`, not
+`%USERPROFILE%\.hermes`:
+
+```powershell
+$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
+"HERMES_HOME=$(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { '<unset>' })"
+$active = Join-Path $root 'active_profile'
+if (Test-Path $active) { Get-Content $active } else { 'active_profile=default' }
+hermes profile list
+```
+
 `hermes` follows `-p <name>` -> a profile-scoped `HERMES_HOME` -> the sticky
 `active_profile` file -> default, but `clawchat_cli.py` (the Hermes 0.12 fallback
 in step 3) follows **`HERMES_HOME` only** and silently falls back to the default
-profile. `hermes profile create <name>` does *not* switch you into `<name>`. To
-target a specific profile, pin it on every command below - pass
-`--profile <name>` to this CLI (with `HERMES_HOME` unset or pointing at the
-Hermes root, never at the profile itself), and `-p <name>` plus
-`HERMES_HOME="$HOME/.hermes/profiles/<name>"` to `hermes` / `python` calls.
+profile - `%LOCALAPPDATA%\hermes` on native Windows, `~/.hermes` on POSIX.
+`hermes profile create <name>` does *not* switch you into `<name>`. To target a
+specific profile, pin it on every command below - pass `--profile <name>` to
+this CLI (with `HERMES_HOME` unset or pointing at the Hermes root, never at the
+profile itself), and `-p <name>` plus an explicit `HERMES_HOME` to `hermes` /
+`python` calls:
+
+```bash
+export HERMES_HOME="$HOME/.hermes/profiles/<name>"                  # POSIX
+```
+
+```powershell
+$env:HERMES_HOME = Join-Path $env:LOCALAPPDATA 'hermes\profiles\<name>'   # Windows
+```
 
 ## 2. Install
 
@@ -185,7 +210,9 @@ step 2 `install` command. Hermes 0.12 fallback:
 *(Windows)* same 0.12 fallback:
 
 ```powershell
-$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:USERPROFILE '.hermes' }
+# Native Windows: %LOCALAPPDATA%\hermes. %USERPROFILE%\.hermes is the POSIX /
+# WSL2 layout - activating there writes credentials Hermes never reads.
+$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
 python (Join-Path $root 'plugins\clawchat\clawchat_cli.py') activate CLAWCHAT_CODE_GOES_HERE
 ```
 
@@ -286,8 +313,8 @@ at step 5 (the user greeted in ClawChat).
   identity the profile had inherited from a cloned config. Don't ask for a fresh
   code yet: re-run the profile checks in step 1, compare `extra.user_id` against
   the other profile's, then re-issue with `-p <profile>` **and** `HERMES_HOME`
-  set to that profile, adding `--new-account` if this profile still needs its
-  own agent. A
+  set to that profile (`%LOCALAPPDATA%\hermes\profiles\<name>` on native
+  Windows), adding `--new-account` if this profile still needs its own agent. A
   `[HERMES_HOME fallback] HERMES_HOME is unset but active profile is …` line on
   stderr is the same problem. Verify with that profile's own files:
   `grep -A6 'clawchat:' "$HOME/.hermes/profiles/<name>/config.yaml"` -
