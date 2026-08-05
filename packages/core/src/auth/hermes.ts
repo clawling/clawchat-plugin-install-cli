@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { platformDefaultHermesHome } from "../hermes-home";
 import type { AuthReadOptions, TargetAuth } from "./types";
 
 function parseEnv(content: string): Record<string, string> {
@@ -23,12 +23,14 @@ function parseEnv(content: string): Record<string, string> {
 
 function getHermesEnvPaths(options: AuthReadOptions): string[] {
   const env = options.env ?? process.env;
-  const homeDir = options.homeDir ?? os.homedir();
   const paths: string[] = [];
   if (env.HERMES_HOME?.trim()) {
     paths.push(path.join(env.HERMES_HOME, ".env"));
   }
-  paths.push(path.join(homeDir, ".hermes", ".env"));
+  // Platform-native fallback: ~/.hermes on POSIX, %LOCALAPPDATA%\\hermes on
+  // Windows. Probing only the POSIX path reported a paired Windows agent as
+  // unauthenticated whenever HERMES_HOME was not exported.
+  paths.push(path.join(platformDefaultHermesHome(options), ".env"));
   return paths;
 }
 

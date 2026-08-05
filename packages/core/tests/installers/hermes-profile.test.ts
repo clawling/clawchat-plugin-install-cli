@@ -39,19 +39,19 @@ describe("resolveHermesProfileHome", () => {
   const homeDir = "/home/u";
 
   it("uses ~/.hermes for the default profile", () => {
-    expect(resolveHermesProfileHome(undefined, { homeDir, env: {} })).toBe(
+    expect(resolveHermesProfileHome(undefined, { homeDir, env: {}, platform: "linux" })).toBe(
       path.join(homeDir, ".hermes"),
     );
   });
 
   it("honors an explicit HERMES_HOME for the default profile", () => {
-    expect(resolveHermesProfileHome("default", { homeDir, env: { HERMES_HOME: "/custom/home" } })).toBe(
+    expect(resolveHermesProfileHome("default", { homeDir, env: { HERMES_HOME: "/custom/home" }, platform: "linux" })).toBe(
       "/custom/home",
     );
   });
 
   it("resolves <homeDir>/.hermes/profiles/<name> for a named profile with no HERMES_HOME", () => {
-    expect(resolveHermesProfileHome("coder", { homeDir, env: {} })).toBe(
+    expect(resolveHermesProfileHome("coder", { homeDir, env: {}, platform: "linux" })).toBe(
       path.join(homeDir, ".hermes", "profiles", "coder"),
     );
   });
@@ -63,7 +63,7 @@ describe("resolveHermesProfileHome", () => {
   });
 
   it("falls back to os.homedir() when no homeDir is given", () => {
-    expect(resolveHermesProfileHome("coder", { env: {} })).toBe(
+    expect(resolveHermesProfileHome("coder", { env: {}, platform: "linux" })).toBe(
       path.join(os.homedir(), ".hermes", "profiles", "coder"),
     );
   });

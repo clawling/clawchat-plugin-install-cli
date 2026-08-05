@@ -1,5 +1,5 @@
-import * as os from "node:os";
 import * as path from "node:path";
+import { type HermesHomeOptions, resolveHermesHomeRoot } from "../hermes-home";
 
 /** A profile name meaning "the default HERMES_HOME" — no -p flag, no redirect. */
 export function isDefaultProfile(profile?: string): boolean {
@@ -21,18 +21,16 @@ export function withHermesProfileArgs(profile: string | undefined, args: readonl
 
 /**
  * Resolve a profile name to its HERMES_HOME directory, mirroring Hermes'
- * layout: the default profile is `~/.hermes` (or an explicit `HERMES_HOME`);
- * a named profile is `~/.hermes/profiles/<name>`. A custom `HERMES_HOME`
- * (trimmed, if set) is honored as the base root for both the default and
- * named profile cases.
+ * layout: the default profile is the Hermes root (an explicit `HERMES_HOME`,
+ * else the platform-native default — `~/.hermes` on POSIX,
+ * `%LOCALAPPDATA%\hermes` on Windows); a named profile is
+ * `<root>/profiles/<name>`.
  */
 export function resolveHermesProfileHome(
   profile: string | undefined,
-  opts: { homeDir?: string; env?: Record<string, string | undefined> } = {},
+  opts: HermesHomeOptions = {},
 ): string {
-  const env = opts.env ?? process.env;
-  const homeDir = opts.homeDir ?? os.homedir();
-  const baseRoot = env.HERMES_HOME?.trim() || path.join(homeDir, ".hermes");
+  const baseRoot = resolveHermesHomeRoot(opts);
   if (isDefaultProfile(profile)) {
     return baseRoot;
   }

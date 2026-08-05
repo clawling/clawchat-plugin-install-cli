@@ -11,4 +11,6 @@ export interface TargetAuth {
 export interface AuthReadOptions {
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
+  /** Defaults to `process.platform`; injectable so both home layouts are testable. */
+  platform?: NodeJS.Platform;
 }

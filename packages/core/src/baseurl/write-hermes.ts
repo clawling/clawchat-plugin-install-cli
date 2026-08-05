@@ -1,7 +1,7 @@
 // packages/core/src/baseurl/write-hermes.ts
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { type HermesHomeOptions, resolveHermesHomeRoot } from "../hermes-home";
 
 export interface HermesBaseUrls {
   CLAWCHAT_BASE_URL?: string;
@@ -9,18 +9,12 @@ export interface HermesBaseUrls {
   CLAWCHAT_MEDIA_BASE_URL?: string;
 }
 
-export interface WriteHermesOptions {
-  homeDir?: string;
-  env?: Record<string, string | undefined>;
-}
+export type WriteHermesOptions = HermesHomeOptions;
 
-/** Mirrors the plugin's reader: `$HERMES_HOME/.env` if set, else `~/.hermes/.env`. */
+/** Mirrors the plugin's reader: `$HERMES_HOME/.env` if set, else the
+ * platform-native Hermes home (`~/.hermes`, or `%LOCALAPPDATA%\\hermes`). */
 export function getHermesEnvPath(options: WriteHermesOptions = {}): string {
-  const env = options.env ?? process.env;
-  if (env.HERMES_HOME?.trim()) {
-    return path.join(env.HERMES_HOME, ".env");
-  }
-  return path.join(options.homeDir ?? os.homedir(), ".hermes", ".env");
+  return path.join(resolveHermesHomeRoot(options), ".env");
 }
 
 /** Idempotently upsert `KEY=value` lines (format the plugin's reader parses). */

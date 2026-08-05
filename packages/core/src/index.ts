@@ -1,4 +1,5 @@
 export * from "./auth";
+export * from "./hermes-home";
 export * from "./config";
 export * from "./errors";
 export * from "./installers/hermes";

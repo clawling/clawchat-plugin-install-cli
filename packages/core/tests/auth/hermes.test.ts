@@ -48,7 +48,7 @@ describe("readHermesAuth", () => {
     fs.mkdirSync(fallback, { recursive: true });
     fs.writeFileSync(path.join(fallback, ".env"), "CLAWCHAT_TOKEN=access-token\n");
 
-    expect(readHermesAuth({ homeDir, env: {} })).toEqual({
+    expect(readHermesAuth({ homeDir, env: {}, platform: "linux" })).toEqual({
       target: "hermes",
       token: "access-token",
       refreshToken: undefined,
@@ -62,6 +62,6 @@ describe("readHermesAuth", () => {
     fs.mkdirSync(fallback, { recursive: true });
     fs.writeFileSync(path.join(fallback, ".env"), "CLAWCHAT_REFRESH_TOKEN=refresh-token\n");
 
-    expect(readHermesAuth({ homeDir, env: {} })).toBeNull();
+    expect(readHermesAuth({ homeDir, env: {}, platform: "linux" })).toBeNull();
   });
 });

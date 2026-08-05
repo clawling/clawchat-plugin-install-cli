@@ -15,14 +15,14 @@ afterEach(() => {
 });
 
 function readEnv() {
-  return fs.readFileSync(getHermesEnvPath({ homeDir: home, env: {} }), "utf8");
+  return fs.readFileSync(getHermesEnvPath({ homeDir: home, env: {}, platform: "linux" }), "utf8");
 }
 
 describe("writeHermesBaseUrls", () => {
   it("creates ~/.hermes/.env with KEY=value lines", () => {
     writeHermesBaseUrls(
       { CLAWCHAT_BASE_URL: "https://api.test:39001", CLAWCHAT_MEDIA_BASE_URL: "https://m.test:39003" },
-      { homeDir: home, env: {} },
+      { homeDir: home, env: {}, platform: "linux" },
     );
     const text = readEnv();
     expect(text).toContain("CLAWCHAT_BASE_URL=https://api.test:39001\n");
@@ -33,7 +33,7 @@ describe("writeHermesBaseUrls", () => {
     const dir = path.join(home, ".hermes");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, ".env"), "CLAWCHAT_TOKEN=keep\nCLAWCHAT_BASE_URL=https://old\n");
-    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://new" }, { homeDir: home, env: {} });
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://new" }, { homeDir: home, env: {}, platform: "linux" });
     const text = readEnv();
     expect(text).toContain("CLAWCHAT_TOKEN=keep\n");
     expect(text).toContain("CLAWCHAT_BASE_URL=https://new\n");
@@ -50,7 +50,7 @@ describe("writeHermesBaseUrls", () => {
     const dir = path.join(home, ".hermes");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, ".env"), "\r\nCLAWCHAT_TOKEN=keep\r\n");
-    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {} });
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
     const text = readEnv();
     expect(text).not.toContain("\r");
     expect(text.startsWith("\n")).toBe(false);
@@ -59,7 +59,7 @@ describe("writeHermesBaseUrls", () => {
   });
 
   it("is a no-op when no values are provided", () => {
-    writeHermesBaseUrls({}, { homeDir: home, env: {} });
-    expect(fs.existsSync(getHermesEnvPath({ homeDir: home, env: {} }))).toBe(false);
+    writeHermesBaseUrls({}, { homeDir: home, env: {}, platform: "linux" });
+    expect(fs.existsSync(getHermesEnvPath({ homeDir: home, env: {}, platform: "linux" }))).toBe(false);
   });
 });
