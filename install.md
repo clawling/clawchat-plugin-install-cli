@@ -189,6 +189,22 @@ $root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:USERPRO
 python (Join-Path $root 'plugins\clawchat\clawchat_cli.py') activate CLAWCHAT_CODE_GOES_HERE
 ```
 
+**Hermes: if activation refuses with "this Hermes profile is already paired".**
+The code is **not** spent. Pick the flag by intent, not by which sentence in the
+error looks closest:
+
+- The profile should get **its own new agent** - including when a freshly
+  created profile already shows an identity, which it inherited from a cloned
+  `config.yaml`: re-run with `--new-account`.
+- Only when the user confirms this profile already paired that exact agent and
+  just lost its token: re-run with `--repair`.
+
+`--repair` keeps the stored `user_id`, so the server re-pairs **that** agent and
+spends the code on it - it never creates an agent. A fresh install has no token,
+so "lost its token" always looks true; that is not evidence. Newer plugin
+versions refuse `--repair` outright when the identity has no local provenance -
+that refusal means `--new-account`, not a fresh code.
+
 ## 4. Restart the agent - the user must do this
 
 **Required.** ClawChat's tools and live connection only become usable after the
@@ -264,11 +280,14 @@ at step 5 (the user greeted in ClawChat).
   brand-new agent under the new account. Don't activate before deciding - the
   server rejects it and the code stays unspent.
 
-- **Hermes: activation says "this Hermes profile is already paired", or the new
-  agent turns out to be an existing one.** The command landed on the wrong
-  profile - almost always the default. Don't ask for a fresh code yet: re-run the
-  profile checks in step 1, then re-issue the command with `-p <profile>` **and**
-  `HERMES_HOME` set to that profile. A
+- **Hermes: the new agent turns out to be an existing one** (the profile
+  connects as an agent the user already had). Two causes: the command landed on
+  the wrong profile - almost always the default - or `--repair` replayed an
+  identity the profile had inherited from a cloned config. Don't ask for a fresh
+  code yet: re-run the profile checks in step 1, compare `extra.user_id` against
+  the other profile's, then re-issue with `-p <profile>` **and** `HERMES_HOME`
+  set to that profile, adding `--new-account` if this profile still needs its
+  own agent. A
   `[HERMES_HOME fallback] HERMES_HOME is unset but active profile is …` line on
   stderr is the same problem. Verify with that profile's own files:
   `grep -A6 'clawchat:' "$HOME/.hermes/profiles/<name>/config.yaml"` -
