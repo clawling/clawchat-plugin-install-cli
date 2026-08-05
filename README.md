@@ -38,6 +38,25 @@ the CLI passes `-p <name>` to the delegated `hermes` calls and writes base URLs
 to that profile's `$HERMES_HOME/.env`. Omit it to target the active/default
 profile.
 
+On a host with more than one Hermes profile, confirm the profile **before**
+installing or activating — every ClawChat identity is keyed on the active
+`HERMES_HOME`, a mis-targeted run pairs a different agent with no error, and
+connect codes are single-use:
+
+- `--profile <name>` resolves to `<HERMES_HOME-or-platform-default>/profiles/<name>`.
+  Pass it **or** point `HERMES_HOME` at the profile directory — never both, or
+  credentials land in `…/profiles/<name>/profiles/<name>`.
+- The delegated `hermes` calls follow `-p` → a profile-scoped `HERMES_HOME` → the
+  sticky `<root>/active_profile` file → default. Bare-`python` entry points such
+  as the Hermes 0.12 `clawchat_cli.py` fallback follow `HERMES_HOME` **only** and
+  silently use the default profile; `hermes profile use` does not reach them.
+- `hermes profile create <name>` does not switch the current shell or agent
+  session into `<name>`.
+
+Full procedure — confirm, pin, verify — in [`install.md`](install.md#1-verify-the-target-and-check-for-an-existing-install)
+and the Hermes plugin's
+[install guide](https://github.com/clawling/clawchat-plugin-hermes-agent/blob/main/docs/install.md#confirm-the-target-profile-before-every-install--activate).
+
 The published npm package does not bundle a skill of its own — each agent
 adapter ships a snapshot of its host's ClawChat skill markdown for
 offline/first-run fallback. This repository, however, **is** the canonical host

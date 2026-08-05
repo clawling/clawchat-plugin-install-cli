@@ -105,6 +105,26 @@ targets. Then check whether ClawChat is already installed (`openclaw plugins
 list --json` or `hermes plugins list`). If it already shows ClawChat, skip step 2
 and run the [update](#update-or-repair-later) command instead, then go to step 3.
 
+**Hermes with more than one profile** - confirm which profile you are on before
+installing or activating. Every ClawChat identity is keyed on the active
+`HERMES_HOME`, so a mis-targeted command pairs a *different* agent with no error
+and burns the single-use code:
+
+```bash
+echo "HERMES_HOME=${HERMES_HOME:-<unset>}"
+cat "$HOME/.hermes/active_profile" 2>/dev/null || echo "active_profile=default"
+hermes profile list
+```
+
+`hermes` follows `-p <name>` -> a profile-scoped `HERMES_HOME` -> the sticky
+`active_profile` file -> default, but `clawchat_cli.py` (the Hermes 0.12 fallback
+in step 3) follows **`HERMES_HOME` only** and silently falls back to the default
+profile. `hermes profile create <name>` does *not* switch you into `<name>`. To
+target a specific profile, pin it on every command below - pass
+`--profile <name>` to this CLI (with `HERMES_HOME` unset or pointing at the
+Hermes root, never at the profile itself), and `-p <name>` plus
+`HERMES_HOME="$HOME/.hermes/profiles/<name>"` to `hermes` / `python` calls.
+
 ## 2. Install
 
 OpenClaw (installs can be slow - wait patiently, don't retry just because it
@@ -243,6 +263,17 @@ at step 5 (the user greeted in ClawChat).
   the original account, or clear the stored `user_id` (as above) to pair as a
   brand-new agent under the new account. Don't activate before deciding - the
   server rejects it and the code stays unspent.
+
+- **Hermes: activation says "this Hermes profile is already paired", or the new
+  agent turns out to be an existing one.** The command landed on the wrong
+  profile - almost always the default. Don't ask for a fresh code yet: re-run the
+  profile checks in step 1, then re-issue the command with `-p <profile>` **and**
+  `HERMES_HOME` set to that profile. A
+  `[HERMES_HOME fallback] HERMES_HOME is unset but active profile is …` line on
+  stderr is the same problem. Verify with that profile's own files:
+  `grep -A6 'clawchat:' "$HOME/.hermes/profiles/<name>/config.yaml"` -
+  `extra.profile` must be `<name>`, and two profiles must never share
+  `extra.user_id`.
 
 - **Activated but no greeting / not connected (step 5).** Almost always the
   step 4 restart hasn't taken effect - **ask the user to restart the agent** and

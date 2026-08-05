@@ -16,6 +16,8 @@ For OpenClaw, `install` delegates to `openclaw plugins install @clawling/clawcha
 
 Both commands accept `--force` to reinstall the plugin even when the host reports it as current.
 
+For Hermes, `--profile <name>` targets a specific Hermes profile: the CLI passes `-p <name>` to the delegated `hermes` calls and writes base URLs to that profile's `$HERMES_HOME/.env`. It resolves to `<HERMES_HOME-or-platform-default>/profiles/<name>`, so pass `--profile` **or** point `HERMES_HOME` at the profile directory — never both. On a multi-profile host, confirm the active profile before installing or activating: a mis-targeted run pairs a different agent with no error, and connect codes are single-use.
+
 ## Update
 
 ```bash
