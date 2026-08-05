@@ -19,11 +19,12 @@ for you (bash equivalent: `install-clawchat.sh`); run it as
 `powershell -ExecutionPolicy Bypass -File .\install-clawchat.ps1 <openclaw|hermes>`,
 then pick up at step 3.
 
-**Goal:** a live, paired connection where the agent **sends the user a first
-greeting inside ClawChat**. That arriving message - not an "activation complete"
-line in the terminal - is the success signal. If a step fails, don't stop: go to
-[Troubleshooting](#troubleshooting) and work the matching case until the user has
-a connected agent that has greeted them.
+**Goal:** a live, paired connection where the agent **greets the user inside
+ClawChat**. The plugin sends that greeting **by itself** on the first connection
+after activation - you never send it. That arriving message - not an "activation
+complete" line in the terminal - is the success signal. If a step fails, don't
+stop: go to [Troubleshooting](#troubleshooting) and work the matching case until
+the user has a connected agent that has greeted them.
 
 ## 0. Check the code is pairable
 
@@ -236,8 +237,9 @@ that refusal means `--new-account`, not a fresh code.
 
 **Required.** ClawChat's tools and live connection only become usable after the
 agent process **restarts** to load the newly installed plugin and activation
-credentials. Until then, the profile and greeting calls in step 5 will fail
-because the ClawChat tools aren't registered yet.
+credentials. Until then the agent cannot connect, so the plugin's automatic
+greeting never fires and the profile call in step 5 would fail - the ClawChat
+tools aren't registered yet.
 
 Hermes activation schedules this restart automatically, but in many environments
 the running agent **cannot restart itself** (the restart needs the user's
@@ -247,26 +249,31 @@ Instead, **ask the user to restart the agent themselves** - the OpenClaw or
 Hermes process that was just activated - and wait for it to come back. Once it's
 back up, the ClawChat tools are available; continue to step 5.
 
-## 5. Set the profile and greet the user (the success signal)
+## 5. Confirm the greeting arrived (the success signal)
 
-After the restart, using the agent's normal ClawChat tools:
+**The plugin greets the user on its own.** On the first connection after
+activation it has the agent send one short self-introduction to the owner's
+ClawChat conversation. **Do not send a greeting yourself** - a second one is a
+bug the user sees, not a stronger success signal.
 
-1. If the agent has identity info, call `clawchat_update_account_profile` with
-   any available `nickname`, `bio`, and/or `avatar_url` so the user can tell
-   which agent connected.
-2. **Send one short greeting** in ClawChat - introduce the agent and say it's
-   connected and ready. When that message appears in the user's ClawChat app, the
-   pairing is confirmed end to end. **Done.**
+After the restart:
+
+1. Optional, using the agent's normal ClawChat tools: if the agent has identity
+   info, call `clawchat_update_account_profile` with any available `nickname`,
+   `bio`, and/or `avatar_url` so the user can tell which agent connected.
+2. Ask the user whether the greeting showed up in their ClawChat app. Once they
+   confirm it, the pairing is verified end to end. **Done.**
 
 If nothing arrives after a minute or two, the step 4 restart most likely hasn't
-taken effect - ask the user to restart again and wait, then redo step 5. If it
-still won't connect, see [Troubleshooting](#troubleshooting).
+taken effect - ask the user to restart again and wait; the plugin retries the
+greeting on the next successful connection. If it still won't connect, see
+[Troubleshooting](#troubleshooting).
 
 ## Troubleshooting
 
 Stay on the **same target** the user picked; never switch targets, invent codes,
 or reuse a spent activation code. Match the symptom, act, then resume and finish
-at step 5 (the user greeted in ClawChat).
+at step 5 (the user confirms the plugin's greeting reached ClawChat).
 
 - **Code not pairable (step 0).** `expired` / `invalid` -> ask for a fresh code
   and re-run step 0. `paired` -> already used; ask whether to re-pair with a fresh
@@ -323,8 +330,10 @@ at step 5 (the user greeted in ClawChat).
 
 - **Activated but no greeting / not connected (step 5).** Almost always the
   step 4 restart hasn't taken effect - **ask the user to restart the agent** and
-  wait. If still disconnected after a restart, ask for a fresh code, run step 3
-  once, restart again, then redo step 5.
+  wait; the plugin still owes the greeting and re-sends it on the next
+  successful connection. Never paper over it by greeting by hand - that is how
+  users end up with two greetings. If still disconnected after a restart, ask
+  for a fresh code, run step 3 once, restart again, then redo step 5.
 
 - **Plugin files missing / stale / corrupted (any step).** Run
   [update](#update-or-repair-later); if the version is already current, rerun
