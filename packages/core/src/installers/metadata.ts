@@ -147,8 +147,7 @@ export function parseOpenClawPluginsJson(text: string): string | null {
       id === "clawchat" ||
       id === "clawchat-plugin-openclaw" ||
       name === "clawchat" ||
-      name === "@clawling/clawchat-plugin-openclaw" ||
-      name === "@newbase-clawchat/clawchat-plugin-openclaw"
+      name === "@clawling/clawchat-plugin-openclaw"
     ) {
       return readString(item.version) ?? null;
     }

@@ -67,15 +67,6 @@ describe("installer metadata", () => {
     }))).toBe("2026.5.4-3");
   });
 
-  it("finds legacy OpenClaw ClawChat installs by previous scoped package name", () => {
-    expect(parseOpenClawPluginsJson(JSON.stringify({
-      plugins: [{
-        name: "@newbase-clawchat/clawchat-plugin-openclaw",
-        version: "2026.5.4-2",
-      }],
-    }))).toBe("2026.5.4-2");
-  });
-
   it("finds clawchat version and status in Hermes table output", () => {
     const output = `│ clawchat       │ enabled     │ 0.1.0   │ ClawChat gateway integration for Hermes Agent. │ git     │`;
 
