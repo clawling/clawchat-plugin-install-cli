@@ -27,24 +27,38 @@ The bucket configuration lives in `scripts/.env.r2` (template:
 
 ## What the guide covers
 
-The four sections of `install.md`:
+`install.md` runs from step 0 to step 5, then closes with two reference
+sections. The stated goal throughout is a paired agent that **greets the user by
+itself** inside ClawChat — that arriving message, not a terminal line, is the
+success signal.
 
-1. **Verify the target agent** — sanity-check that `openclaw` or `hermes` is
-   reachable on `PATH`, including auto-activating a Hermes virtualenv if
-   present.
-2. **Install the plugin** — run
-   `npx -y @clawling/clawchat-plugin-install-cli@latest install --target <target>`.
-3. **Activate with the user-provided code** — invoke the target plugin's
-   activation command exactly once with a fresh code.
-4. **Update the ClawChat account profile** — call the agent's
-   `clawchat_update_account_profile` tool so the connected account is
-   identifiable to the user.
+0. **Check the code is pairable** — a `POST /v1/agents/connect/check` pre-check
+   that does *not* consume the single-use code, optionally carrying a stored
+   `user_id` to get a `user_id_status` verdict.
+1. **Verify the target and check for an existing install** — is `openclaw` /
+   `hermes` on `PATH` (auto-activating a Hermes virtualenv if needed), is
+   ClawChat already installed, and — for Hermes — which profile is active.
+2. **Install** — run
+   `npx -y @clawling/clawchat-plugin-install-cli@latest install --target <target>`,
+   with a documented fallback to installing directly via the host when the
+   GitHub-raw fetch is blocked.
+3. **Activate (single-use code)** — invoke the target plugin's activation command
+   exactly once, including the Hermes 0.12 `clawchat_cli.py` fallback and the
+   `--new-account` vs `--repair` decision.
+4. **Restart the agent — the user must do this** — the plugin's tools and live
+   connection only exist after the host process restarts.
+5. **Confirm the greeting arrived** — optionally call
+   `clawchat_update_account_profile`, then have the user confirm the plugin's
+   own greeting reached their ClawChat app.
 
-It also includes a *Reactivation repair* section that distinguishes auth
-errors (re-run step 3 with a new code) from corrupted-files errors (run
-`update` and, if needed, `update --force`), plus an *Update or repair later*
-section that documents the same `update` command with `--force` as a
-documented repair path.
+Then:
+
+- **Troubleshooting** — symptom-matched cases (code not pairable, missing target
+  command, install failure, activation/auth failure, `code: 16001` /
+  `agent not found`, `owner_mismatch`, wrong Hermes profile, no greeting,
+  corrupted plugin files), each resuming the numbered flow.
+- **Update or repair later** — the `update --target <target>` command, plus
+  `--force` as the documented reinstall/repair path.
 
 ## Editing rules
 

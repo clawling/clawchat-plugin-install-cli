@@ -7,10 +7,13 @@ what you are trying to do.
 ## I want to install or update the ClawChat plugin
 
 - [`../install.md`](../install.md) — step-by-step runtime guide consumed by AI
-  agents and end-users. Verifies the target agent, installs or repairs the
-  plugin, activates with a user-provided code, then updates the account
-  profile. Also the file published to R2 by
-  [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh).
+  agents and end-users. Steps 0–5: pre-check the connect code, verify the target
+  agent, install or repair the plugin, activate with a user-provided code, have
+  the user restart the agent, and confirm the plugin's own greeting arrived —
+  followed by Troubleshooting and "Update or repair later" sections. Also the
+  file published to R2 by
+  [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh),
+  together with both one-shot installer scripts.
 - [`runtime-install-guide.md`](runtime-install-guide.md) — companion page for
   humans that explains who `install.md` is for and how it is delivered.
 
@@ -20,10 +23,20 @@ what you are trying to do.
   typecheck, filter examples, environment variables, recipes for testing
   against local plugin builds.
 - [`architecture.md`](architecture.md) — how the workspace is laid out, how
-  `packages/cli` consumes `packages/core`, and how the OpenClaw and Hermes
-  install flows differ.
+  `packages/cli` consumes `packages/core`, how the OpenClaw and Hermes install
+  flows differ, and the two runtime hosting subsystems this repo serves to the
+  agent adapters (`skills/` and `livewares/`).
 - [`../AGENTS.md`](../AGENTS.md) — short coding-conventions anchor for coding
   agents.
+
+## I want to change a skill or the Liveware Sample
+
+- [`../skills/README.md`](../skills/README.md) — the canonical `SKILL.md` tree,
+  its generated `manifest.json`, and the `skills-vX.Y.Z` release/versioning
+  workflow the two adapters pin to.
+- The `livewares/` tree (the Liveware Sample app plus its own generated
+  manifest) is documented in the "Livewares hosting subsystem" section of
+  [`architecture.md`](architecture.md); it ships on the same tag.
 
 ## I want to publish a new version
 

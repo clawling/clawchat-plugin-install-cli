@@ -22,6 +22,12 @@ npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 
 For OpenClaw, `install` delegates to
 `openclaw plugins install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`.
+Both `install` and `update` may also rewrite the user's `~/.openclaw/openclaw.json`
+after that call: a config still referencing the pre-rename `openclaw-clawchat`
+plugin id is migrated onto `clawchat-plugin-openclaw` (channel block,
+`plugins.allow`, entries, tools) so upgrading from the old plugin keeps the
+existing pairing. Nothing is written when no legacy id is present, and a
+migration failure is reported as a warning rather than aborting the install.
 ClawChat is a third-party (non-catalog) plugin: on older OpenClaw the flag
 bypasses the install-time safety scan that would block it; on newer OpenClaw it
 is a deprecated no-op (installs allowed by default, operator gating via
@@ -60,11 +66,17 @@ and the Hermes plugin's
 The published npm package does not bundle a skill of its own — each agent
 adapter ships a snapshot of its host's ClawChat skill markdown for
 offline/first-run fallback. This repository, however, **is** the canonical host
-for the skills tree those adapters fetch at runtime: `skills/` plus the generated
-`skills/manifest.json`, served from GitHub raw via the `OFFICIAL_SKILLS_BASE`
-constant in `packages/core/src/config.ts`. See
-[`skills/README.md`](skills/README.md) and the "Skills hosting subsystem" section
-of [`docs/architecture.md`](docs/architecture.md).
+for two trees those adapters fetch at runtime, both served from GitHub raw via
+the `OFFICIAL_SKILLS_BASE` constant in `packages/core/src/config.ts` and pinned to
+the same `skills-vX.Y.Z` tag:
+
+- `skills/` plus the generated `skills/manifest.json` — the agent skill markdown.
+- `livewares/` plus the generated `livewares/manifest.json` — the Liveware Sample
+  demo app the plugins auto-install.
+
+See [`skills/README.md`](skills/README.md) and the "Skills hosting subsystem" /
+"Livewares hosting subsystem" sections of
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Update
 
@@ -82,6 +94,9 @@ For Hermes, `update` requires an installed plugin and delegates to
 even when the installed `plugin.yaml` version already matches the remote
 version. Pass `--force` as the explicit repair path: with `--force`, Hermes
 runs `hermes plugins install clawling/clawchat-plugin-hermes-agent --force --enable`.
+`--force` also lifts the "not installed" precondition — `update --force` on a
+host with no ClawChat plugin installs it instead of failing, and reports
+`installed`.
 The same `--force` is recommended when a Hermes update fails with a dirty
 checkout or fast-forward conflict.
 
@@ -116,10 +131,20 @@ npx -y @clawling/clawchat-plugin-install-cli@latest install \
 - `--wsbaseurl` → WebSocket messaging (`/ws` is appended for a bare `host:port`)
 - `--mediabaseurl` → media upload/download
 
-The URLs are written **before** install — OpenClaw to
-`~/.openclaw/openclaw.json` (channel `clawchat-plugin-openclaw`), Hermes to
-`~/.hermes/.env` — and the plugin reads them at startup, falling back to its
-built-in defaults when unset. `--target openclaw@<ref>` installs the npm
+Where and when they are written differs per target:
+
+- **Hermes** — into `<Hermes home>/.env`, **before** the host is touched. The
+  Hermes home is `$HERMES_HOME` when exported, otherwise the platform default:
+  `~/.hermes` on POSIX, `%LOCALAPPDATA%\hermes` on Windows. With
+  `--profile <name>` it is that profile's directory,
+  `<root>/profiles/<name>/.env`.
+- **OpenClaw** — into `~/.openclaw/openclaw.json` under channel
+  `clawchat-plugin-openclaw`, **after** the plugin is installed. The channel id
+  is not registered until the install finishes, so writing it earlier makes
+  OpenClaw's own config validation fail with "unknown channel id".
+
+The plugin reads them at startup, falling back to its built-in defaults when
+unset. `--target openclaw@<ref>` installs the npm
 dist-tag/version `<ref>`; `--target hermes@<giturl#branch>` installs that git
 ref (forced) and runs the version compat check against the branch's
 `plugin.yaml`. Both flags work on `update` as well as `install`.
@@ -138,6 +163,17 @@ available (auto-activating a Hermes virtualenv if needed), and uses
 plugin is detected, it runs `update --target <target>` and retries with
 `--force` if the update fails.
 
+`scripts/install-clawchat.ps1` is the PowerShell equivalent for Windows, with the
+same argument and behaviour:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-clawchat.ps1 <openclaw|hermes>
+```
+
+Both scripts are published to R2 alongside `install.md` (see
+[`docs/release.md`](docs/release.md)), so end-users usually fetch them from there
+rather than from a checkout.
+
 ## Documentation map
 
 - [`install.md`](install.md) — runtime install guide for end-users and AI
@@ -147,8 +183,8 @@ plugin is detected, it runs `update --target <target>` and retries with
     install flows per target, library API, security notes.
   - [`docs/development.md`](docs/development.md) — pnpm setup, build,
     test, local plugin testing.
-  - [`docs/release.md`](docs/release.md) — how to publish the CLI and
-    refresh the R2-hosted `install.md`.
+  - [`docs/release.md`](docs/release.md) — how to publish the CLI, refresh the
+    R2-hosted `install.md` and installer scripts, and cut a skills tag.
   - [`docs/runtime-install-guide.md`](docs/runtime-install-guide.md) —
     what `install.md` is for and how it is delivered.
 - [`packages/core/README.md`](packages/core/README.md) —

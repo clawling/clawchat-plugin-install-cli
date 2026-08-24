@@ -46,7 +46,9 @@ pnpm skills:check       # CI: fail if the manifest is stale
 
 1. Edit the relevant `SKILL.md` and **bump its frontmatter `version:`**
    (semver `X.Y.Z`, optional `-<build>`).
-2. `pnpm skills:manifest` to refresh `manifest.json`.
+2. `pnpm skills:manifest` to refresh `manifest.json` (and `pnpm livewares:manifest`
+   if the Liveware Sample under `livewares/` changed in the same round — it rides
+   the same tag).
 3. `pnpm skills:sync` to copy the tree + manifest into the sibling plugin
    repos (flags `--hermes/--openclaw` override the default sibling paths),
    then commit the synced files in each plugin repo.
@@ -63,6 +65,9 @@ pnpm skills:check       # CI: fail if the manifest is stale
 
    Both adapters share the constant with their `liveware-sample` module, so the
    `livewares/` tree is pinned to the same tag — verify it exists there too.
+
+The same procedure is summarised, in release order, under "Release a skills /
+livewares change" in [`../docs/release.md`](../docs/release.md).
 
 2026-07-06: skills were renamed to `clawchat-*` ids; the old ids (`clawchat`,
 `liveware-app`, `set-greeting`) are permanent tombstones in `REMOVED`.

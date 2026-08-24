@@ -9,9 +9,10 @@ install and pair the ClawChat plugin for **one** target - `openclaw` **or**
 `hermes`. Each code block is one terminal call; use your target's block.
 
 **On Windows, use PowerShell** - not `cmd.exe`. The `npx`, `openclaw`, and
-`hermes` commands below are identical there; only three blocks differ and each
-has a *(Windows)* twin right next to the bash one: the step 0 pre-check, the
-Hermes venv activation in step 1, and the Hermes 0.12 fallback in step 3. Never
+`hermes` commands below are identical there; only five blocks differ and each
+has a PowerShell twin right next to the bash one: the step 0 pre-check, and in
+step 1 the Hermes venv activation, the Hermes profile check and the `HERMES_HOME`
+export, plus the Hermes 0.12 fallback in step 3. Never
 use PowerShell's `curl` - it is an alias for `Invoke-WebRequest` and takes
 entirely different flags. If you would rather not run steps 1-2 by hand, the
 one-shot script `install-clawchat.ps1` published alongside this guide does them
@@ -117,8 +118,9 @@ installing or activating. Every ClawChat identity is keyed on the active
 and burns the single-use code:
 
 ```bash
+root="${HERMES_HOME:-$HOME/.hermes}"
 echo "HERMES_HOME=${HERMES_HOME:-<unset>}"
-cat "$HOME/.hermes/active_profile" 2>/dev/null || echo "active_profile=default"
+cat "$root/active_profile" 2>/dev/null || echo "active_profile=default"
 hermes profile list
 ```
 
@@ -144,11 +146,12 @@ profile itself), and `-p <name>` plus an explicit `HERMES_HOME` to `hermes` /
 `python` calls:
 
 ```bash
-export HERMES_HOME="$HOME/.hermes/profiles/<name>"                  # POSIX
+export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/<name>"  # POSIX
 ```
 
 ```powershell
-$env:HERMES_HOME = Join-Path $env:LOCALAPPDATA 'hermes\profiles\<name>'   # Windows
+$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
+$env:HERMES_HOME = Join-Path $root 'profiles\<name>'                # Windows
 ```
 
 ## 2. Install
@@ -324,7 +327,9 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   Windows), adding `--new-account` if this profile still needs its own agent. A
   `[HERMES_HOME fallback] HERMES_HOME is unset but active profile is …` line on
   stderr is the same problem. Verify with that profile's own files:
-  `grep -A6 'clawchat:' "$HOME/.hermes/profiles/<name>/config.yaml"` -
+  `grep -A6 'clawchat:' "${HERMES_HOME:-$HOME/.hermes}/profiles/<name>/config.yaml"`
+  (PowerShell: the same file under `%LOCALAPPDATA%\hermes` when `HERMES_HOME` is
+  unset) -
   `extra.profile` must be `<name>`, and two profiles must never share
   `extra.user_id`.
 

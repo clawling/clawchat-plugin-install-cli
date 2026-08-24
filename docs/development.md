@@ -31,12 +31,19 @@ Run these from the repo root unless noted.
 | `pnpm clean` | Remove `dist/` from each package |
 | `pnpm skills:manifest` | `node scripts/build-skills-manifest.mjs` — regenerate `skills/manifest.json` from the `SKILL.md` tree after editing a skill |
 | `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` — CI guard that fails when the committed manifest is stale |
+| `pnpm skills:sync` | `node scripts/sync-skills.mjs` — copy the skills tree + manifest into the sibling plugin repos (`--hermes` / `--openclaw` override the default sibling paths) |
+| `pnpm livewares:manifest` | `node scripts/build-livewares-manifest.mjs` — regenerate `livewares/manifest.json` after editing the Liveware Sample app |
+| `pnpm livewares:check` | `node scripts/build-livewares-manifest.mjs --check` — CI guard that fails when that manifest is stale |
+| `pnpm test:scripts` | `node --test scripts/sync-skills.test.mjs` — the sync script's own tests; `pnpm test` runs these too, after the per-package Vitest suites |
 | `pnpm release:dry` | `pnpm --filter @clawling/clawchat-plugin-install-cli release:dry` — typecheck + test + build + `npm pack --dry-run` |
 
-The `skills:*` scripts maintain the runtime skills-hosting subsystem (the `skills/`
-tree this repo serves to the two agent adapters). See the "Skills hosting
-subsystem" section of [`architecture.md`](architecture.md) and
-[`../skills/README.md`](../skills/README.md) for the full workflow.
+The `skills:*` and `livewares:*` scripts maintain the two runtime hosting
+subsystems — the `skills/` markdown tree and the `livewares/` Liveware Sample app
+— that this repo serves to the two agent adapters. Both manifests are generated:
+never hand-edit `skills/manifest.json` or `livewares/manifest.json`. See the
+"Skills hosting subsystem" and "Livewares hosting subsystem" sections of
+[`architecture.md`](architecture.md) and [`../skills/README.md`](../skills/README.md)
+for the full workflow.
 
 Filter examples for working on a single package:
 
@@ -84,12 +91,31 @@ need a real host CLI.
 
 ## Environment variables observed at runtime
 
-- `HERMES_HOME` — Hermes auth reader checks `$HERMES_HOME/.env` first, then
-  `$HOME/.hermes/.env`. See `packages/core/src/auth/hermes.ts`.
+- `HERMES_HOME` — the Hermes root. `resolveHermesHomeRoot`
+  (`packages/core/src/hermes-home.ts`) uses it when set, and otherwise falls back
+  to the **platform-native** default: `~/.hermes` on POSIX,
+  `%LOCALAPPDATA%\hermes` on Windows (`<home>\AppData\Local\hermes` when
+  `LOCALAPPDATA` is unset). Both the Hermes base-URL writer
+  (`baseurl/write-hermes.ts`) and the auth reader (`auth/hermes.ts`) resolve
+  their `.env` path this way; the auth reader probes `$HERMES_HOME/.env` first
+  and then the platform default.
+- `LOCALAPPDATA` / `USERPROFILE` / `HOME` — consumed by that same platform
+  resolution. `installers/openclaw.ts` additionally reads `HOME` (falling back to
+  `USERPROFILE`) to decide whether a configured
+  `/home/node/.openclaw/workspace` is a stale container leftover.
+- `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` / `ALL_PROXY` /
+  `all_proxy` — when any is set, the Hermes flow fetches `plugin.yaml` with
+  `curl` instead of Node's `fetch`, which does not honour these on Node 18–23
+  (`isProxyConfigured` in `packages/core/src/installers/hermes.ts`).
 - `CLAWCHAT_TOKEN`, `CLAWCHAT_REFRESH_TOKEN`, `CLAWCHAT_BASE_URL`,
-  `CLAWCHAT_USER_ID` — read out of the Hermes env file by the auth helper.
-- `process.env` in general is only used by the auth helpers; the installer
-  paths do not consult environment variables.
+  `CLAWCHAT_USER_ID` — read out of the Hermes `.env` file by the auth helper (these
+  are file keys, not process env vars that the CLI itself reads).
+- The installers also *set* one variable on a child process:
+  `GIT_TERMINAL_PROMPT=0` for the CLI-owned `git clone` in the Hermes ref flow, so
+  git can never block on a credential prompt.
+
+Every path above takes an injectable override (`homeDir`, `env`, `platform`) so
+both layouts are testable without touching the real environment.
 
 ## Style
 

@@ -1,12 +1,15 @@
 # Release
 
-This project ships two artifacts that are released independently:
+This project ships three artifacts that are released independently:
 
 1. The npm package `@clawling/clawchat-plugin-install-cli`, published from
    `packages/cli`.
-2. The runtime install guide `install.md`, uploaded to a public R2 prefix
-   by `scripts/upload-install-md-to-r2.sh`. Agents and end-users fetch this
-   file at install time.
+2. The runtime install assets — `install.md` plus both one-shot installer
+   scripts — uploaded to a public R2 prefix by
+   `scripts/upload-install-md-to-r2.sh`. Agents and end-users fetch these at
+   install time.
+3. The `skills/` and `livewares/` trees, released together under a
+   `skills-vX.Y.Z` git tag that the two agent adapters pin to.
 
 > Shipping a test/pre-release build instead of a real release? Use the `dev`
 > dist-tag flow in [`dev-release.md`](dev-release.md) so you don't push
@@ -50,11 +53,22 @@ This project ships two artifacts that are released independently:
 
 There is no GitHub Actions release workflow today; publishing is manual.
 
-## Refresh the runtime install guide on R2
+## Refresh the runtime install assets on R2
 
 `install.md` at the repo root is the file end-users (or AI agents on their
-behalf) read after running `npx -y @clawling/clawchat-plugin-install-cli`. It is
-hosted at the public R2 prefix configured in
+behalf) read after running `npx -y @clawling/clawchat-plugin-install-cli`. The
+upload script publishes **three** objects under the configured prefix, and always
+all three together:
+
+| Local file | R2 object (default prefix) | Content-Type |
+|------------|----------------------------|--------------|
+| `install.md` | `clawchat/install.md` | `text/markdown` |
+| `scripts/install-clawchat.sh` | `clawchat/install-clawchat.sh` | `text/x-shellscript` |
+| `scripts/install-clawchat.ps1` | `clawchat/install-clawchat.ps1` | `text/plain` |
+
+The script aborts if any of the three is missing, so a step added to the guide
+that a script also performs means updating the guide **and** both scripts before
+uploading. They are hosted at the public R2 prefix configured in
 `scripts/.env.r2.example`:
 
 - bucket: set `R2_BUCKET`
@@ -76,15 +90,43 @@ To validate without uploading:
 scripts/upload-install-md-to-r2.sh --no-upload
 ```
 
-The script reads `$REPO_ROOT/install.md` directly — do not move that file
-without also updating the script.
+The script reads `$REPO_ROOT/install.md` and `$REPO_ROOT/scripts/install-clawchat.{sh,ps1}`
+directly — do not move those files without also updating the script.
 
-## Bootstrap script
+## Release a skills / livewares change
 
-`scripts/install-clawchat.sh` is a thin bash wrapper around
-`npx -y @clawling/clawchat-plugin-install-cli@latest`. It is documented in the root
-`README.md`; it does not need a release step because users invoke it from
-either the GitHub raw URL or a checked-out copy.
+The `skills/` and `livewares/` trees are versioned **independently of the npm
+package**: both agent adapters fetch them from GitHub raw at a pinned
+`skills-vX.Y.Z` tag, so publishing the CLI does not ship a skill change and a new
+tag reaches nobody until every consumer's pin is moved.
+
+1. Edit the files and bump their versions — a `SKILL.md` frontmatter `version:`,
+   and/or the Liveware Sample's `liveware.json` `version`.
+2. Regenerate the manifests and let CI verify them:
+
+   ```bash
+   pnpm skills:manifest && pnpm skills:check
+   pnpm livewares:manifest && pnpm livewares:check
+   ```
+
+3. `pnpm skills:sync` to refresh the bundled snapshots in the sibling plugin
+   repos, and commit those.
+4. Tag this repo `skills-vX.Y.Z` and push the tag.
+5. **Move the pin in all three consumers**, then release each:
+   `DEFAULT_SKILLS_REF` in `packages/core/src/config.ts` here, plus the matching
+   constant in each agent plugin repo. They must all name the same tag.
+
+[`../skills/README.md`](../skills/README.md) has the full per-consumer checklist
+and the tombstone rules for retired skill ids.
+
+## Bootstrap scripts
+
+`scripts/install-clawchat.sh` (bash) and `scripts/install-clawchat.ps1`
+(PowerShell) are thin wrappers around
+`npx -y @clawling/clawchat-plugin-install-cli@latest`. They are documented in the
+root `README.md` and have no npm release step of their own — but they **are**
+part of the R2 upload above, so a change to either only reaches users once that
+upload is re-run.
 
 Bootstrap-script tests run under Vitest
 (`packages/cli/tests/install-script.test.ts`) and stand up temporary mock

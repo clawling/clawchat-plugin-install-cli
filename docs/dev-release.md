@@ -7,9 +7,10 @@ touching the `latest` channel that real end-users get.
 This is the companion to [`release.md`](release.md):
 
 - `release.md` → ships the production build to npm `latest`. The bootstrap
-  script (`scripts/install-clawchat.sh`) and the R2-hosted `install.md` both
-  pull `@clawling/clawchat-plugin-install-cli@latest`, so **anything on `latest`
-  goes straight to real users**.
+  scripts (`scripts/install-clawchat.sh` and `scripts/install-clawchat.ps1`) and
+  the R2-hosted `install.md` all pull
+  `@clawling/clawchat-plugin-install-cli@latest`, so **anything on `latest` goes
+  straight to real users**.
 - `dev-release.md` (this file) → ships a pre-release build to a separate `dev`
   dist-tag that only testers opt into via `@dev`. `latest` is left untouched.
 
@@ -115,8 +116,9 @@ Or pin an exact prerelease version when you need to compare two dev builds:
 npx -y @clawling/clawchat-plugin-install-cli@0.2.0-dev.1 install --target openclaw
 ```
 
-Note: the bootstrap script `scripts/install-clawchat.sh` hard-codes
-`@clawling/clawchat-plugin-install-cli@latest`, so it will **not** pick up dev
+Note: both bootstrap scripts (`scripts/install-clawchat.sh` and
+`scripts/install-clawchat.ps1`) hard-code
+`@clawling/clawchat-plugin-install-cli@latest`, so they will **not** pick up dev
 builds. If you want a tester to use the bootstrap flow against a dev build,
 either tell them to run the `npx … @dev` command above directly, or refresh a
 **dev copy** of the R2 assets (next section).
@@ -125,18 +127,20 @@ either tell them to run the `npx … @dev` command above directly, or refresh a
 
 ## (Optional) Dev copy of the R2 install assets
 
-The production `install.md` / `install-clawchat.sh` live at the R2 prefix
-`clawchat/` (see [`release.md`](release.md)). To stage a dev copy without
-overwriting the production objects, override `R2_PREFIX`:
+The production `install.md`, `install-clawchat.sh`, and `install-clawchat.ps1`
+live at the R2 prefix `clawchat/` (see [`release.md`](release.md)). To stage a dev
+copy without overwriting the production objects, override `R2_PREFIX`:
 
 ```bash
 cp scripts/.env.r2.example scripts/.env.r2     # fill in the AWS_* keys
 R2_PREFIX=clawchat-dev scripts/upload-install-md-to-r2.sh
-# → uploads clawchat-dev/install.md and clawchat-dev/install-clawchat.sh
+# → uploads clawchat-dev/install.md, clawchat-dev/install-clawchat.sh
+#   and clawchat-dev/install-clawchat.ps1 (all three, always)
 ```
 
 If your dev `install.md` should drive a dev CLI build, edit the `npx` spec in
-your local `install.md` / `install-clawchat.sh` to use `@dev` before uploading.
+your local `install.md` and in **both** installer scripts to use `@dev` before
+uploading.
 Do **not** point the production `clawchat/` prefix at `@dev`.
 
 ---

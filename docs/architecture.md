@@ -11,7 +11,9 @@ private and only orchestrates the workspace; the published artifact lives in
 
 ```
 .                                  package: @clawling/clawchat-plugin-install (private)
-├── package.json                   workspace root; scripts: build, test, typecheck, clean, release:dry
+├── package.json                   workspace root; scripts: build, test, typecheck, clean,
+│                                  skills:manifest/check/sync, livewares:manifest/check,
+│                                  test:scripts, release:dry
 ├── pnpm-workspace.yaml            packages: ["packages/*"]
 ├── tsconfig.base.json             shared strict TS settings
 ├── packages/
@@ -22,7 +24,10 @@ private and only orchestrates the workspace; the published artifact lives in
 │   └── core/                      package: @clawling/clawchat-plugin-install-core (workspace-internal)
 │       ├── package.json           no publishConfig; consumed only by `cli`
 │       └── src/...
-└── scripts/                       bootstrap + R2 upload helpers (not part of the npm package)
+├── skills/                        canonical agent skill markdown + generated manifest
+├── livewares/                     canonical Liveware Sample app + generated manifest
+└── scripts/                       bootstrap, R2 upload, and manifest/sync helpers
+                                   (none of them part of the npm package)
 ```
 
 Only `packages/cli` is published to npm. `packages/core` is consumed via the
@@ -32,9 +37,12 @@ time — see the alias in `packages/cli/tsdown.config.ts` and the
 therefore ships a single `dist/index.cjs` with no runtime dependency on
 `core`. Vitest mirrors the same alias in `packages/cli/vitest.config.ts`.
 
-The only runtime dependency declared in `packages/cli/package.json` is
-[`cac`](https://www.npmjs.com/package/cac), which is intentionally not
-bundled.
+The published CLI has **zero runtime dependencies**: `packages/cli/package.json`
+declares no `dependencies` at all, and its only `devDependency`,
+[`cac`](https://www.npmjs.com/package/cac), is bundled into `dist/index.cjs`
+along with `core` (both are listed in `deps.alwaysBundle` in
+`packages/cli/tsdown.config.ts`). `npx` therefore fetches a single tarball and
+resolves nothing else.
 
 ## Command surface
 
@@ -43,8 +51,8 @@ The CLI exposes exactly two commands, both defined in
 
 | Command | Flags |
 |---------|-------|
-| `clawchat install` | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--activate <code>` |
-| `clawchat update`  | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>` |
+| `clawchat install` | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--activate <code>`, `--profile <name>` |
+| `clawchat update`  | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--profile <name>` |
 
 Both commands require `--target`. The allowed values are defined in
 `packages/core/src/config.ts` (`TARGETS = ["openclaw", "hermes"]`); any other
@@ -54,15 +62,23 @@ Flag semantics:
 
 - `--force` — reinstall/repair even when the installed version is already current.
 - `--apibaseurl` / `--wsbaseurl` / `--mediabaseurl` — override the backend
-  endpoints written for the plugin **before** install/update. A bare `host:port`
-  is normalized assuming TLS (`--wsbaseurl` → `wss://host:port/ws`, the two HTTP
-  ones → `https://host:port`) via `normalizeWsUrl` / `normalizeHttpUrl`; pass a
-  full `ws://`/`http://` URL to opt out. Both commands accept all three.
+  endpoints written for the plugin. A bare `host:port` is normalized assuming TLS
+  (`--wsbaseurl` → `wss://host:port/ws`, the two HTTP ones → `https://host:port`)
+  via `normalizeWsUrl` / `normalizeHttpUrl`; pass a full `ws://`/`http://` URL to
+  opt out. Both commands accept all three. **The write order differs per target**
+  (see the flows below): Hermes writes the `.env` values *before* touching the
+  host, OpenClaw writes them *after* the plugin is installed.
 - `--activate <code>` — **`install` only, Hermes only.** After a successful
   Hermes install the CLI runs `hermes clawchat activate <code>` once
   (`activateHermesAfterInstall` in `packages/core/src/installers/hermes.ts`,
   bounded by `HERMES_ACTIVATE_TIMEOUT_MS`), so install + activation is a single
   deterministic call. The code is single-use; the result reports `+ activated`.
+- `--profile <name>` — **Hermes only.** Prefixes every delegated `hermes` call
+  with `-p <name>` (`withHermesProfileArgs`) and points the base-URL write at
+  that profile's home, `<HERMES_HOME-or-platform-default>/profiles/<name>`
+  (`resolveHermesProfileHome` in
+  `packages/core/src/installers/hermes-profile.ts`). Registered on both commands.
+  Omit it — or pass `default` — to target the Hermes root itself.
 - The optional `host@ref` suffix on `--target` (e.g. `openclaw@dev`,
   `hermes@<giturl#branch>`) is parsed by `parseTarget`; `ref` selects the npm
   dist-tag/version or the git ref to install. Works on both commands.
@@ -90,6 +106,32 @@ OpenClaw plugin manager remains responsible for reporting that state.
 | `install --target openclaw --force` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
 | `update --target openclaw` | `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install` |
 | `update --target openclaw --force` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
+
+#### Files this flow writes
+
+Both `install` and `update` may rewrite the user's OpenClaw config
+(`~/.openclaw/openclaw.json`, resolved by `getOpenClawConfigPath`):
+
+- **Legacy-id migration.** After the delegated `openclaw plugins …` call, the CLI
+  runs `applyLegacyOpenClawConfigMigration`
+  (`packages/core/src/installers/openclaw-config-migration.ts`), which rewrites
+  the config when it still references the pre-rename `openclaw-clawchat` id —
+  moving the channel block, `plugins.allow` gate, entries, and tools onto
+  `clawchat-plugin-openclaw` so an upgrade from the old plugin is
+  non-destructive. It is a no-op write-wise when no legacy id is present (zero
+  changes ⇒ no file write), and a failure is non-fatal: it is reported as a
+  warning and the install continues.
+- **Base URLs.** When any of `--apibaseurl` / `--wsbaseurl` / `--mediabaseurl` is
+  passed, `writeOpenClawBaseUrls` upserts them under
+  `channels.clawchat-plugin-openclaw.*`.
+
+Both happen **after** the plugin install, and in that order: the channel id is
+not registered until install completes, so writing `channels.<id>.*` earlier
+makes `openclaw plugins install`'s own config validation fail with "unknown
+channel id" on hosts that validate strictly. The migration runs first so the
+base URLs land on the migrated key. Also note `repairStaleOpenClawWorkspace` may
+run `openclaw config set agents.defaults.workspace` before the install, as
+described above.
 
 The npm package name `@clawling/clawchat-plugin-openclaw` is the constant
 `OPENCLAW_PLUGIN_SPEC` in `packages/core/src/config.ts`. Every delegated
@@ -122,7 +164,10 @@ installer should set on the user's behalf.
 ### Hermes
 
 `installHermesPlugin` and `updateHermesPlugin` in
-`packages/core/src/installers/hermes.ts` are stateful:
+`packages/core/src/installers/hermes.ts` are stateful. Before anything else,
+both write the base-URL overrides (when passed) into
+`<profile home>/.env` via `writeHermesBaseUrls` — **before** the host is
+touched, the opposite of the OpenClaw order. The remaining steps are:
 
 1. Fetch `plugin.yaml` from
    `https://raw.githubusercontent.com/clawling/clawchat-plugin-hermes-agent/main/plugin.yaml`
@@ -166,6 +211,26 @@ installed. The four result statuses are:
   untracked files, the error is rewritten with the hint to retry with
   `--force` (`appendHermesForceRepairHint` in
   `packages/core/src/installers/hermes.ts`).
+- An EBUSY / read-only failure while Hermes rewrites `$HERMES_HOME/config.yaml`
+  is rewritten with a deployment-level hint
+  (`appendHermesConfigBusyHint`) — that file must be writable, not a read-only
+  bind mount.
+
+#### Network and filesystem access in the Hermes flow
+
+Beyond the `plugin.yaml` GET, a **`--target hermes@<ref>` install reaches the
+network itself**: `installViaLocalClone` creates a temporary directory under the
+OS temp dir (`fs.mkdtempSync(os.tmpdir(), "clawchat-hermes-")`), runs
+`git clone --depth 1 --single-branch --branch <branch> <cloneUrl>` into it
+(bounded by `GIT_CLONE_TIMEOUT_MS` with two retries, `GIT_TERMINAL_PROMPT=0` so
+git can never block on a credential prompt), reads `plugin.yaml` straight out of
+the checkout for the host-compat guard, hands the checkout to
+`hermes plugins install file://<dest> --force --enable`, and removes the temp
+tree in a `finally`. The CLI owns the clone precisely so the branch in a
+`#branch` fragment is honoured and the network step stays under its own
+timeout/retry budget instead of the host's fixed, no-retry clone. The canonical
+(non-ref) install has no CLI-owned clone — the host clones the repo itself
+during `hermes plugins install clawling/clawchat-plugin-hermes-agent`.
 
 ## Skills hosting subsystem
 
@@ -192,8 +257,11 @@ skills/
   hand-edit `manifest.json`.
 - **`packages/core/src/skills/check-update.ts`** is the TypeScript reference
   implementation of the runtime contract: it builds the fetch URLs from
-  `OFFICIAL_SKILLS_BASE` + a git `ref` (default `DEFAULT_SKILLS_REF = "main"`;
-  production callers SHOULD pin an immutable `skills-vX.Y.Z` tag), parses/validates
+  `OFFICIAL_SKILLS_BASE` + a git `ref` (defaulting to `DEFAULT_SKILLS_REF`, which
+  is pinned to an immutable `skills-vX.Y.Z` tag rather than the moving `main` —
+  `skills-v1.6.0` as of this writing; `packages/core/src/config.ts` is the
+  authoritative value and every skills release moves it, see
+  [`release.md`](release.md)), parses/validates
   the manifest (`parseSkillsManifest`), compares offered vs locally installed
   versions (`checkSkillUpdate`), and downloads+integrity-checks a single file
   (`fetchSkillMarkdown`, capped at `MAX_SKILL_BYTES`, exact `sha256` match
@@ -205,14 +273,63 @@ skills/
 
 The relevant constants are all in `packages/core/src/config.ts`:
 `OFFICIAL_SKILLS_BASE` (the GitHub raw base — `clawling` is public, so fetches
-are unauthed), `DEFAULT_SKILLS_REF`, and `MAX_SKILL_BYTES`.
+are unauthed), `DEFAULT_SKILLS_REF` (the pinned skills tag; both agent adapters
+keep their own copy of this constant and all three move together), and
+`MAX_SKILL_BYTES`.
 
 | npm script | Command | Purpose |
 |------------|---------|---------|
 | `pnpm skills:manifest` | `node scripts/build-skills-manifest.mjs` | rewrite `skills/manifest.json` from the `SKILL.md` tree |
 | `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` | CI guard: fail if the committed manifest is stale |
+| `pnpm skills:sync` | `node scripts/sync-skills.mjs` | copy the tree + manifest into the sibling plugin repos (`--hermes` / `--openclaw` override the default sibling paths) |
+| `pnpm test:scripts` | `node --test scripts/sync-skills.test.mjs` | node:test coverage for the sync script (also part of the root `pnpm test`) |
 
 See [`../skills/README.md`](../skills/README.md) for the release/versioning workflow.
+
+## Livewares hosting subsystem
+
+`livewares/` is the second tree this repository hosts for the adapters, and it
+works exactly like `skills/`: static files served from GitHub raw, described by a
+generated manifest the adapters verify before writing. It holds the **Liveware
+Sample** — the small demo web app the plugins auto-install so a freshly paired
+user has something to look at — not markdown.
+
+```
+livewares/
+  manifest.json                        generated contract (do not hand-edit)
+  openclaw/liveware-sample/            the sample app's static files
+    liveware.json                      carries the sample's `version`
+    index.html, app.js, server.mjs, state.json
+```
+
+- **One physical copy, two manifest targets.** The sample is host-agnostic (plain
+  Node), so `scripts/build-livewares-manifest.mjs` maps both the `openclaw` and
+  the `hermes` target at the same `openclaw/liveware-sample` directory (see its
+  `LAYOUT` constant). Each adapter fetches under its own target key; there is no
+  second copy to drift.
+- **`livewares/manifest.json`** is keyed `livewares.<target>.<sampleId>` and, unlike
+  the skills manifest, records a **list of files** per sample — each with its
+  repo-relative `path`, `sha256`, and `bytes` — plus the `version` read from the
+  sample's `liveware.json`. Adapters compare `version` to decide whether to
+  refresh and check each file's `sha256` before writing it.
+- **`scripts/build-livewares-manifest.mjs`** generates it, or verifies it with
+  `--check`. Never hand-edit `manifest.json`.
+- The tree is served from the same `OFFICIAL_SKILLS_BASE` repo and pinned by the
+  same `skills-vX.Y.Z` tag as the skills tree — both adapters share the
+  `DEFAULT_SKILLS_REF` constant between their skill-update and liveware-sample
+  modules, so a new tag must exist in **both** trees. There is no TypeScript
+  reference implementation for livewares in `packages/core` (unlike
+  `skills/check-update.ts`); the adapters implement the fetch themselves.
+- Byte-exactness matters: `.gitattributes` pins LF on checkout so a Windows clone
+  cannot invalidate the recorded hashes.
+
+The `clawchat-liveware-sample` skill (per host, under `skills/`) is what teaches
+the agent to operate this app; the two subsystems ship together.
+
+| npm script | Command | Purpose |
+|------------|---------|---------|
+| `pnpm livewares:manifest` | `node scripts/build-livewares-manifest.mjs` | rewrite `livewares/manifest.json` from the `livewares/` tree |
+| `pnpm livewares:check` | `node scripts/build-livewares-manifest.mjs --check` | CI guard: fail if the committed manifest is stale |
 
 ## Library API (currently unused by the CLI)
 
@@ -225,14 +342,34 @@ consumers. They are covered by tests under `packages/core/tests/auth/` and
 exported names as a stable surface even though the CLI itself does not
 depend on them.
 
-## Security note: subprocess argument validation
+## Security note: subprocess argument handling
 
-`packages/core/src/installers/run.ts` defines `runCommand` and
-`captureCommand`, the only paths that spawn subprocesses. Both reject any
-argument matching `[\s&|;<>()` + "\`" + `$\\"'%^]` before spawning. This is
-why the bootstrap script and `--target` values can safely contain only
-plain identifiers — anything user-supplied that reaches the installers is
-rejected before it touches a shell.
+`packages/core/src/installers/run.ts` defines `runCommand` and `captureCommand`,
+the only paths that spawn subprocesses. What they guarantee is narrower than
+"every argument is sanitized", and the difference matters:
+
+- **Command names** are checked on every platform. `assertSafeCommandName`
+  rejects anything matching `UNSAFE_COMMAND_NAME` (whitespace, shell
+  metacharacters, quotes, `%`, `^`, control characters). Every command name in
+  this package is a hardcoded constant (`git`, `hermes`, `openclaw`, `curl`), so
+  nothing legitimate trips it.
+- **Arguments on POSIX are passed through verbatim.** `spawnOptions` sets
+  `shell: false` there, so `execvp` receives the argv array and no shell ever
+  re-parses it — there is nothing to escape, and rejecting spaces or backslashes
+  would only break legitimate paths. `prepareArgs` returns the array unchanged,
+  by design (see its doc comment).
+- **Arguments on Windows are quoted, not filtered out.** `shell: true` is
+  unavoidable on win32 because `npm`/`npx` and the host CLIs installed through
+  them are `.cmd` shims Node refuses to spawn directly. There `prepareArgs`
+  rejects only what cannot be made safe inside a `cmd.exe` double-quoted argument
+  (`WINDOWS_UNQUOTABLE` — `"`, `%`, control characters) and quotes everything
+  else via `quoteWindowsArg`, so ordinary Windows paths (`C:\Users\Zhang San\…`,
+  full of backslashes and spaces) keep working.
+
+The property to rely on is therefore **"POSIX never involves a shell; Windows
+quotes, and rejects the few characters it cannot quote"** — not "user input is
+stripped of metacharacters before it reaches the installers". `CommandOptions.env`
+is not validated at all and must only ever carry hardcoded constants.
 
 ## Relationship to the sibling plugins
 

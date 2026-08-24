@@ -19,7 +19,12 @@ Internal library for `@clawling/clawchat-plugin-install-cli`. Not published to n
   the version-comparison helpers (`isVersionOlder`,
   `assertVersionSatisfiesRange`).
 - `src/installers/run.ts` — `runCommand` / `captureCommand` wrappers around
-  `child_process.spawnSync` with shell-metacharacter rejection.
+  `child_process.spawnSync`. Command *names* are metacharacter-checked on every
+  platform; arguments are passed through verbatim on POSIX (`shell: false`, so no
+  shell ever sees them) and quoted for `cmd.exe` on Windows, where `shell: true`
+  is unavoidable — only the handful of characters that cannot be quoted there
+  (`"`, `%`, control characters) are rejected. See the "Security note" in
+  [`../../docs/architecture.md`](../../docs/architecture.md).
 - `src/installers/archive.ts` — `tar`-based helpers used by tests.
 - `src/auth/*` — readers for OpenClaw `openclaw.json` and Hermes `.env`.
   Exposed for downstream code; not invoked by the published CLI commands.
