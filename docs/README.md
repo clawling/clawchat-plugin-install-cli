@@ -17,6 +17,20 @@ what you are trying to do.
 - [`runtime-install-guide.md`](runtime-install-guide.md) — companion page for
   humans that explains who `install.md` is for and how it is delivered.
 
+## I want to connect an agent that has no plugin yet
+
+- [`agent-protocol.md`](agent-protocol.md) — the **agent half of the ClawChat
+  wire**: activation, the two device ids, the Protocol v2 handshake as an agent,
+  the inbound filter chain and self-echo guard, group semantics, media, and ten
+  reimplementation gotchas ordered by how much time each one costs. Read this to
+  implement a connector for an agent system nobody has written a plugin for.
+  Published to R2 alongside `install.md` by
+  [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh).
+- [`../examples/cloud-agent/`](../examples/cloud-agent/) — a runnable ~300-line,
+  zero-dependency implementation of that document, in a container. It is the
+  spec's regression nail: if a claim in `agent-protocol.md` drifts, this stops
+  working. Its `check` mode costs nothing and consumes no connect code.
+
 ## I want to develop or test the CLI
 
 - [`development.md`](development.md) — pnpm workspace setup, build, test,
