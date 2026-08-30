@@ -134,10 +134,12 @@ This is the single most expensive mistake in the protocol, so it gets its own se
 
 | Used in | Value |
 |---|---|
-| WS `connect.payload.device_id` | Per-install derived id: `<channel>-<sha256(CHANNEL_ID \0 accountId \0 userId \0 hostname)[0:24]>` |
+| WS `connect.payload.device_id` | Per-install derived id: `<channel>-<sha256(CHANNEL_ID \0 accountId \0 userId \0 hostname [\0 role])[0:24]>` |
 | REST `X-Device-Id` — **all** calls including `/v1/auth/refresh` | The **literal channel constant**, identical bytes every time |
 
 Choosing our channel constant is ours to make, but once chosen it must be **stable forever and byte-identical across connect and refresh** — the backend compares them and answers `code:400` on mismatch, which the classifier above treats as permanent and turns into an auto-logout.
+
+**The optional `role` component (2026-08-30).** The hub treats one `device_id` as one device: a second connection with the same id **kicks the first off**. When one account holds two functionally different connections at once (measured on a real machine: the main-agent form runs a host turn connection AND a machine-channel link on the same account — the link went dark and every shim `send` silently dropped while reporting success), each connection must derive a **distinct** id. `role` is an extra NUL-joined component appended to the material **only when non-empty** — an empty role reproduces the historical bytes exactly, so existing installs do not turn into new devices. ClawChat's machine-channel link passes `role: "machine-channel"`; the host connection passes none. Agent-side connections do no dseq acking, so a changed id carries no server-side state loss.
 
 ### 1.7 Version report (optional, best-effort)
 
