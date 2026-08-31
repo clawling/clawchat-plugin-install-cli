@@ -32,6 +32,8 @@ Every wire action a tool performs is specified in this document (send §2.6, rea
 
 The split matters when reading §2.9 / §3: **context assembly is the channel's job**, not the host's. A host adapter receives a finished prompt string and returns text. Swapping hosts must not require re-implementing anything in this file.
 
+**A live `hello-ok` — even the auto-greeting after first connect — proves only the channel half.** The reference `examples/cloud-agent/` runs as a deliberate probe when no `CLAWCHAT_MODEL_*` is configured: it echoes inbound text and says it has no brain. That echo is a **successful wire, not a failed handshake** — nothing in §1.3 / §2.3 broke, so don't go debugging there. The converse holds too: don't call the pairing "done" until a real host is attached, because to the owner a connected-but-hostless agent looks broken (measured 2026-08-31 — the first outside reimplementation reported "integration failure" for exactly this).
+
 > **⚠️ Precaution 7 does not forbid this.** **`CLAUDE.md`** Precaution 7 says WebSocket handlers are registered only in `WsNotifier._registerGlobalHandlers`. That constrains **the user's connection**. An agent connection is a separate `WsV2Client` instance with its own handler set and does not enter that registry — see **`../technical-implementation/architecture.md`**. Identity isolation between the two is a hard acceptance item, not a best-effort.
 
 ---
@@ -79,6 +81,8 @@ Body:
 | `user_id` | Optional; a re-pair hint only. |
 
 **Safe pre-check that does NOT consume the code:** `POST /v1/agents/connect/check` with `{code, platform, user_id?}` → `data.pairable: bool`, `data.status: pending|expired|invalid|paired`, optional `user_id_status: live|deleted|unknown|owner_mismatch|invalid`.
+
+> **`pairable:false` is not "the code is dead" — branch on `status` × `user_id_status`** ([gotcha 11](#6-reimplementation-gotchas)). `status:"pending"` + `user_id_status:"owner_mismatch"` means the invite is **unused** and the replayed `user_id` belongs to a different owner (a stale re-pair hint from an earlier pairing): drop `user_id` and check again before discarding the code. Calling `/connect` with the mismatched hint is what can spend the code *and* still fail. Note the reference `examples/cloud-agent/` omits `user_id` entirely — code copied from it first hits this the day it grows re-pairing. (Measured 2026-08-31.)
 
 Response `data`:
 
@@ -277,9 +281,11 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
 - **No outbound streaming.** `message.created` / `message.add` / `message.done` are receive-only; replies go out as single static messages.
 - **Never address an outbound frame to a `usr_…` id** — see [gotcha 4](#6-reimplementation-gotchas).
 
-**Typing** — `{event:"typing.update", chat_id, to, payload:{is_typing:bool}}`, fire-and-forget (not ack-aligned).
+**Typing** — `{event:"typing.update", chat_id, to:{id,type}, payload:{is_typing:bool}}`, fire-and-forget (not ack-aligned).
 
-> Measured against this app 2026-07-31: include `to`, mirroring the composer's own frame — DM → peer `usr_…` with type `"direct"`; group → `cnv_…` with type `"group"`. The server injects `sender` on the downlink. **The app's indicator lapses 6 s after the last frame** (`typingIndicatorWindow`), so re-send `is_typing:true` every ~4 s for the whole run and close with `false`.
+> Measured against this app 2026-07-31: include `to` **as an object**, mirroring the composer's own frame — DM → `{id:<peer usr_…>, type:"direct"}`; group → `{id:<cnv_…>, type:"group"}`. The server injects `sender` on the downlink. **The app's indicator lapses 6 s after the last frame** (`typingIndicatorWindow`), so re-send `is_typing:true` every ~4 s while the turn runs and close with `false`.
+>
+> **Bound the loop to a send that is actually coming** ([gotcha 12](#6-reimplementation-gotchas)). The 6 s lapse is the app's idle timeout, not an invitation to keep a dead host looking alive: if the host has produced no `message.send` within a bounded window (seconds, not minutes), send `is_typing:false` and stop refreshing — on the owner's screen, endless typing with no message is indistinguishable from a hung channel. Persist the inbound claim first (gotcha 6), then type, then send; drop typing even when the host errors. (Measured 2026-08-31.)
 
 **Reaction** — `{event:"message.reaction", chat_id, payload:{target_message_id, emoji, removed}}`, fire-and-forget. The server-side emoji allowlist was lifted (measured 2026-06-23): any emoji echoes back.
 
@@ -490,6 +496,8 @@ Every one of these was learned the expensive way — from the reference plugin's
 8. **`platform` is client-chosen and unvalidated at the check endpoint.** `claudecode` is accepted by production; if `/connect` ever rejects a new id, fall back to `openclaw`. The visible cost of the fallback is that the Agent management page's platform pill shows `openclaw` instead of the real host name — functionally lossless, cosmetically wrong.
 9. **`pong` must echo `emitted_at` verbatim.** Re-stamping it is a protocol violation.
 10. **The §1.6 derivation includes `hostname()` — which is wrong for containers.** A Docker container gets a fresh random hostname on every `run`, so a host that derives its WS `device_id` per the formula looks like a **new device on every restart** and takes a full inbox replay each time (measured 2026-08-30: a restart re-delivered messages the previous run had already acked). The fix is the one §2.3 already states — **persist `hello-ok.device_id` and send it back next connect** — plus computing the derived value only once and storing it. The formula is right for a normal install; anything whose hostname can change must not re-derive.
+11. **`pairable:false` from `/connect/check` is a fork, not a verdict.** `status:"pending"` + `user_id_status:"owner_mismatch"` = the invite is unused and your stored `user_id` belongs to another owner — drop the hint and re-check instead of throwing the code away; `/connect` with the mismatched hint is what can spend the code and still fail (§1.3, measured 2026-08-31).
+12. **Never let `typing.update` outlive the host.** Refresh `is_typing:true` every ~4 s only while a `message.send` is actually coming; time-bound the loop and close with `false` even on host error. A hung host kept "typing" for minutes is indistinguishable, on the owner's screen, from a dead channel — which reads as a §2.3 failure when nothing on the wire is wrong (§2.6, measured 2026-08-31).
 
 ---
 

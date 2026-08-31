@@ -207,7 +207,12 @@ function shouldHandle(frame, ownUserId) {
     ...(p.message?.context?.mentions ?? []).map((m) => m.user_id ?? m.userId ?? m.id),
   ].filter(Boolean);
   const wasMentioned = frame.chat_type === 'direct' || ids.includes(ownUserId) || ids.includes('all');
-  return { text, chatId: frame.chat_id, sender: frame.sender, wasMentioned };
+  // typing.update 的收件人（§2.6：to 是对象，镜像 composer 自己的帧形）——
+  // DM 指向对端 usr_（就是刚说话的人），群指向 cnv_。
+  const typingTo = frame.chat_type === 'direct'
+    ? { id: frame.sender.id, type: 'direct' }
+    : { id: frame.chat_id, type: 'group' };
+  return { text, chatId: frame.chat_id, sender: frame.sender, wasMentioned, typingTo };
 }
 
 // ── WS ──────────────────────────────────────────────────────────────────────
@@ -515,8 +520,10 @@ function connect(state, onReady) {
   const api = {
     // §2.6：本端指示器 6s 不见新帧就熄，所以整个思考期间每 ~4s 重发一次，
     // 结束时补一帧 false。fire-and-forget，不与 ack 对齐。
-    typing(chatId, on) {
-      send({ event: 'typing.update', trace_id: traceId(), chat_id: chatId, payload: { is_typing: on } });
+    // `to` 是**对象** {id, type}（§2.6 实测口径，镜像 composer 的帧形）；
+    // 第一版漏了它 —— 2026-08-31 首个外部重实现者对照文档抓出来的偏差。
+    typing(chatId, on, to) {
+      send({ event: 'typing.update', trace_id: traceId(), chat_id: chatId, ...(to ? { to } : {}), payload: { is_typing: on } });
     },
     sendText(chatId, text) {
       const tid = traceId();
@@ -589,17 +596,17 @@ function start() {
     }
 
     // 本地模型一轮几十秒，没有指示器的话主人只能对着空白等。
-    a.typing(hit.chatId, true);
-    const keepTyping = setInterval(() => a.typing(hit.chatId, true), 4000);
+    a.typing(hit.chatId, true, hit.typingTo);
+    const keepTyping = setInterval(() => a.typing(hit.chatId, true, hit.typingTo), 4000);
     try {
       const answer = await think(hit.chatId, hit.text);
       clearInterval(keepTyping);
-      a.typing(hit.chatId, false);
+      a.typing(hit.chatId, false, hit.typingTo);
       const r = await a.sendText(hit.chatId, answer);
       log(`回复 ${r.event}，${answer.length} 字，耗时 ${Date.now() - t0}ms`);
     } catch (e) {
       clearInterval(keepTyping);
-      a.typing(hit.chatId, false);
+      a.typing(hit.chatId, false, hit.typingTo);
       // 宿主原话原样回 —— 不包装、不粉饰（`SEND_FAILED: <e>` 那条纪律的同族）。
       log('model failed:', e.message);
       await a.sendText(hit.chatId, `我这一轮没答上来：${e.message}`);
