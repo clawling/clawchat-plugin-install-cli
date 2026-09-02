@@ -98,6 +98,8 @@ Response `data`:
 
 Error **16001** `AGENT_NOT_FOUND` = the replayed `user_id` is unknown → drop `user_id` and retry once.
 
+> **A spent code still works on `/connect` — it is your token-recovery path (measured 2026-09-02).** `check` and `/connect` disagree about a code that has already been redeemed, and the disagreement is useful, not a bug: `check` answers `{"pairable":false,"status":"paired"}` — correct, there is nothing left to *pair* — while **`POST /v1/agents/connect` with that same code returns 200 and the same `agent.id`, with a fresh `access_token` / `refresh_token` pair**. So if you lose your tokens before persisting them (the measured case: an ESM crash between activation and the first write), you are not locked out and you do not need a new code from the owner. **Do not read `pairable:false` as "start over"** — this is a second reason beyond [gotcha 11](#6-reimplementation-gotchas)'s `owner_mismatch`. ⚠️ **Unmeasured, so assume the worst:** whether re-activating invalidates the previous session's tokens. Treat it as a recovery path for a client that is *not* currently connected, not as a way to open a second one.
+
 ### 1.4 JWT claims (read locally, never verified client-side)
 
 | Claim | Meaning |
