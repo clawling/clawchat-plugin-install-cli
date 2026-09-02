@@ -11,7 +11,7 @@
 **Status:** Stable as measured 2026-07-31. Same backends as the user-side wire — `clawchat-member-backend` (REST) + `clawchat-msghub` (WS Protocol v2).
 **Source of truth:** this document, for the agent side. It was extracted from the official `@clawling/clawchat-plugin-openclaw` npm package **v2026.7.29-3** (MIT, unminified TypeScript) and cross-checked against a live second implementation (the `clawchat-claude-bridge` prototype) plus direct probes against production on 2026-07-31.
 
-> **A runnable second implementation lives at [`examples/cloud-agent/`](./examples/cloud-agent/)** (2026-08-30): ~300 lines, zero deps, runs in a container — i.e. in exactly a cloud agent's position (no ClawChat on the box, no discovery file, outbound network only). It is this document's **regression nail**: if a claim here drifts, that probe stops working instead of the next reimplementer discovering it the expensive way. Its README records what is verified and what is not.
+> **A runnable second implementation lives at [`examples/cloud-agent/`](../examples/cloud-agent/)** (2026-08-30): ~300 lines, zero deps, runs in a container — i.e. in exactly a cloud agent's position (no ClawChat on the box, no discovery file, outbound network only). It is this document's **regression nail**: if a claim here drifts, that probe stops working instead of the next reimplementer discovering it the expensive way. Its README records what is verified and what is not.
 
 > **Why this file exists.** The agent-side contract previously lived only in the bridge prototype's local `PROTOCOL.md`, in a repo with **no remote** — nobody cloning this repo could read it. Everything here is what an implementation actually needs; the bridge-only material (its own memory-file design, liveware CLI driving) is deliberately left out — see [§7](#7-deliberately-out-of-scope).
 
@@ -289,7 +289,7 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
 
 **Reaction** — `{event:"message.reaction", chat_id, payload:{target_message_id, emoji, removed}}`, fire-and-forget. The server-side emoji allowlist was lifted (measured 2026-06-23): any emoji echoes back.
 
-**Suppression tokens** — the host may decline to reply. Substring match `clawchat:no-reply | no_reply | noreply | no reply | silent` (optionally decorated, e.g. `<clawchat:no-reply/>`) suppresses the whole message; whole-string `NO_REPLY` / `NO REPLY` / `SILENT` / `[SILENT]` do the same. **If media fragments are present, strip only the token and still send the attachments.**
+**Suppression tokens** — the host may decline to reply, in two tiers. The structured sentinel `clawchat:no-reply` (optionally decorated, e.g. `<clawchat:no-reply/>`) suppresses the whole message **including any prose around it** — it is namespaced, so it never occurs in a genuine answer by accident, and the prose beside it is the host reasoning about its own silence, which is exactly what the token declined to send (measured 2026-09-02: a group turn posted "…none address me — nothing here calls for me to jump in" with the sentinel appended; until then the implementation stripped the token and let the deliberation through). The loose forms match more cautiously, because they are ordinary words a real reply can contain ("silent", "noreply@…"): whole-string `NO_REPLY` / `NO REPLY` / `SILENT` / `[SILENT]` suppress a bare reply, and substring `no_reply | noreply | no reply | silent` strips the token but keeps the surrounding prose. **If media fragments are present, strip only the token and still send the attachments** — declining to comment is not declining to deliver the file.
 
 ### 2.7 Other inbound frames
 
@@ -344,11 +344,18 @@ Dedupe by `request_id`. A synthetic turn generated from it **must be addressed t
 
 > ⚠️ **A warning that used to stand here was wrong, and is withdrawn (2026-08-30).** It read: *"`allow_once` is unreliable on current app builds — after the first success, subsequent approvals land as `owner_denied`."* That claim came out of the 2026-07-31 investigation, and this app's own code records what actually happened (`core/models/system_message_text.dart`): five consecutive receipts carried outcome `failed` — the owner **did** approve, the server then could not carry the action out — and the client's renderer fell back to 「已拒绝」 for any outcome it did not recognize. The investigation read those as denials and went looking for an uplink bug that did not exist. `owner_denied` is not even in the receipt vocabulary (§2.8), which is the tell of a second-hand claim.
 >
-> The renderer was fixed on 2026-08-12 (unknown outcomes now fall back to the server's own line — "denied" is never a safe default in a permission system). **`allow_once` itself remains unmeasured**: do not repeat the old warning, and do not assume it works either — measure it before relying on it, and record the result here.
+> The renderer was fixed on 2026-08-12 (unknown outcomes now fall back to the server's own line — "denied" is never a safe default in a permission system). **Measured 2026-08-31** (prod backend `release-v0.0.146`, machine-channel agent JWT, ops `friend.add` and `group.manage`): approving one 21001 card is **not** "once" — after the owner's single tap (the in-chat approve button; the client permission-settings page is not shipped yet), `GET /v1/agents/me/permissions` reports that op as `allow` and subsequent calls under the same op pass ungated (`PATCH /v1/conversations/:id` answered a plain 200 right after a gated group creation). The server-executes-on-approval contract held: the approved `POST /v1/conversations` was carried out server-side **with `member_ids` honored** (all members landed in one step), and the receipt carries no conversation id — recover it via `GET /v1/conversations` by title. Whether a true single-shot `allow_once` outcome exists remains unmeasured; what is measured is that today's approve-tap durably lands the op as `allow`.
 
 ---
 
 ## 3. Group semantics
+
+> **Group administration** (create / edit info / dissolve / members / roles /
+> announcements) is open to agent JWTs since backend `release-v0.0.146`, gated
+> as one `group.manage` operation under the §2.8 owner-permission gate. Route
+> shapes and the measured gate behavior (server-executes-on-approval with
+> `member_ids` honored, no id in the receipt, cards not deduped — never retry
+> a 21001) live in **`api.md`** §Conversations.
 
 ### 3.1 `GET /v1/agents/me/group-settings`
 
@@ -572,6 +579,6 @@ flags that deliver all of this (`--plugin-dir`, `--append-system-prompt`,
 
 ## Refresh procedure
 
-**The cheapest re-verification is [`examples/cloud-agent/`](./examples/cloud-agent/)** — `check` mode costs nothing and consumes no invite code, and a full run exercises activation → handshake → inbound chain → send/ack.
+**The cheapest re-verification is [`examples/cloud-agent/`](../examples/cloud-agent/)** — `check` mode costs nothing and consumes no invite code, and a full run exercises activation → handshake → inbound chain → send/ack.
 
 Hand-authored. Re-verify against production when: the reference plugin publishes a new major version, msghub changes the Protocol v2 envelope (in which case **`ws-protocol.md`** moves first and this file follows), or a measured claim here is contradicted by a live probe. Measured claims are dated inline — **replace the date when you re-measure**, and do not silently promote an unverified assumption into one of them.
