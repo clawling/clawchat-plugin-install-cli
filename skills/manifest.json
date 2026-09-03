@@ -3,10 +3,10 @@
   "skills": {
     "openclaw": {
       "clawchat-core": {
-        "version": "1.2.0",
+        "version": "1.2.1",
         "path": "openclaw/clawchat-core/SKILL.md",
-        "sha256": "a558a23e1ed8c625a3c28a7893d3df1eb651c344f331204c32a42e34486ee1cb",
-        "bytes": 9278
+        "sha256": "94532ce03074f7e3897775aaac17c07e9d6d14bd534a82bc5bf730c19c41e430",
+        "bytes": 11012
       },
       "clawchat-liveware": {
         "version": "1.2.1",
