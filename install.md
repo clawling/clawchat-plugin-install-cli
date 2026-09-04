@@ -170,8 +170,9 @@ npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
 The CLI delegates to the host's plugin manager (OpenClaw -> `openclaw plugins
-install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`,
-safe on all versions; Hermes -> checks remote metadata + Hermes version, then
+install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`,
+plus `--accept-capabilities` when the host advertises it, which OpenClaw 2026.8+
+requires; Hermes -> checks remote metadata + Hermes version, then
 `hermes plugins install clawling/clawchat-plugin-hermes-agent`). Skill content is
 bundled in the plugin.
 
@@ -184,9 +185,16 @@ CLI's GitHub-raw fetch:
 ```bash
 # Hermes
 hermes plugins install clawling/clawchat-plugin-hermes-agent
-# OpenClaw
-openclaw plugins install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install
+# OpenClaw 2026.8 and newer
+openclaw plugins install @clawling/clawchat-plugin-openclaw --force --accept-capabilities
+# OpenClaw older than 2026.8 (it rejects --accept-capabilities as an unknown option)
+openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install
 ```
+
+On OpenClaw 2026.8+ both flags are required: `--force` confirms the npm (non-ClawHub)
+source, and `--accept-capabilities` consents to the plugin's declared capabilities.
+Without them the install is cancelled or rejected and the plugin never lands. Run
+`openclaw plugins install --help` if you are unsure which line your host wants.
 
 Then continue to step 3.
 
