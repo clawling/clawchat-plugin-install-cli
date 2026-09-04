@@ -21,8 +21,11 @@ npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
 For OpenClaw, `install` delegates to
-`openclaw plugins install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`.
-Both `install` and `update` may also rewrite the user's `~/.openclaw/openclaw.json`
+`openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`
+(plus `--accept-capabilities` on OpenClaw >=2026.8, which requires both flags to install
+an npm-sourced plugin at all).
+Both `install` and `update` may also rewrite the user's OpenClaw config
+(`OPENCLAW_CONFIG_PATH`, else `<OPENCLAW_STATE_DIR>/openclaw.json`, else `~/.openclaw/openclaw.json`)
 after that call: a config still referencing the pre-rename `openclaw-clawchat`
 plugin id is migrated onto `clawchat-plugin-openclaw` (channel block,
 `plugins.allow`, entries, tools) so upgrading from the old plugin keeps the

@@ -102,15 +102,21 @@ OpenClaw plugin manager remains responsible for reporting that state.
 
 | CLI call | Subprocess |
 |----------|------------|
-| `install --target openclaw` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install` |
-| `install --target openclaw --force` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
+| `install --target openclaw` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
+| `install --target openclaw --force` | same as above (`--force` is already unconditional on install) |
 | `update --target openclaw` | `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install` |
 | `update --target openclaw --force` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
+
+On a host whose `openclaw plugins install --help` advertises `--accept-capabilities`
+(OpenClaw >=2026.8), that flag is appended to every line above. See
+[capability consent](#capability-consent-and-the-non-clawhub-source-gate).
 
 #### Files this flow writes
 
 Both `install` and `update` may rewrite the user's OpenClaw config
-(`~/.openclaw/openclaw.json`, resolved by `getOpenClawConfigPath`):
+(resolved by `getOpenClawConfigPath`, which mirrors the host's own order:
+`OPENCLAW_CONFIG_PATH` → `<OPENCLAW_STATE_DIR>/openclaw.json` →
+`~/.openclaw/openclaw.json`):
 
 - **Legacy-id migration.** After the delegated `openclaw plugins …` call, the CLI
   runs `applyLegacyOpenClawConfigMigration`
@@ -132,6 +138,26 @@ channel id" on hosts that validate strictly. The migration runs first so the
 base URLs land on the migrated key. Also note `repairStaleOpenClawWorkspace` may
 run `openclaw config set agents.defaults.workspace` before the install, as
 described above.
+
+#### Capability consent and the non-ClawHub source gate
+
+OpenClaw 2026.8 added two gates that abort a delegated install before the plugin
+lands. Both are handled on the command line built by `pluginCommandArgs`:
+
+- **Capability consent.** Without `--accept-capabilities`, `plugins install` fails with
+  `Plugin "clawchat-plugin-openclaw" requires capability consent`. The flag cannot be
+  passed unconditionally: 2026.6.x/2026.7.x reject unknown options outright
+  (`OpenClaw does not recognize option "--accept-capabilities"`). The CLI therefore reads
+  the host's own `plugins install --help` and appends the flag only when the host
+  advertises it; a failed probe falls back to the pre-2026.8 command line.
+- **Non-ClawHub source.** 2026.8 widened `--force` to also mean "confirm this
+  non-ClawHub source". Since this plugin is always installed from npm, a plain
+  install without it is cancelled (`Install cancelled; rerun with --force after
+  reviewing the source`). `--force` is therefore unconditional on `install`. On older
+  hosts it only means "overwrite an existing plugin", which is what an idempotent
+  re-install wants anyway. `plugins update` has no such gate and is left unforced.
+
+Verified against OpenClaw 2026.6.34, 2026.7.1, and 2026.8.2.
 
 The npm package name `@clawling/clawchat-plugin-openclaw` is the constant
 `OPENCLAW_PLUGIN_SPEC` in `packages/core/src/config.ts`. Every delegated

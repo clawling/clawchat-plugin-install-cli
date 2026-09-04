@@ -1,4 +1,8 @@
-import { OPENCLAW_PLUGIN_SPEC, OPENCLAW_UNSAFE_INSTALL_FLAG } from "../config";
+import {
+  OPENCLAW_ACCEPT_CAPABILITIES_FLAG,
+  OPENCLAW_PLUGIN_SPEC,
+  OPENCLAW_UNSAFE_INSTALL_FLAG,
+} from "../config";
 import { writeOpenClawBaseUrls } from "../baseurl/write-openclaw";
 import { applyLegacyOpenClawConfigMigration } from "./openclaw-config-migration";
 import { captureCommand, runCommand, type CommandCapturer, type CommandRunner } from "./run";
@@ -13,6 +17,36 @@ const defaultOpenClawBaseUrlWriter: BaseUrlWriter = (values) =>
 
 function openClawSpec(ref?: string): string {
   return ref ? `${OPENCLAW_PLUGIN_SPEC}@${ref}` : OPENCLAW_PLUGIN_SPEC;
+}
+
+/**
+ * Whether this host needs `--accept-capabilities` on delegated plugin commands.
+ *
+ * OpenClaw >=2026.8 gates managed plugins behind capability consent: without the flag
+ * `plugins install` aborts with `Plugin "clawchat-plugin-openclaw" requires capability
+ * consent`, so the plugin never lands and the base-URL write below it never runs.
+ * The flag cannot simply be passed everywhere — 2026.6.x/2026.7.x reject unknown options
+ * with `OpenClaw does not recognize option "--accept-capabilities"` (verified on 2026.6.34
+ * and 2026.7.1). So ask the host: only pass it when its own help advertises it.
+ *
+ * A failed probe is treated as "unsupported": that keeps the pre-2026.8 command line,
+ * which is the safe default on any host we could not interrogate.
+ */
+async function hostAcceptsCapabilityFlag(capture: CommandCapturer): Promise<boolean> {
+  try {
+    const help = await capture("openclaw", ["plugins", "install", "--help"]);
+    return help.includes(OPENCLAW_ACCEPT_CAPABILITIES_FLAG);
+  } catch {
+    return false;
+  }
+}
+
+async function pluginCommandArgs(
+  capture: CommandCapturer,
+  args: readonly string[],
+): Promise<string[]> {
+  const accepts = await hostAcceptsCapabilityFlag(capture);
+  return accepts ? [...args, OPENCLAW_ACCEPT_CAPABILITIES_FLAG] : [...args];
 }
 
 /**
@@ -81,9 +115,17 @@ export async function installOpenClawPlugin(options: InstallerOptions = {}): Pro
   progress?.(force ? "Reinstalling OpenClaw plugin..." : "Installing OpenClaw plugin...");
   await repairStaleOpenClawWorkspace(run, capture);
   const spec = openClawSpec(options.ref);
-  const args = force
-    ? ["plugins", "install", spec, "--force", OPENCLAW_UNSAFE_INSTALL_FLAG]
-    : ["plugins", "install", spec, OPENCLAW_UNSAFE_INSTALL_FLAG];
+  // --force is unconditional on install: OpenClaw 2026.8 widened it to also mean
+  // "confirm this non-ClawHub source", and the ClawChat plugin is always npm-sourced, so
+  // without it the install is cancelled outright. On older hosts it only means "overwrite
+  // an existing plugin", which is what an idempotent re-install wants anyway.
+  const args = await pluginCommandArgs(capture, [
+    "plugins",
+    "install",
+    spec,
+    "--force",
+    OPENCLAW_UNSAFE_INSTALL_FLAG,
+  ]);
   await run("openclaw", args);
   // Migrate any legacy openclaw-clawchat config to the renamed id BEFORE writing
   // base URLs, so the base-URL write lands on the migrated/new channel key.
@@ -109,9 +151,12 @@ export async function updateOpenClawPlugin(options: InstallerOptions = {}): Prom
   progress?.(force ? "Reinstalling OpenClaw plugin..." : "Updating OpenClaw plugin...");
   await repairStaleOpenClawWorkspace(run, capture);
   const spec = openClawSpec(options.ref);
-  const args = force
-    ? ["plugins", "install", spec, "--force", OPENCLAW_UNSAFE_INSTALL_FLAG]
-    : ["plugins", "update", spec, OPENCLAW_UNSAFE_INSTALL_FLAG];
+  const args = await pluginCommandArgs(
+    capture,
+    force
+      ? ["plugins", "install", spec, "--force", OPENCLAW_UNSAFE_INSTALL_FLAG]
+      : ["plugins", "update", spec, OPENCLAW_UNSAFE_INSTALL_FLAG],
+  );
   await run("openclaw", args);
   // Migrate any legacy openclaw-clawchat config to the renamed id BEFORE writing
   // base URLs (see installOpenClawPlugin).

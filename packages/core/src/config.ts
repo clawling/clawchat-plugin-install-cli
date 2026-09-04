@@ -5,6 +5,10 @@ export const OPENCLAW_PLUGIN_SPEC = "@clawling/clawchat-plugin-openclaw";
 // time without this flag, newer OpenClaw treats the flag as a deprecated no-op.
 // Passing it on every delegated `openclaw plugins install/update` is safe on both.
 export const OPENCLAW_UNSAFE_INSTALL_FLAG = "--dangerously-force-unsafe-install";
+// OpenClaw >=2026.8 requires explicit consent to a plugin's declared capabilities before
+// `plugins install/update/enable` will proceed. Older hosts reject the flag as an unknown
+// option, so it is passed only when the host's own help advertises it.
+export const OPENCLAW_ACCEPT_CAPABILITIES_FLAG = "--accept-capabilities";
 export const HERMES_PLUGIN_YAML_URL =
   "https://raw.githubusercontent.com/clawling/clawchat-plugin-hermes-agent/main/plugin.yaml";
 export const HERMES_PLUGIN_SPEC = "clawling/clawchat-plugin-hermes-agent";
