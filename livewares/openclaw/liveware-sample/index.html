@@ -2,11 +2,13 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
   <title>Liveware Sample</title>
   <style>
-    /* Palette mirrors the ClawChat mobile app's design tokens
-       (clawchat-mobile core/theme/app_theme.dart — AppColors light/dark). */
+    /* Palette mirrors the ClawChat app's design tokens
+       (clawchat-mobile core/theme/app_theme.dart — AppColors light/dark).
+       Brand orange is reserved for the ✦ mark and primary buttons. */
     :root {
       --brand: #FF812A;          /* AppColors.brand */
       --brand-light: #FFF3EA;    /* AppColors.brandLight — tint bg */
@@ -16,6 +18,8 @@
       --text-primary: #1A1A18;
       --text-secondary: #5A5A55;
       --line: #E8E6E0;           /* AppColors.border / divider */
+      --shadow: 0 8px 30px rgba(0,0,0,.08);
+      --scrim: rgba(0,0,0,.35);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -26,79 +30,180 @@
         --text-primary: #F4EFE7;
         --text-secondary: #B3ADA2;
         --line: #3A3630;
+        --shadow: 0 8px 30px rgba(0,0,0,.35);
+        --scrim: rgba(0,0,0,.55);
       }
     }
-    body { margin: 0; font-family: system-ui, sans-serif; min-height: 100vh;
-           display: flex; align-items: center; justify-content: center; background: var(--bg); }
-    .card { background: var(--card); border-radius: 16px; padding: 28px; max-width: 420px; width: 90%;
-            margin: 24px 0; box-shadow: 0 8px 30px rgba(0,0,0,.08); border-top: 6px solid var(--theme, var(--brand)); }
-    h1 { margin: 0 0 12px; font-size: 24px; color: var(--text-primary); }
-    p { color: var(--text-secondary); line-height: 1.6; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text-primary);
+      font-family: system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    [hidden] { display: none !important; }
+    .accent { color: var(--theme, var(--brand)); }
+
+    /* ---------- stage: intro ---------- */
+    #intro {
+      max-width: 480px; margin: 0 auto;
+      padding: calc(28px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom));
+    }
+    .eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .02em; color: var(--theme, var(--brand)); margin: 0 0 10px; }
+    h1 { margin: 0 0 14px; font-size: 26px; line-height: 1.25; font-weight: 700; }
+    .lead { margin: 0; color: var(--text-secondary); font-size: 15px; line-height: 1.65; }
+    .lead + .lead { margin-top: 6px; }
+    .pick { margin: 28px 0 10px; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+    .cards { display: flex; flex-direction: column; gap: 10px; }
+    .card {
+      display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit;
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 14px 16px;
+      cursor: pointer; text-align: left; font: inherit; width: 100%;
+      transition: transform .12s ease, background .12s ease;
+    }
+    .card:active { transform: scale(.985); background: var(--surface-muted); }
+    .card .ico {
+      flex: none; width: 44px; height: 44px; border-radius: 12px; background: var(--brand-light);
+      color: var(--theme, var(--brand)); display: flex; align-items: center; justify-content: center;
+    }
+    .card .ico svg { width: 22px; height: 22px; }
+    .card .txt { flex: 1; min-width: 0; }
+    .card .name { font-size: 16px; font-weight: 600; line-height: 1.3; }
+    .card .blurb { margin-top: 3px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+    .card .chev { flex: none; color: var(--text-secondary); opacity: .6; }
+    .card .chev svg { width: 18px; height: 18px; display: block; }
+
+    /* "say this to your agent" fallback (no agent id → no deep link) */
+    .say-panel { margin-top: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
+    .hint { font-size: 13px; line-height: 1.5; color: var(--text-secondary); margin: 0; }
+    .say { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .say-text { flex: 1; min-width: 0; background: var(--brand-light); border-radius: 10px; padding: 10px 12px;
+                font-size: 14px; line-height: 1.45; color: var(--text-primary); user-select: all; -webkit-user-select: all; }
+    .btn-ghost { flex: none; border: 1px solid var(--line); background: transparent; color: var(--text-primary);
+                 border-radius: 10px; padding: 9px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+
+    /* ---------- stages: tool / personalized / kept ---------- */
+    #stage-tool { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
+    #tool-frame { flex: 1; width: 100%; border: 0; display: block; background: var(--bg); }
+    /* the tool failed to load: say so, with the status — never a blank frame */
+    #tool-error { flex: none; display: flex; align-items: center; gap: 10px; margin: calc(12px + env(safe-area-inset-top)) 12px 0;
+                  padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+                  font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+    #tool-error span { flex: 1; min-width: 0; }
+
+    #finish-card {
+      flex: none; margin: calc(12px + env(safe-area-inset-top)) 12px 8px;
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow);
+      padding: 14px 16px;
+    }
+    #finish-card .title { font-size: 15px; font-weight: 600; line-height: 1.4; margin: 0; }
+    #finish-card .hint { margin-top: 4px; }
     .row { display: flex; gap: 8px; margin-top: 12px; }
-    button, a.btn { border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer;
-             background: var(--theme, var(--brand)); color: #fff; font-size: 15px;
-             text-decoration: none; text-align: center; white-space: nowrap; }
-    input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 15px;
-            min-width: 0; background: var(--surface-muted); color: var(--text-primary); }
-    .lead { margin-top: 12px; font-size: 14px; }
-    section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
-    section h2 { margin: 0 0 8px; font-size: 16px; color: var(--text-primary); }
-    .hint { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
-    .say { background: var(--brand-light); border-radius: 8px; padding: 8px 10px; font-size: 14px;
-           color: var(--text-primary); margin-top: 8px; }
-    .icon-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
-    .icon-box { width: 48px; height: 48px; border-radius: 12px; background: var(--brand-light);
-                display: flex; align-items: center; justify-content: center; flex: none;
-                color: var(--brand); font-size: 22px; overflow: hidden; }
-    .icon-box img { width: 100%; height: 100%; display: block; }
+    .btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+           border: 0; border-radius: 10px; padding: 11px 14px; font: inherit; font-size: 15px; font-weight: 600;
+           text-decoration: none; cursor: pointer; white-space: nowrap; }
+    .btn-primary { background: var(--theme, var(--brand)); color: #fff; }
+    .btn-secondary { background: var(--surface-muted); color: var(--text-primary); }
+    .btn:active { opacity: .85; }
+
+    #pill {
+      position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 0; border-radius: 999px; padding: 11px 16px 11px 14px;
+      background: var(--theme, var(--brand)); color: #fff; font: inherit; font-size: 14px; font-weight: 600;
+      box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: pointer;
+    }
+    #pill .mark { font-size: 15px; line-height: 1; }
+    #pill:active { transform: scale(.97); }
+
+    /* bottom sheet (restyle input + fallback sentence) */
+    .scrim { position: fixed; inset: 0; background: var(--scrim); }
+    .sheet {
+      position: fixed; left: 0; right: 0; bottom: 0; background: var(--card);
+      border-radius: 20px 20px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.12);
+      padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
+      max-width: 560px; margin: 0 auto;
+    }
+    .sheet h2 { margin: 0 0 4px; font-size: 17px; font-weight: 700; }
+    .sheet .hint { margin-bottom: 12px; }
+    .sheet input {
+      width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: 15px;
+      background: var(--surface-muted); color: var(--text-primary); outline: none;
+    }
+    .sheet input:focus { border-color: var(--theme, var(--brand)); }
+    .sheet .row { margin-top: 12px; }
+    .sheet .say { margin-top: 0; }
+    .btn-text { background: transparent; border: 0; color: var(--text-secondary); font: inherit; font-size: 14px;
+                padding: 10px; margin-top: 4px; width: 100%; cursor: pointer; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1 id="title"></h1>
-    <p id="body"></p>
-    <p class="lead">这是一个 Liveware 使用引导页。Liveware 是由你的 agent 托管、能和聊天联动的小应用 —— 下面四个例子带你体验它和对话的双向联动。</p>
+  <!-- stage: intro — one screen: what a Liveware is + three directions.
+       Visible by default with zh copy baked in, so a script that fails to load
+       (stale edge cache, blocked JS) still leaves a readable page instead of a
+       blank one; app.js takes over the moment it runs. -->
+  <main id="intro">
+    <p class="eyebrow">✦ Liveware</p>
+    <h1 data-i18n="introTitle">做出你的第一个 Liveware</h1>
+    <p class="lead" data-i18n="introLead1">Liveware 是你的 Agent 为你造的小工具，一次造好、反复打开。</p>
+    <p class="lead" data-i18n="introLead2">跟 Agent 说一句，它写好、上线；再说一句，它改。</p>
+    <p class="pick" data-i18n="pickTitle">挑一个，这一页就会变成它</p>
+    <div class="cards" id="cards"></div>
+    <div class="say-panel" id="intro-say" hidden>
+      <p class="hint" data-i18n="fallbackHint"></p>
+      <div class="say">
+        <div class="say-text" id="intro-say-text"></div>
+        <button class="btn-ghost" type="button" data-copy="intro-say-text" data-i18n="copy"></button>
+      </div>
+    </div>
+  </main>
 
-    <section>
-      <h2>① 让 agent 改这个页面</h2>
-      <p class="hint">回到对话页,对 agent 说:</p>
-      <p class="say">修改 Liveware-sample 标题为'新名字'</p>
-      <p class="hint">上方标题会在一秒内实时变化,正文和主题色同理。</p>
-    </section>
-
-    <section>
-      <h2>② 给 agent 留句话</h2>
+  <!-- stages: tool / personalized / kept — the owner's tool fills the screen -->
+  <div id="stage-tool" hidden>
+    <!-- finish card: the tour is over, the tool is theirs. One acknowledgement,
+         handled by the page itself (POST /stage → kept); deleting is a chat
+         request to the agent whenever they want, not a button here. -->
+    <div id="finish-card" hidden>
+      <p class="title" data-i18n="finishTitle"></p>
+      <p class="hint" data-i18n="finishHint"></p>
       <div class="row">
-        <input id="note" placeholder="给 agent 留句话…" />
-        <button id="send">发送</button>
+        <button class="btn btn-primary" type="button" id="btn-keep" data-i18n="keep"></button>
       </div>
-      <div class="row">
-        <button id="like">👍 赞一下</button>
-      </div>
-      <p class="hint">留言(或点赞)后,回到对话页问 agent:「我在 liveware 页面上做了什么/有人留言吗」—— agent 就能读到并复述你的留言。</p>
-    </section>
-
-    <section>
-      <h2>③ 从页面一键跳回聊天</h2>
-      <div class="row" id="nav-row" hidden>
-        <input id="nav-input" placeholder="随便输入点什么…" />
-        <a class="btn" id="back-to-chat" href="#">确认并返回聊天</a>
-      </div>
-      <p class="hint" id="nav-fallback" hidden>当前版本暂不支持一键返回 —— 点左上角 ‹ 即可回到聊天。</p>
-      <p class="hint">输入的内容会作为一条页面事件记录下来,回到聊天后同样可以问 agent。</p>
-    </section>
-
-    <section>
-      <h2>④ 让 agent 换个图标</h2>
-      <div class="icon-row">
-        <span id="icon-box" class="icon-box" aria-hidden="true">✦</span>
-        <p class="hint" id="icon-hint">还没有图标 —— 这个 liveware 在聊天里显示的是默认的 ✦。</p>
-      </div>
-      <p class="hint">回到对话页,对 agent 说(怎么描述都行,agent 会现场画一个 SVG):</p>
-      <p class="say">把你的图标换成一个火箭穿过星环的样子</p>
-      <p class="hint">上方图标会实时变化。聊天里的活件卡和启动器图标最长 30 分钟后自动更新;在容器菜单里点「强制刷新」可立即生效。</p>
-    </section>
+    </div>
+    <div id="tool-error" hidden>
+      <span id="tool-error-text"></span>
+      <button class="btn-ghost" type="button" id="tool-retry" data-i18n="retry"></button>
+    </div>
+    <iframe id="tool-frame" title="tool"></iframe>
   </div>
+
+  <button id="pill" type="button" hidden><span class="mark">✦</span><span data-i18n="pill"></span></button>
+
+  <!-- restyle sheet: a sentence to bring to the agent -->
+  <div id="restyle" hidden>
+    <div class="scrim" data-close></div>
+    <div class="sheet">
+      <h2 data-i18n="restyleTitle"></h2>
+      <p class="hint" data-i18n="restyleHint"></p>
+      <input id="restyle-input" maxlength="200" autocomplete="off" />
+      <div class="row"><a class="btn btn-primary" id="btn-restyle" href="#" data-i18n="restyleGo"></a></div>
+      <button class="btn-text" type="button" data-close data-i18n="cancel"></button>
+    </div>
+  </div>
+
+  <!-- fallback sheet: no agent id → show the sentence to say in chat -->
+  <div id="fallback" hidden>
+    <div class="scrim" data-close></div>
+    <div class="sheet">
+      <p class="hint" data-i18n="fallbackHint"></p>
+      <div class="say">
+        <div class="say-text" id="fallback-text"></div>
+        <button class="btn-ghost" type="button" data-copy="fallback-text" data-i18n="copy"></button>
+      </div>
+      <button class="btn-text" type="button" data-close data-i18n="close"></button>
+    </div>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>

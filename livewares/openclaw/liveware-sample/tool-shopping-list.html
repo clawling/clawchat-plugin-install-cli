@@ -1,0 +1,129 @@
+<!doctype html>
+<!--
+  Liveware Sample · template: shopping list
+  Agent, when personalizing: copy this file to <sample_root>/tool/index.html and
+  change ONLY the CSS and the wording below this comment. Keep the data contract
+  as is: fetch('/data') / PUT '/data', the EventSource('/sse') "data" listener,
+  the element ids and data-* attributes, and the data.json shape
+  {"items":[{"id":"…","text":"…","done":false}]}. data.json is what the owner
+  edits through chat ("add milk"), so a shape change breaks that line.
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Shopping list</title>
+  <style>
+    :root {
+      --brand: #FF812A; --brand-light: #FFF3EA; --bg: #FAFAF8; --card: #FFFFFF; --surface-muted: #F5F3EE;
+      --text-primary: #1A1A18; --text-secondary: #5A5A55; --line: #E8E6E0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --brand-light: #4A2E18; --bg: #1F1D1A; --card: #28251F; --surface-muted: #2F2C25;
+              --text-primary: #F4EFE7; --text-secondary: #B3ADA2; --line: #3A3630; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text-primary);
+           font-family: system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+    main { max-width: 480px; margin: 0 auto; padding: calc(24px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom)); }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    .count { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+    form { display: flex; gap: 8px; }
+    input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: 15px;
+            background: var(--surface-muted); color: var(--text-primary); outline: none; }
+    input:focus { border-color: var(--brand); }
+    .btn { border: 0; border-radius: 10px; padding: 11px 16px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+           background: var(--brand); color: #fff; white-space: nowrap; }
+    ul { list-style: none; margin: 16px 0 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    ul:empty { display: none; }
+    li { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--line); cursor: pointer; }
+    li:first-child { border-top: 0; }
+    li:active { background: var(--surface-muted); }
+    .box { flex: none; width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; color: #fff; }
+    li[data-done="true"] .box { background: var(--brand); border-color: var(--brand); }
+    li[data-done="true"] .text { color: var(--text-secondary); text-decoration: line-through; }
+    .text { flex: 1; font-size: 16px; line-height: 1.4; word-break: break-word; }
+    .empty { margin: 28px 0 0; text-align: center; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+    .footer { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .btn-text { background: transparent; border: 0; color: var(--text-secondary); font: inherit; font-size: 14px; padding: 8px 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><h1 id="heading"></h1><span class="count" id="count"></span></header>
+    <form id="add-form"><input id="add-input" maxlength="80" autocomplete="off" /><button class="btn" type="submit" id="add-btn"></button></form>
+    <ul id="list"></ul>
+    <p class="empty" id="empty" hidden></p>
+    <div class="footer"><button class="btn-text" type="button" id="clear-done" hidden></button></div>
+  </main>
+  <script>
+    (function () {
+      var lang = /^zh/i.test(window.__lang || navigator.language || "") ? "zh" : "en"; // __lang: the shell passes the ClawChat app language in (?lang= contract)
+      document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+      var T = lang === "zh"
+        ? { heading: "购物清单", add: "加一项", placeholder: "要买什么？", empty: "还没有东西。在这里加一项，或在聊天里跟 Agent 说「加牛奶」。",
+            left: function (n) { return n ? "还剩 " + n + " 项" : "都买齐了"; }, clearDone: "清掉已买" }
+        : { heading: "Shopping list", add: "Add", placeholder: "What do you need?", empty: "Nothing yet. Add an item here, or tell your Agent “add milk” in chat.",
+            left: function (n) { return n ? n + " left" : "All bought"; }, clearDone: "Clear bought" };
+      document.getElementById("heading").textContent = T.heading;
+      document.getElementById("add-btn").textContent = T.add;
+      document.getElementById("add-input").placeholder = T.placeholder;
+      document.getElementById("empty").textContent = T.empty;
+      document.getElementById("clear-done").textContent = T.clearDone;
+
+      // ---- data contract: GET /data on load, PUT /data on change, re-GET on SSE "data" ----
+      var data = { items: [] };
+      function load() {
+        fetch("/data").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+          if (!d) return; // 503 = agent mid-write: keep what we have, SSE brings the settled file
+          data = { items: Array.isArray(d && d.items) ? d.items : [] };
+          render();
+        }).catch(function () {});
+      }
+      function save() {
+        render();
+        fetch("/data", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(data) }).catch(function () {});
+      }
+      var es = new EventSource("/sse");
+      es.addEventListener("data", load);
+
+      function uid() { return Math.random().toString(36).slice(2, 10); }
+      function render() {
+        var list = document.getElementById("list");
+        list.innerHTML = "";
+        var left = 0, done = 0;
+        data.items.forEach(function (it) {
+          if (!it || typeof it.text !== "string") return;
+          if (it.done) done++; else left++;
+          var li = document.createElement("li");
+          li.setAttribute("data-id", it.id);
+          li.setAttribute("data-done", it.done ? "true" : "false");
+          li.innerHTML = '<span class="box">' + (it.done ? "✓" : "") + '</span><span class="text"></span>';
+          li.querySelector(".text").textContent = it.text;
+          li.addEventListener("click", function () { it.done = !it.done; save(); });
+          list.appendChild(li);
+        });
+        document.getElementById("empty").hidden = data.items.length > 0;
+        document.getElementById("count").textContent = data.items.length ? T.left(left) : "";
+        document.getElementById("clear-done").hidden = done === 0;
+      }
+      document.getElementById("add-form").addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var input = document.getElementById("add-input");
+        var text = (input.value || "").trim();
+        if (!text) return;
+        data.items.push({ id: uid(), text: text, done: false });
+        input.value = "";
+        save();
+      });
+      document.getElementById("clear-done").addEventListener("click", function () {
+        data.items = data.items.filter(function (it) { return !it.done; });
+        save();
+      });
+      load();
+    })();
+  </script>
+</body>
+</html>

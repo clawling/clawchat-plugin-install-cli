@@ -323,10 +323,21 @@ user has something to look at — not markdown.
 ```
 livewares/
   manifest.json                        generated contract (do not hand-edit)
-  openclaw/liveware-sample/            the sample app's static files
+  openclaw/liveware-sample/            the sample app's static files (FLAT — see below)
     liveware.json                      carries the sample's `version`
-    index.html, app.js, server.mjs, state.json
+    index.html, app.js, server.mjs     the guide shell + its zero-dependency server
+    tool-shopping-list.html            the three tool templates the shell can become
+    tool-countdown.html                (agent copies one to <root>/tool/index.html to
+    tool-habits.html                    personalize it; the copy is NOT in the manifest)
+    state.json                         agent-owned after install (stage / tool / title)
 ```
+
+- **Flat by contract.** Both adapters install the sample as a flat directory
+  (`basename` of each manifest path) and treat any extra file in `app/` as a
+  reason to reinstall, so every shipped file lives at the sample's root — no
+  subdirectories. Everything the agent creates (`tool/index.html`, `data.json`)
+  lives one level *above* the app dir, which the server resolves as
+  `path.resolve(dir, "..")`.
 
 - **One physical copy, two manifest targets.** The sample is host-agnostic (plain
   Node), so `scripts/build-livewares-manifest.mjs` maps both the `openclaw` and

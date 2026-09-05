@@ -1,5 +1,5 @@
 {
   "title": "Hello from your agent",
-  "body": "这是你的 agent 托管的 liveware 使用引导页。跟着下面四个例子,体验页面和聊天的双向联动。",
-  "theme": "#FF812A"
+  "theme": "#FF812A",
+  "stage": "intro"
 }
