@@ -1,0 +1,113 @@
+<!doctype html>
+<!--
+  Liveware Sample · template: countdown
+  Agent, when personalizing: copy this file to <sample_root>/tool/index.html and
+  change ONLY the CSS and the wording below this comment. Keep the data contract
+  as is: fetch('/data') / PUT '/data', the EventSource('/sse') "data" listener,
+  the element ids, and the data.json shape {"title":"…","date":"YYYY-MM-DD"}.
+  data.json is what the owner edits through chat ("move the date to Dec 25"),
+  so a shape change breaks that line.
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Countdown</title>
+  <style>
+    :root {
+      --brand: #FF812A; --brand-light: #FFF3EA; --bg: #FAFAF8; --card: #FFFFFF; --surface-muted: #F5F3EE;
+      --text-primary: #1A1A18; --text-secondary: #5A5A55; --line: #E8E6E0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --brand-light: #4A2E18; --bg: #1F1D1A; --card: #28251F; --surface-muted: #2F2C25;
+              --text-primary: #F4EFE7; --text-secondary: #B3ADA2; --line: #3A3630; }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text-primary);
+           font-family: system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+    main { min-height: 100%; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center;
+           padding: calc(24px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom)); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 28px 24px; text-align: center; }
+    .title { width: 100%; border: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 18px; font-weight: 600;
+             text-align: center; outline: none; padding: 6px 8px; border-radius: 8px; }
+    .title:focus { background: var(--surface-muted); }
+    .label { margin: 18px 0 2px; font-size: 14px; color: var(--text-secondary); }
+    .days { font-size: 72px; line-height: 1; font-weight: 700; color: var(--brand); letter-spacing: -.02em; }
+    .unit { font-size: 16px; color: var(--text-secondary); margin-top: 6px; }
+    .date { margin-top: 22px; display: inline-flex; align-items: center; gap: 8px; }
+    .date input { border: 1px solid var(--line); background: var(--surface-muted); color: var(--text-primary); border-radius: 10px;
+                  padding: 8px 10px; font: inherit; font-size: 15px; outline: none; color-scheme: light dark; }
+    .date input:focus { border-color: var(--brand); }
+    .hint { margin: 16px 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="card">
+      <input class="title" id="title-input" maxlength="40" autocomplete="off" />
+      <p class="label" id="label"></p>
+      <div class="days" id="days">–</div>
+      <div class="unit" id="unit"></div>
+      <div class="date"><input type="date" id="date-input" /></div>
+      <p class="hint" id="hint"></p>
+    </div>
+  </main>
+  <script>
+    (function () {
+      var lang = /^zh/i.test(window.__lang || navigator.language || "") ? "zh" : "en"; // __lang: the shell passes the ClawChat app language in (?lang= contract)
+      document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+      var T = lang === "zh"
+        ? { defaultTitle: "纪念日", placeholder: "这一天叫什么？", until: "还有", since: "已经", today: "就是今天", days: "天",
+            hint: "点标题或日期就地改，或在聊天里跟 Agent 说「把日期改成 12 月 25 日」。" }
+        : { defaultTitle: "Anniversary", placeholder: "Name this day", until: "Days to go", since: "Days since", today: "It's today", days: "days",
+            hint: "Tap the title or the date to change it here, or tell your Agent “move the date to Dec 25” in chat." };
+      var titleEl = document.getElementById("title-input");
+      var dateEl = document.getElementById("date-input");
+      titleEl.placeholder = T.placeholder;
+      document.getElementById("hint").textContent = T.hint;
+
+      function pad(n) { return (n < 10 ? "0" : "") + n; }
+      function iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+      function defaultDate() { var d = new Date(); var y = d.getFullYear(); var xmas = new Date(y, 11, 25); return iso(xmas < d ? new Date(y + 1, 11, 25) : xmas); }
+
+      // ---- data contract: GET /data on load, PUT /data on change, re-GET on SSE "data" ----
+      var data = { title: "", date: "" };
+      function load() {
+        fetch("/data").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+          if (!d) return; // 503 = agent mid-write: keep what we have, SSE brings the settled file
+          data = { title: typeof d.title === "string" ? d.title : "", date: /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : "" };
+          render();
+        }).catch(function () {});
+      }
+      function save() {
+        render();
+        fetch("/data", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(data) }).catch(function () {});
+      }
+      var es = new EventSource("/sse");
+      es.addEventListener("data", load);
+
+      function render() {
+        if (document.activeElement !== titleEl) titleEl.value = data.title || T.defaultTitle;
+        var date = data.date || defaultDate();
+        dateEl.value = date;
+        var parts = date.split("-").map(Number);
+        var target = new Date(parts[0], parts[1] - 1, parts[2]);
+        var now = new Date(); var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        var diff = Math.round((target - today) / 86400000);
+        var label = document.getElementById("label"), days = document.getElementById("days"), unit = document.getElementById("unit");
+        if (diff === 0) { label.textContent = ""; days.textContent = T.today; days.style.fontSize = "40px"; unit.textContent = ""; return; }
+        days.style.fontSize = "";
+        label.textContent = diff > 0 ? T.until : T.since;
+        days.textContent = String(Math.abs(diff));
+        unit.textContent = T.days;
+      }
+      titleEl.addEventListener("change", function () { data.title = titleEl.value.trim(); save(); });
+      titleEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") titleEl.blur(); });
+      dateEl.addEventListener("change", function () { if (dateEl.value) { data.date = dateEl.value; save(); } });
+      load();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!doctype html>
+<!--
+  Liveware Sample · template: habit tracker
+  Agent, when personalizing: copy this file to <sample_root>/tool/index.html and
+  change ONLY the CSS and the wording below this comment. Keep the data contract
+  as is: fetch('/data') / PUT '/data', the EventSource('/sse') "data" listener,
+  the element ids and data-* attributes, and the data.json shape
+  {"habits":[{"id":"…","name":"…","checks":["YYYY-MM-DD"]}]}. data.json is what
+  the owner edits through chat ("check off water for today"), so a shape change
+  breaks that line.
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Habit tracker</title>
+  <style>
+    :root {
+      --brand: #FF812A; --brand-light: #FFF3EA; --bg: #FAFAF8; --card: #FFFFFF; --surface-muted: #F5F3EE;
+      --text-primary: #1A1A18; --text-secondary: #5A5A55; --line: #E8E6E0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --brand-light: #4A2E18; --bg: #1F1D1A; --card: #28251F; --surface-muted: #2F2C25;
+              --text-primary: #F4EFE7; --text-secondary: #B3ADA2; --line: #3A3630; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text-primary);
+           font-family: system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+    main { max-width: 480px; margin: 0 auto; padding: calc(24px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom)); }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    .week { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+    form { display: flex; gap: 8px; }
+    input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: 15px;
+            background: var(--surface-muted); color: var(--text-primary); outline: none; }
+    input:focus { border-color: var(--brand); }
+    .btn { border: 0; border-radius: 10px; padding: 11px 16px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+           background: var(--brand); color: #fff; white-space: nowrap; }
+    .habits { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .habit { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; }
+    .top { display: flex; align-items: center; gap: 8px; }
+    .name { flex: 1; font-size: 16px; font-weight: 600; word-break: break-word; }
+    .streak { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+    .del { border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 18px; line-height: 1; padding: 4px 6px; cursor: pointer; opacity: .6; }
+    .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 10px; }
+    .cell { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); }
+    .dot { width: 100%; aspect-ratio: 1; max-width: 40px; border-radius: 10px; background: var(--surface-muted); border: 1.5px solid transparent;
+           display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; }
+    .cell[data-checked="true"] .dot { background: var(--brand); }
+    .cell[data-today="true"] .dot { border-color: var(--brand); cursor: pointer; }
+    .cell[data-today="true"] { color: var(--text-primary); font-weight: 600; }
+    .empty { margin: 28px 0 0; text-align: center; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><h1 id="heading"></h1><span class="week" id="week"></span></header>
+    <form id="add-form"><input id="add-input" maxlength="40" autocomplete="off" /><button class="btn" type="submit" id="add-btn"></button></form>
+    <div class="habits" id="habits"></div>
+    <p class="empty" id="empty" hidden></p>
+  </main>
+  <script>
+    (function () {
+      var lang = /^zh/i.test(window.__lang || navigator.language || "") ? "zh" : "en"; // __lang: the shell passes the ClawChat app language in (?lang= contract)
+      document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+      var T = lang === "zh"
+        ? { heading: "习惯打卡", add: "加一个", placeholder: "想坚持什么？", week: "本周", days: ["一", "二", "三", "四", "五", "六", "日"],
+            empty: "加一个想坚持的小习惯，比如「喝水」。每天回来点一下今天的格子，或在聊天里跟 Agent 说「今天喝水打个卡」。",
+            streak: function (n) { return n ? "连续 " + n + " 天" : ""; }, del: "删除" }
+        : { heading: "Habit tracker", add: "Add", placeholder: "What will you keep up?", week: "This week", days: ["M", "T", "W", "T", "F", "S", "S"],
+            empty: "Add a small habit to keep up, like “water”. Come back and tap today's cell, or tell your Agent “check off water for today” in chat.",
+            streak: function (n) { return n ? n + "-day streak" : ""; }, del: "Delete" };
+      document.getElementById("heading").textContent = T.heading;
+      document.getElementById("add-btn").textContent = T.add;
+      document.getElementById("add-input").placeholder = T.placeholder;
+      document.getElementById("empty").textContent = T.empty;
+      document.getElementById("week").textContent = T.week;
+
+      function pad(n) { return (n < 10 ? "0" : "") + n; }
+      function iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+      function todayIso() { return iso(new Date()); }
+      function thisWeek() { // Monday → Sunday, local dates
+        var now = new Date(); var day = (now.getDay() + 6) % 7; var out = [];
+        for (var i = 0; i < 7; i++) { var d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + i); out.push(iso(d)); }
+        return out;
+      }
+      function streak(checks) {
+        var set = {}; checks.forEach(function (c) { set[c] = true; });
+        var n = 0; var d = new Date();
+        if (!set[iso(d)]) d.setDate(d.getDate() - 1); // a streak still counts before today's check
+        while (set[iso(d)]) { n++; d.setDate(d.getDate() - 1); }
+        return n;
+      }
+
+      // ---- data contract: GET /data on load, PUT /data on change, re-GET on SSE "data" ----
+      var data = { habits: [] };
+      function load() {
+        fetch("/data").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+          if (!d) return; // 503 = agent mid-write: keep what we have, SSE brings the settled file
+          data = { habits: Array.isArray(d && d.habits) ? d.habits : [] };
+          render();
+        }).catch(function () {});
+      }
+      function save() {
+        render();
+        fetch("/data", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(data) }).catch(function () {});
+      }
+      var es = new EventSource("/sse");
+      es.addEventListener("data", load);
+
+      function uid() { return Math.random().toString(36).slice(2, 10); }
+      function render() {
+        var host = document.getElementById("habits");
+        host.innerHTML = "";
+        var week = thisWeek(), today = todayIso();
+        data.habits.forEach(function (h) {
+          if (!h || typeof h.name !== "string") return;
+          if (!Array.isArray(h.checks)) h.checks = [];
+          var el = document.createElement("div");
+          el.className = "habit"; el.setAttribute("data-id", h.id);
+          el.innerHTML = '<div class="top"><span class="name"></span><span class="streak"></span><button class="del" type="button">×</button></div><div class="grid"></div>';
+          el.querySelector(".name").textContent = h.name;
+          el.querySelector(".streak").textContent = T.streak(streak(h.checks));
+          var del = el.querySelector(".del"); del.title = T.del;
+          del.addEventListener("click", function () { data.habits = data.habits.filter(function (x) { return x !== h; }); save(); });
+          var grid = el.querySelector(".grid");
+          week.forEach(function (date, i) {
+            var cell = document.createElement("div");
+            cell.className = "cell"; cell.setAttribute("data-date", date);
+            var checked = h.checks.indexOf(date) >= 0;
+            cell.setAttribute("data-checked", checked ? "true" : "false");
+            cell.setAttribute("data-today", date === today ? "true" : "false");
+            cell.innerHTML = '<div class="dot">' + (checked ? "✓" : "") + "</div><span>" + T.days[i] + "</span>";
+            if (date === today) cell.querySelector(".dot").addEventListener("click", function () {
+              if (checked) h.checks = h.checks.filter(function (c) { return c !== date; }); else h.checks.push(date);
+              save();
+            });
+            grid.appendChild(cell);
+          });
+          host.appendChild(el);
+        });
+        document.getElementById("empty").hidden = data.habits.length > 0;
+      }
+      document.getElementById("add-form").addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var input = document.getElementById("add-input");
+        var name = (input.value || "").trim();
+        if (!name) return;
+        data.habits.push({ id: uid(), name: name, checks: [] });
+        input.value = "";
+        save();
+      });
+      load();
+    })();
+  </script>
+</body>
+</html>
