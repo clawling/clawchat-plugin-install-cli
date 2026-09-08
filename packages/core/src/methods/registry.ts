@@ -53,7 +53,7 @@ export async function callClawchatMethod(
 
   switch (method) {
     case "activate": {
-      // Apifox: POST /agents/connect requires X-Device-Id. Runtime API uses the /v1 prefix.
+      // API spec: POST /agents/connect requires X-Device-Id. Runtime API uses the /v1 prefix.
       const code = requireString(input, "code", method);
       return requestJson(
         baseUrl,
@@ -71,7 +71,7 @@ export async function callClawchatMethod(
       );
     }
     case "get_account_profile": {
-      // Apifox: GET /users/me. Runtime API uses the /v1 prefix.
+      // API spec: GET /users/me. Runtime API uses the /v1 prefix.
       return requestJson(
         baseUrl,
         "/v1/users/me",
@@ -80,7 +80,7 @@ export async function callClawchatMethod(
       );
     }
     case "get_user_profile": {
-      // Apifox: GET /users/{id}. Runtime API uses /v1 and the CLI input name userId.
+      // API spec: GET /users/{id}. Runtime API uses /v1 and the CLI input name userId.
       const userId = encodeURIComponent(requireString(input, "userId", method));
       return requestJson(
         baseUrl,
@@ -90,7 +90,7 @@ export async function callClawchatMethod(
       );
     }
     case "list_account_friends": {
-      // Apifox: GET /friendships. Runtime API uses /v1 and CLI adds page/pageSize query params.
+      // API spec: GET /friendships. Runtime API uses /v1 and CLI adds page/pageSize query params.
       const page = optionalPositiveInteger(input, "page", 1);
       const pageSize = optionalPositiveInteger(input, "pageSize", 20);
       if (pageSize > 100) {
@@ -104,7 +104,7 @@ export async function callClawchatMethod(
       );
     }
     case "update_account_profile": {
-      // Apifox: PATCH /users/me. Runtime API uses the /v1 prefix.
+      // API spec: PATCH /users/me. Runtime API uses the /v1 prefix.
       const body = pickDefined(input, ["nickname", "avatar_url", "bio"]);
       if (Object.keys(body).length === 0) {
         throw new ClawchatError(
@@ -120,7 +120,7 @@ export async function callClawchatMethod(
       );
     }
     case "upload_avatar_image": {
-      // Apifox: POST /files/upload-url multipart field `file`. Runtime API uses /v1.
+      // API spec: POST /files/upload-url multipart field `file`. Runtime API uses /v1.
       return requestMultipart(
         baseUrl,
         "/v1/files/upload-url",
@@ -129,7 +129,7 @@ export async function callClawchatMethod(
       );
     }
     case "upload_media_file": {
-      // Not present in current Apifox OAS. Product requirement uses POST /media/upload.
+      // Not present in current OAS. Product requirement uses POST /media/upload.
       return requestMultipart(
         baseUrl,
         "/media/upload",
