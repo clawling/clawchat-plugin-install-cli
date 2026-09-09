@@ -244,7 +244,26 @@ before the request leaves the machine, so the same code is still redeemable.
 This instance holds exactly one ClawChat identity, and reusing the code here
 would rebind it to the agent already stored rather than add a second one.
 
-`channels add` and `channels login` take no intent flags of their own. The
+**A human at a terminal does not see that refusal at all.** On `2026.9.8-2` and
+newer the step 3 command asks instead, right where it stopped:
+
+```text
+This OpenClaw instance already holds ClawChat agent agt_... (shadow user usr_...).
+  [1] Pair as a BRAND-NEW agent - this instance stops using that identity.
+  [2] RESTORE that identity - re-pairs the same agent; if it was deleted, this
+      brings it back with its history.
+Enter 1 or 2 (press Enter to submit):
+```
+
+Answer and it continues in the same run - no flag, no re-run. Note that `[2]`
+is how a deleted agent comes back, so read it to the user before choosing for
+them. **You will not get this prompt**, because it only appears on a real
+terminal: an agent driving `channels add`, CI, and piped input all get the
+refusal instead. That is deliberate. Both outcomes are irreversible in opposite
+directions, so an unattended run must not pick one.
+
+So when you are the one running the command, state the intent up front.
+`channels add` and `channels login` take no intent flags of their own; the
 intents live on the plugin's runtime slash command, which you send on **any
 OpenClaw command surface** - the Gateway chat, the TUI, `openclaw chat`. It does
 **not** have to be a ClawChat conversation, which matters when the old agent was
