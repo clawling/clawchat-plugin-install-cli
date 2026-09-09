@@ -65,10 +65,20 @@ that throw is the same "skip the pre-check" signal, not a reason to stop.
 
 | `user_id_status` | Meaning | Action |
 |---|---|---|
-| `live` / `deleted` | The stored identity is real; activation re-pairs (or revives) it | continue |
+| `live` | The stored identity is real and active; activation re-pairs **that same agent** | continue only if re-pairing is the intent; it will not create a second agent |
+| `deleted` | The user deleted this agent, but the record survives | **stop and ask.** Sending the id **revives the old agent**, history and all - it does not create a new one. If the user wants a *new* agent, clear the stored id first (see below) |
 | `unknown` | The identity no longer exists on this server | continue - activation just creates a fresh agent |
 | `owner_mismatch` | It belongs to a **different** ClawChat account | don't activate with this code; see [Troubleshooting](#troubleshooting) |
 | `invalid` | Malformed id in the config | clear the field, then continue |
+
+`deleted` is the status to slow down on, because "I deleted my agent, now make me a
+new one" is the common request and replaying the id does the opposite. Deleting an
+agent in the app does **not** clear the identity stored on this machine, so the
+next activation reattaches to it. To pair as a brand-new agent instead, clear the
+stored `user_id` (Hermes: `platforms.clawchat.extra.user_id`; OpenClaw:
+`channels.clawchat-plugin-openclaw.userId` **and** `token`, since the id is
+recovered from the token) before step 3, or use the `--new-account` intent
+described there.
 
 Omitting `user_id` checks the code alone and leaves `user_id_status` absent.
 
@@ -228,6 +238,42 @@ $root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAP
 python (Join-Path $root 'plugins\clawchat\clawchat_cli.py') activate CLAWCHAT_CODE_GOES_HERE
 ```
 
+**OpenClaw: if activation refuses with "this OpenClaw instance is already
+paired to ClawChat agent ...".** The code is **not** spent - the refusal happens
+before the request leaves the machine, so the same code is still redeemable.
+This instance holds exactly one ClawChat identity, and reusing the code here
+would rebind it to the agent already stored rather than add a second one.
+
+`channels add` and `channels login` take no intent flags of their own. The
+intents live on the plugin's runtime slash command, which you send on **any
+OpenClaw command surface** - the Gateway chat, the TUI, `openclaw chat`. It does
+**not** have to be a ClawChat conversation, which matters when the old agent was
+deleted and that chat is gone:
+
+- This instance should get **its own new agent**, including after the user
+  deleted the previous one: `/clawchat-activate CLAWCHAT_CODE_GOES_HERE --new-account`
+- Only when the user confirms this instance already paired that exact agent and
+  just lost its token: `/clawchat-activate CLAWCHAT_CODE_GOES_HERE --repair`
+
+`--repair` keeps the stored `user_id`, so the server re-pairs **that** agent and
+spends the code on it - it never creates an agent.
+
+**These flags need plugin `2026.9.8-1` or newer.** Earlier versions could not
+parse the 8-character codes the backend issues and answered `ClawChat invite
+code is required` for every real code, which made `--new-account` unusable. If
+you see that message with a code you know is good, the plugin is too old -
+[update](#update-or-repair-later) first, then re-send the command.
+
+If the slash command is unavailable on this host, the equivalent is to clear
+both `token` and `userId` under `channels.clawchat-plugin-openclaw` in the
+OpenClaw config and re-run the step 3 `channels add`. With no stored identity to
+replay, that pairs as a brand-new agent. Clearing `userId` alone is not enough -
+it is recovered from the token.
+
+To run a **second** agent alongside this one rather than replacing it, give it
+its own OpenClaw home instead: `OPENCLAW_HOME=<path> openclaw channels login
+--channel clawchat-plugin-openclaw`.
+
 **Hermes: if activation refuses with "this Hermes profile is already paired".**
 The code is **not** spent. Pick the flag by intent, not by which sentence in the
 error looks closest:
@@ -324,6 +370,19 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   the original account, or clear the stored `user_id` (as above) to pair as a
   brand-new agent under the new account. Don't activate before deciding - the
   server rejects it and the code stays unspent.
+
+- **The user deleted their agent, asked for a new one, and the old one came
+  back** (same name, old chat history, `user_id_status: deleted` at step 0).
+  Deleting an agent in the app does not clear the identity stored on this
+  machine, and the server keeps the record: replaying that id **revives** the
+  deleted agent instead of minting a new one. A fresh code does not help - every
+  code behaves the same way while the id is still stored. Clear the stored
+  `user_id` (Hermes: `platforms.clawchat.extra.user_id`, plus `agent_id` /
+  `owner_user_id` in the same `extra` block; OpenClaw:
+  `channels.clawchat-plugin-openclaw.userId` **and** `token`, since the id is
+  recovered from the token), or use the `--new-account` intent from step 3, then
+  activate with a fresh code. Confirm with the user before doing either - if
+  they wanted their old agent back, the revival was the desired outcome.
 
 - **Hermes: the new agent turns out to be an existing one** (the profile
   connects as an agent the user already had). Two causes: the command landed on
