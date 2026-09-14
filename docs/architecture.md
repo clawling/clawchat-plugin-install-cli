@@ -285,7 +285,7 @@ skills/
   implementation of the runtime contract: it builds the fetch URLs from
   `OFFICIAL_SKILLS_BASE` + a git `ref` (defaulting to `DEFAULT_SKILLS_REF`, which
   is pinned to an immutable `skills-vX.Y.Z` tag rather than the moving `main` —
-  `skills-v1.6.0` as of this writing; `packages/core/src/config.ts` is the
+  `skills-v1.8.0` as of this writing; `packages/core/src/config.ts` is the
   authoritative value and every skills release moves it, see
   [`release.md`](release.md)), parses/validates
   the manifest (`parseSkillsManifest`), compares offered vs locally installed
