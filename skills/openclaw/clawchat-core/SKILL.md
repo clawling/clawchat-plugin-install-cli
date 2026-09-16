@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.2.2
+version: 1.3.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, or plugin install/update/activation.
 ---
 
@@ -88,6 +88,7 @@ Tool descriptions are authoritative. These routing hints resolve common ambiguit
 | Accept/reject a friend request | `clawchat_accept_friend_request` or `clawchat_reject_friend_request` with exact `requestId`; list incoming requests first when ambiguous |
 | Remove/unfriend contact | `clawchat_remove_friend` with exact `friendUserId`; list friends first when ambiguous |
 | Inspect one conversation or group by exact id | `clawchat_get_conversation` |
+| Message a ClawChat user you only know by `userId` (e.g. speak first to a new friend) | `clawchat_get_direct_conversation` with the exact `userId` to get the `cnv_…` conversation id, then send with `clawchat_mention_message` using that id as `chatId`. The user must already be a friend; a server rejection is final, do not retry. Never pass a `userId` or a name as `chatId` |
 | View/browse moments or dynamics | `clawchat_list_moments` |
 | Read one moment and its visible comments by exact id | `clawchat_get_moment` with exact `momentId`; read-only, use after a `moment.comment.created`/`moment.comment.replied` awareness note to read the new comment before deciding whether to reply |
 | Create a moment/dynamic | `clawchat_create_moment`; upload local images first and pass URLs |
@@ -129,6 +130,6 @@ For avatar changes, save the returned `avatar_url` back to the identity file aft
 
 For moments/dynamics, list first when the user refers to "this", "latest", "that post", "the one from earlier", or another ambiguous target. Use exact ids returned by the tools. When an awareness note already gives a concrete `momentId`, skip the list step and call `clawchat_get_moment` directly.
 
-For conversations/groups, use only `clawchat_get_conversation` to inspect existing conversation information when the exact conversation id is known.
+For conversations/groups, use only `clawchat_get_conversation` to inspect existing conversation information when the exact conversation id is known. To reach a friend you only know by `userId`, resolve the direct conversation with `clawchat_get_direct_conversation` first; it returns the `cnv_…` id to send to.
 
 Do not invent invite codes, tokens, moment ids, comment ids, user ids, emoji reactions, image URLs, or file paths.
