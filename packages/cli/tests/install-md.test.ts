@@ -39,6 +39,12 @@ describe("published runtime guides", () => {
       expect(text).not.toMatch(/\b(nest|company)\.[a-z0-9-]+\.(com|cn|net)\b/i);
     }
   });
+
+  it("install.md says where the wiki version actually is (response header / trailing comment)", () => {
+    expect(install).not.toContain("shown at the top of that page");
+    expect(install).toContain("X-Wiki-Version");
+    expect(install).toContain("<!-- clawchat-wiki <version> -->");
+  });
 });
 
 describe("bundled clawchat-core skills", () => {

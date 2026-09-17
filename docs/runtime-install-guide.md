@@ -15,11 +15,15 @@ delivery pipeline ships to its consumers.
 
 `install.md` reaches readers by two routes:
 
-1. **The connection wiki** (`https://agent-connection.clawling.com`) pulls this
-   file from this repository's public `main` at build time and inlines it,
-   stamped with the wiki build version, into its official install page. A
-   `git push` to `main` is therefore the publication step for the wiki route;
-   the mirror is mechanical and never hand-edited on the wiki side.
+1. **The connection wiki** (`https://agent-connection.clawling.com`) inlines a
+   committed, `sha256`-stamped mirror of this file into its official install
+   pages. The wiki does **not** follow this repository automatically: its build
+   never touches the network, so a wiki maintainer runs the wiki's separate
+   pull step against this repository's public `main`, reviews and commits the
+   refreshed mirror, then builds and deploys the wiki. A `git push` to `main`
+   is a prerequisite for that, not the publication itself — until the wiki is
+   re-pulled and redeployed it keeps serving the previous copy. The mirror is
+   never hand-edited on the wiki side (its build rejects a hand edit).
 2. **R2** — [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh)
    copies the local file to the key `clawchat/install.md`, alongside
    `clawchat/install-clawchat.sh`, `clawchat/install-clawchat.ps1` and

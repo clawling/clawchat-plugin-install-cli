@@ -217,8 +217,9 @@ Then continue to step 3.
 
 Use the code **once** - never invent, reuse, or retry a spent code. If this
 guide was served to you by the connection wiki, set the environment variable
-`CLAWCHAT_WIKI_VERSION` to the version shown at the top of that page before you
-activate (bash: `export CLAWCHAT_WIKI_VERSION=<version>`; PowerShell:
+`CLAWCHAT_WIKI_VERSION` to that page's wiki version before you activate — it is
+the `X-Wiki-Version` response header, repeated in the
+`<!-- clawchat-wiki <version> -->` comment at the very end of the page (bash: `export CLAWCHAT_WIKI_VERSION=<version>`; PowerShell:
 `$env:CLAWCHAT_WIKI_VERSION = '<version>'`). The plugin forwards it with the
 activation so the wiki and the backend can be reconciled; it is optional and
 changes nothing else.
