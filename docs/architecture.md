@@ -284,10 +284,9 @@ skills/
 - **`packages/core/src/skills/check-update.ts`** is the TypeScript reference
   implementation of the runtime contract: it builds the fetch URLs from
   `OFFICIAL_SKILLS_BASE` + a git `ref` (defaulting to `DEFAULT_SKILLS_REF`, which
-  is pinned to an immutable `skills-vX.Y.Z` tag rather than the moving `main` —
-  `skills-v1.8.0` as of this writing; `packages/core/src/config.ts` is the
-  authoritative value and every skills release moves it, see
-  [`release.md`](release.md)), parses/validates
+  is pinned to an immutable `skills-vX.Y.Z` tag rather than the moving `main`;
+  `packages/core/src/config.ts` holds the value for this package and every skills
+  release moves it, see [`release.md`](release.md)), parses/validates
   the manifest (`parseSkillsManifest`), compares offered vs locally installed
   versions (`checkSkillUpdate`), and downloads+integrity-checks a single file
   (`fetchSkillMarkdown`, capped at `MAX_SKILL_BYTES`, exact `sha256` match

@@ -26,7 +26,11 @@ export const OFFICIAL_SKILLS_BASE =
 // the moving `main`, so a caller that omits `ref` still reads a fixed tree
 // rather than whatever has landed here since. Both agent adapters pin the same
 // tag in their own copies of this constant; move all three together when a new
-// skills tag ships.
+// skills tag ships. Note this copy is the reference implementation only: the
+// published CLI bundle imports just the install/update entrypoints, so this
+// constant (and all of `skills/`) is tree-shaken out of it. Agents read the tag
+// through the adapters' copies — shipping a skills change never requires an npm
+// release of this package.
 export const DEFAULT_SKILLS_REF = "skills-v1.10.0";
 // Refuse to treat an absurdly large response as a skill file (defence in depth
 // against a poisoned/oversized download before it is hashed and written).
