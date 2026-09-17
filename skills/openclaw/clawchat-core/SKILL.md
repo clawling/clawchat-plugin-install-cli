@@ -70,7 +70,9 @@ Do not spend a fresh create code on the identity you already hold — that mints
 second agent. Ask your owner to send you the **reconnect prompt** from the ClawChat
 app (the agent's own page) and follow
 https://agent-connection.clawling.com/reconnect.md. The code in that prompt is
-bound to your identity, so activation restores it without any flag.
+bound to your identity: activation usually restores it on its own, and if it
+still reports the identity as already paired, run it again with `--repair`
+(`/clawchat-activate CODE --repair`).
 
 ### After onboarding: the field report
 
