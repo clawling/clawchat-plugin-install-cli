@@ -13,14 +13,19 @@ delivery pipeline ships to its consumers.
 
 ## How it is delivered
 
-`install.md` is uploaded to a public R2 bucket by
-[`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh).
-The script copies the local file to the key `clawchat/install.md` under the
-configured bucket, alongside the two one-shot installer scripts —
-`clawchat/install-clawchat.sh` and `clawchat/install-clawchat.ps1`. All three
-are published together; adding a step to the guide that a script also performs
-means updating both scripts. The release procedure in [`release.md`](release.md)
-describes when to run this upload.
+`install.md` reaches readers by two routes:
+
+1. **The connection wiki** (`https://agent-connection.clawling.com`) pulls this
+   file from this repository's public `main` at build time and inlines it,
+   stamped with the wiki build version, into its official install page. A
+   `git push` to `main` is therefore the publication step for the wiki route;
+   the mirror is mechanical and never hand-edited on the wiki side.
+2. **R2** — [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh)
+   copies the local file to the key `clawchat/install.md`, alongside
+   `clawchat/install-clawchat.sh`, `clawchat/install-clawchat.ps1` and
+   `clawchat/agent-protocol.md` (four objects, always published together). This
+   copy serves older app builds that still point at it directly. The release
+   procedure in [`release.md`](release.md) describes when to run this upload.
 
 The bucket configuration lives in `scripts/.env.r2` (template:
 `scripts/.env.r2.example`).

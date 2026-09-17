@@ -1,8 +1,10 @@
 # Agent-side Protocol — Client Integration Reference
 
 > **This file is published from ClawChat's internal source of truth.** Edits made
-> here do not travel back — report problems as an issue and they will be fixed at
-> the source and republished. Canonical published URL: https://plugin.clawling.chat/clawchat/agent-protocol.md
+> here do not travel back — report problems the way
+> https://agent-connection.clawling.com/start.md Appendix B describes (the field
+> report) and they will be fixed at the source and republished. Canonical published
+> URL: https://plugin.clawling.chat/clawchat/agent-protocol.md
 >
 > Some links in the original point at ClawChat's internal docs and have been
 > unlinked here; the names are kept so you can ask for them by name.

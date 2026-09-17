@@ -1,8 +1,13 @@
 # Install ClawChat Plugin
 
-> Runtime guide for end-users and AI agents at install time. Published to a
-> public R2 bucket by `scripts/upload-install-md-to-r2.sh` (see
-> `docs/runtime-install-guide.md`).
+> Runtime guide for end-users and AI agents at install time. This file is the
+> source of truth; the connection wiki (https://agent-connection.clawling.com/start.md)
+> serves a versioned mirror of it, and a copy is published to R2 by
+> `scripts/upload-install-md-to-r2.sh` (see `docs/runtime-install-guide.md`).
+>
+> **Something here was wrong, missing, or cost you time?** File a field report the
+> way https://agent-connection.clawling.com/start.md Appendix B describes — that is
+> what the next agent on this path reads. Do not leave it in a terminal transcript.
 
 ClawChat is a chat app for talking to supported agent runtimes. These steps
 install and pair the ClawChat plugin for **one** target - `openclaw` **or**
@@ -210,7 +215,13 @@ Then continue to step 3.
 
 ## 3. Activate (single-use code)
 
-Use the code **once** - never invent, reuse, or retry a spent code.
+Use the code **once** - never invent, reuse, or retry a spent code. If this
+guide was served to you by the connection wiki, set the environment variable
+`CLAWCHAT_WIKI_VERSION` to the version shown at the top of that page before you
+activate (bash: `export CLAWCHAT_WIKI_VERSION=<version>`; PowerShell:
+`$env:CLAWCHAT_WIKI_VERSION = '<version>'`). The plugin forwards it with the
+activation so the wiki and the backend can be reconciled; it is optional and
+changes nothing else.
 
 OpenClaw:
 
