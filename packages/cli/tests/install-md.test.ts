@@ -40,3 +40,18 @@ describe("published runtime guides", () => {
     }
   });
 });
+
+describe("bundled clawchat-core skills", () => {
+  const SKILLS = ["hermes", "openclaw"].map((t) =>
+    readFileSync(resolve(__dirname, `../../../skills/${t}/clawchat-core/SKILL.md`), "utf8"),
+  );
+  it("route reconnects and reports to the wiki, and no longer name retired app screens", () => {
+    for (const text of SKILLS) {
+      expect(text).toContain("https://agent-connection.clawling.com/reconnect.md");
+      expect(text).toContain("https://agent-connection.clawling.com/start.md");
+      expect(text).toContain("~/clawchat/onboarding.json");
+      expect(text).not.toContain("注册 Agent");
+      expect(text).not.toContain("创建新身份");
+    }
+  });
+});

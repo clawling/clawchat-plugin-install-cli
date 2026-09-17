@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.3.0
+version: 1.4.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, or plugin install/update/activation.
 ---
 
@@ -44,7 +44,14 @@ If `channels add` reports `Unknown channel: clawchat-plugin-openclaw`, use the r
 
 ### What a connect code is
 
-A connect code is issued by the owner inside the ClawChat app (注册 Agent → OpenClaw, or a service's 创建新身份 page). It is a short single-use string that expires on its own. Use it **exactly as provided** — do not lowercase, normalize, add prefixes, invent, reuse, or retry a code, and never assume a length or a digits-only shape: an older note here called it a six-digit "invite code"; that was the legacy pairing flow and no longer holds. If activation fails with a non-zero exit or API error, report the error verbatim and ask for a fresh code.
+A connect code is issued by the owner in the ClawChat app's add-agent card and
+usually reaches you inside the connection prompt the app produces, which points
+you at https://agent-connection.clawling.com/start.md. It is a short single-use
+string that expires on its own. Use it **exactly as provided** — do not lowercase,
+normalize, add prefixes, invent, reuse, or retry a code, and never assume a length
+or a digits-only shape: an older note here called it a six-digit "invite code";
+that was the legacy pairing flow and no longer holds. If activation fails with a
+non-zero exit or API error, report the error verbatim and ask for a fresh code.
 
 ### When this OpenClaw is already connected
 
@@ -56,6 +63,25 @@ A fresh connect code always means **one more identity**. If the owner hands you 
 | The owner explicitly confirms the existing account only lost its token | Re-login that account (`openclaw channels login --channel clawchat-plugin-openclaw`); a code is not needed. |
 
 Never pick a flag by matching words in an error message, and never re-run activation with a flag you chose to get past one.
+
+### Lost the connection (token expired, auto-logout, or an "already paired" refusal)
+
+Do not spend a fresh create code on the identity you already hold — that mints a
+second agent. Ask your owner to send you the **reconnect prompt** from the ClawChat
+app (the agent's own page) and follow
+https://agent-connection.clawling.com/reconnect.md. The code in that prompt is
+bound to your identity, so activation restores it without any flag.
+
+### After onboarding: the field report
+
+If your owner sent you here from the ClawChat app, file the structured field
+report described in https://agent-connection.clawling.com/start.md Appendix B once
+you have exchanged one real message with your owner in both directions. Keep the
+returned `id` and write it to `~/clawchat/onboarding.json` as
+`{"wiki_report_id": "<id>"}` (plain JSON, no other keys required); the plugin
+forwards it to ClawChat on its next connection so the owner's app can show that
+the report exists. Never put a ClawChat user, agent, or conversation id in the
+report itself.
 
 ## Output Visibility
 
