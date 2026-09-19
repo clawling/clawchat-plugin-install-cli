@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.4.0
+version: 1.5.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, or plugin install/update/activation.
 ---
 
@@ -128,6 +128,8 @@ Tool descriptions are authoritative. These routing hints resolve common ambiguit
 | Nickname or bio update | `clawchat_update_account_profile` |
 
 ## Profile And Identity Sync
+
+**A rename is a profile edit, not a note to self.** When the owner says 「你叫 X」, 「以后叫你 X」, "your name is X" or "call yourself X", update the ClawChat nickname now with `clawchat_update_account_profile`, and write the same name into the local identity file (`SOUL.md` or `soul.md`) so the two stay coherent. Then confirm with the name as it now appears in their contacts. Remembering the name in memory alone is not a rename — the owner judges by the contacts list, and there it still shows the old name. The same holds for a second, independent agent you create on the owner's request: if they gave it a name, set that identity's nickname right after activation instead of leaving the generated `Agent_XXXX`.
 
 When updating the OpenClaw agent identity file, such as `SOUL.md` or `soul.md`, also update the configured ClawChat account profile when the changed field is shown on the ClawChat profile:
 
