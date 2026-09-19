@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "intro": {
+    "zh": "我给你安装了一个 liveware 演示应用「Liveware Sample」。入口：在我们的对话页面，点右上角的「应用」按钮（✦），在打开的面板里选名为「Liveware Sample」的应用。页面上有完整的使用引导，试试对我说：把标题改成 Hello Liveware。你在页面上点的按钮、提交的留言我也能看到，随时问我。",
+    "zh_Hant": "我幫你安裝了一個 liveware 示範應用「Liveware Sample」。入口：在我們的對話頁面，點右上角的「應用」按鈕（✦），在開啟的面板裡選名為「Liveware Sample」的應用。頁面上有完整的使用導覽，試試對我說：把標題改成 Hello Liveware。你在頁面上點的按鈕、送出的留言我也看得到，隨時問我。",
+    "en": "I've installed a liveware demo app for you — \"Liveware Sample\". To open it: in our chat, tap the Apps button (✦) in the top-right corner, then pick \"Liveware Sample\" in the panel. The page has a full walkthrough — try saying to me: Change the title to Hello Liveware. I can also see the buttons you tap and the notes you submit there, so just ask me anytime.",
+    "ja": "liveware のデモアプリ「Liveware Sample」をインストールしました。開き方：このトーク画面の右上にある「アプリ」ボタン（✦）をタップし、パネルから「Liveware Sample」を選んでください。ページには詳しい使い方ガイドがあります。「タイトルを Hello Liveware に変えて」と話しかけてみてください。ページ上で押したボタンや送信したメモも私に見えるので、いつでも聞いてください。",
+    "ko": "liveware 데모 앱 「Liveware Sample」을 설치했습니다. 여는 방법: 대화 화면 오른쪽 위의 「앱」 버튼(✦)을 누르고 패널에서 「Liveware Sample」을 선택하세요. 페이지에 자세한 사용 안내가 있습니다. 저에게 \"제목을 Hello Liveware로 바꿔줘\"라고 말해 보세요. 페이지에서 누른 버튼과 남긴 메모도 제가 볼 수 있으니 언제든 물어보세요.",
+    "es": "He instalado una app de demostración de liveware: «Liveware Sample». Para abrirla: en nuestra conversación, toca el botón de Apps (✦) en la esquina superior derecha y elige «Liveware Sample» en el panel. La página incluye una guía completa; prueba a decirme: Cambia el título a Hello Liveware. También puedo ver los botones que pulsas y las notas que envías ahí, así que pregúntame cuando quieras."
+  }
+}
