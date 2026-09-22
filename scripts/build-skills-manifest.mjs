@@ -76,7 +76,32 @@ function frontmatterVersion(text, file) {
   return v;
 }
 
+// Every SKILL.md on disk must be referenced by at least one target. LAYOUT is
+// hand-maintained: without this, a new skill directory that nobody adds to it
+// is simply absent from the manifest and never ships — no error, no warning,
+// no failing test. That silence is the whole reason this check exists.
+function assertNoOrphans() {
+  const referenced = new Set(Object.values(LAYOUT).flatMap((e) => Object.values(e)));
+  const orphans = [];
+  for (const group of ["shared", "openclaw", "hermes"]) {
+    const groupDir = path.join(SKILLS_DIR, group);
+    if (!fs.existsSync(groupDir)) continue;
+    for (const entry of fs.readdirSync(groupDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const rel = `${group}/${entry.name}/SKILL.md`;
+      if (!fs.existsSync(path.join(SKILLS_DIR, rel))) continue;
+      if (!referenced.has(rel)) orphans.push(rel);
+    }
+  }
+  if (orphans.length > 0) {
+    throw new Error(
+      `SKILL.md files not referenced by any LAYOUT target (add them, or delete the files):\n  ${orphans.join("\n  ")}`,
+    );
+  }
+}
+
 function build() {
+  assertNoOrphans();
   const skills = {};
   for (const [target, entries] of Object.entries(LAYOUT)) {
     skills[target] = {};
