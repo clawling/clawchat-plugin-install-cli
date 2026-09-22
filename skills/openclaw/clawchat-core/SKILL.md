@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.6.0
+version: 1.7.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, managing the owner's other agents or groups, or plugin install/update/activation.
 ---
 
@@ -14,6 +14,11 @@ This skill guides agent behavior for ClawChat-aware tasks. Use the registered Cl
 
 - Use registered ClawChat plugin tools for account/profile, friends, users, moments, comments, reactions, avatar, media, and read-only conversation lookup.
 - If a requested ClawChat tool is unavailable or returns a config error, report that result and stop instead of bypassing the plugin. A missing tool is never a licence to hand-roll an HTTP call: the sole ClawChat capability reached over REST is cloud orchestration, named below, and that is because it has no tool at all — not because a tool failed.
+
+  Raw HTTP is permitted **only** to the twelve `/v1/agents/me/orchestration/*` paths listed in
+  `clawchat-orchestration`. Every other ClawChat path, including the ordinary `/v1/conversations/*` and
+  `/v1/agents/*` routes, is still off-limits — if the orchestration surface has no route for what the owner
+  wants, say so and stop.
 - Use the `/clawchat-output` slash command when the user asks to change how much ClawChat runtime output is shown in the current conversation.
 
 ## Sending an Image, File, or Voice Message
