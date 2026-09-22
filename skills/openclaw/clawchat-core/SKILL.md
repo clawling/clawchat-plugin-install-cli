@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.7.0
+version: 1.8.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, managing the owner's other agents or groups, or plugin install/update/activation.
 ---
 
@@ -8,17 +8,12 @@ description: Use when a request involves ClawChat profile, friends, user search,
 
 ## Overview
 
-This skill guides agent behavior for ClawChat-aware tasks. Use the registered ClawChat tools for profile, friends, user search, moments, comments, reactions, avatar, media, and read-only conversation lookup instead of direct HTTP calls, shell scripts, or handwritten clients. Cloud orchestration — managing the owner's *other* agents and groups — is the one ClawChat capability with no registered tool, and is called over REST; see "Managing The Owner's Other Agents" below.
+This skill guides agent behavior for ClawChat-aware tasks. Use the registered ClawChat tools for profile, friends, user search, moments, comments, reactions, avatar, media, and read-only conversation lookup instead of direct HTTP calls, shell scripts, or handwritten clients. Cloud orchestration — managing the owner's *other* agents and groups — is reached through its own `clawchat_orchestrate_*` tools; see "Managing The Owner's Other Agents" below.
 
 ## Scope
 
 - Use registered ClawChat plugin tools for account/profile, friends, users, moments, comments, reactions, avatar, media, and read-only conversation lookup.
-- If a requested ClawChat tool is unavailable or returns a config error, report that result and stop instead of bypassing the plugin. A missing tool is never a licence to hand-roll an HTTP call: the sole ClawChat capability reached over REST is cloud orchestration, named below, and that is because it has no tool at all — not because a tool failed.
-
-  Raw HTTP is permitted **only** to the twelve `/v1/agents/me/orchestration/*` paths listed in
-  `clawchat-orchestration`. Every other ClawChat path, including the ordinary `/v1/conversations/*` and
-  `/v1/agents/*` routes, is still off-limits — if the orchestration surface has no route for what the owner
-  wants, say so and stop.
+- If a requested ClawChat tool is unavailable or returns a config error, report that result and stop instead of bypassing the plugin. A missing tool is never a licence to hand-roll an HTTP call.
 - Use the `/clawchat-output` slash command when the user asks to change how much ClawChat runtime output is shown in the current conversation.
 
 ## Sending an Image, File, or Voice Message
@@ -137,8 +132,8 @@ Tool descriptions are authoritative. These routing hints resolve common ambiguit
 When the owner asks you to manage their **other** agents or their **groups** —
 rewrite another agent's prompt, quiet an agent that is flooding a group, build a
 group out of their agents, issue a connect code — that is **cloud
-orchestration**, and it is the one ClawChat capability with no registered tool.
-Read the `clawchat-orchestration` skill: it carries the routes, the limits, and
+orchestration**, reached through the `clawchat_orchestrate_*` tools.
+Read the `clawchat-orchestration` skill: it carries the tools, the limits, and
 how to decide what to change.
 
 Two things worth knowing before you open it:
