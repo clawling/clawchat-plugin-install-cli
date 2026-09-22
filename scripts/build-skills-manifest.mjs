@@ -33,6 +33,7 @@ const LAYOUT = {
     "clawchat-liveware-dev": "shared/clawchat-liveware-dev/SKILL.md",
     "clawchat-set-greeting": "shared/clawchat-set-greeting/SKILL.md",
     "clawchat-liveware-sample": "openclaw/clawchat-liveware-sample/SKILL.md",
+    "clawchat-orchestration": "shared/clawchat-orchestration/SKILL.md",
   },
   hermes: {
     "clawchat-core": "hermes/clawchat-core/SKILL.md",
@@ -40,6 +41,7 @@ const LAYOUT = {
     "clawchat-liveware-dev": "shared/clawchat-liveware-dev/SKILL.md",
     "clawchat-set-greeting": "shared/clawchat-set-greeting/SKILL.md",
     "clawchat-liveware-sample": "hermes/clawchat-liveware-sample/SKILL.md",
+    "clawchat-orchestration": "shared/clawchat-orchestration/SKILL.md",
   },
 };
 
