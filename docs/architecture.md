@@ -61,6 +61,8 @@ value exits non-zero with `--target must be one of: openclaw, hermes`.
 Flag semantics:
 
 - `--force` — reinstall/repair even when the installed version is already current.
+  For Hermes it never overrides the host's plugin security scan (see
+  [Hermes host security scan](#hermes-host-security-scan)).
 - `--apibaseurl` / `--wsbaseurl` / `--mediabaseurl` — override the backend
   endpoints written for the plugin. A bare `host:port` is normalized assuming TLS
   (`--wsbaseurl` → `wss://host:port/ws`, the two HTTP ones → `https://host:port`)
@@ -229,10 +231,17 @@ installed. The four result statuses are:
   every time; it does **not** return `skipped`. See the test
   `updates and enables during update even when installed plugin is current`
   in `packages/core/tests/installers/hermes.test.ts`.
-- `update --force` runs
-  `hermes plugins install clawling/clawchat-plugin-hermes-agent --force --enable`.
-  The package spec used here is `HERMES_PLUGIN_SPEC` (the GitHub source), not
-  the bare plugin name `clawchat` (`HERMES_PLUGIN_NAME`).
+- `update --force` (and `install --force` on an installed plugin) reinstalls
+  from `HERMES_PLUGIN_SPEC` (the GitHub source `clawling/clawchat-plugin-hermes-agent`,
+  not the bare plugin name `clawchat` / `HERMES_PLUGIN_NAME`) through
+  `installViaHost`: first `hermes plugins install <spec> --enable`, and only if
+  the host answers "already exists" a second
+  `hermes plugins install <spec> --force --enable`. See the next section for why.
+- If `hermes plugins update` is refused because the plugin is **pinned** (installed
+  at a fixed commit, e.g. by name from the Hermes plugin catalog), the error gets
+  a hint (`appendHermesPinnedUpdateHint`): neither `plugins update` nor a
+  `--force` reinstall moves a pin; `hermes plugins remove clawchat` followed by
+  a fresh `install --target hermes` does.
 - If the non-force update fails because of dirty checkout / fast-forward /
   untracked files, the error is rewritten with the hint to retry with
   `--force` (`appendHermesForceRepairHint` in
@@ -241,6 +250,59 @@ installed. The four result statuses are:
   is rewritten with a deployment-level hint
   (`appendHermesConfigBusyHint`) — that file must be writable, not a read-only
   bind mount.
+
+#### Hermes host security scan
+
+Hermes 0.20.2+ scans a community plugin tree after cloning it and before moving
+it into place (`plugins.scan_on_install`, on by default). Verdicts: `safe`
+installs; `caution` needs confirmation — an interactive yes, or the host's
+`plugins install --force`; `dangerous` is always refused. The catch is that the
+host's `--force` means two things at once: "overwrite an existing install" and
+"accept a caution verdict". The CLI never gives the host a TTY, so without
+`--force` a caution verdict is refused.
+
+The installer therefore never passes the host's `--force` on a first attempt.
+`installViaHost` (used by the canonical install, the ref/local-clone install and
+the raw-spec ref install) runs:
+
+1. `hermes plugins install <spec> --enable` — no `--force`. The host scans
+   **before** it checks whether the plugin already exists (true for every
+   scanning release), so:
+   - a scan refusal surfaces here and becomes a `SCAN_BLOCKED` error;
+   - "already exists" means the scan passed.
+2. Only when a reinstall was asked for (`--force`, or any `@ref` install) and
+   step 1 said "already exists": `hermes plugins install <spec> --force --enable`,
+   which keeps the host's atomic swap. Uninstall + install would also avoid
+   `--force` but leaves the agent with no plugin whenever the fresh install fails.
+
+Residual window: for the canonical remote spec, step 2 re-clones, so a commit
+pushed between the two clones would be scanned with `--force`. The ref path
+reuses one local checkout for both steps, so it has no window.
+
+Refusal detection (`isHermesScanRefusal`) is a conservative wording heuristic
+over the host output: the literal `security scan blocked`, or `blocked` together
+with `caution verdict` / `dangerous verdict`, after collapsing whitespace (rich
+wraps at 80 columns when stdout is piped). The host prints this on **stdout**,
+so the install call runs with `collectStdout` (`packages/core/src/installers/run.ts`):
+stdout is piped, added to the error on failure, and written back to our stdout
+on success. `captureCommand` also includes stdout in its failure message.
+
+A `SCAN_BLOCKED` error says that the host's security scan refused the plugin,
+that nothing was installed or replaced, that it needs the owner's review and must
+not be retried automatically or forced, and then quotes the host output. For a
+`dangerous` verdict it adds that the host never installs it, `--force` or not.
+The CLI adds no flag to override the scan. Accepting a caution verdict is
+the owner's call, made with the host's own CLI after reviewing the findings.
+
+`hermes plugins update` rescans after `git pull` and on a `dangerous` verdict
+disables the plugin but still exits 0. `runHermesUpdate` captures that output
+and, when the host reports it disabled the plugin, raises `SCAN_BLOCKED`
+**instead of** running its usual `hermes plugins enable clawchat`, which would
+otherwise silently undo the host's decision.
+
+The bootstrap scripts (`scripts/install-clawchat.{sh,ps1}`) retry a failed
+update once with `--force`; with the above, that retry gets the same scan
+verdict and fails the same way. It cannot get past the scan.
 
 #### Network and filesystem access in the Hermes flow
 
@@ -251,7 +313,8 @@ OS temp dir (`fs.mkdtempSync(os.tmpdir(), "clawchat-hermes-")`), runs
 (bounded by `GIT_CLONE_TIMEOUT_MS` with two retries, `GIT_TERMINAL_PROMPT=0` so
 git can never block on a credential prompt), reads `plugin.yaml` straight out of
 the checkout for the host-compat guard, hands the checkout to
-`hermes plugins install file://<dest> --force --enable`, and removes the temp
+`hermes plugins install file://<dest> --enable` (plus the scan-clean `--force`
+replace step described above when a copy is already installed), and removes the temp
 tree in a `finally`. The CLI owns the clone precisely so the branch in a
 `#branch` fragment is honoured and the network step stays under its own
 timeout/retry budget instead of the host's fixed, no-retry clone. The canonical

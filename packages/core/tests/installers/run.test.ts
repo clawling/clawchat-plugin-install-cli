@@ -67,6 +67,35 @@ describe("runCommand", () => {
     );
   });
 
+  it("with collectStdout, includes the child's stdout in the failure message", async () => {
+    spawnSyncMock.mockReturnValue({
+      status: 1,
+      stdout: "Blocked: Security scan blocked plugin install\n",
+      stderr: "",
+    } as ReturnType<typeof spawnSync>);
+
+    await expect(
+      runCommand("hermes", ["plugins", "install", "x"], { collectStdout: true }),
+    ).rejects.toEqual(
+      new ClawchatError(
+        "SUBPROCESS",
+        "hermes plugins install x failed with exit code 1: Blocked: Security scan blocked plugin install",
+      ),
+    );
+    expect(spawnSyncMock.mock.calls[0]![2]).toMatchObject({ stdio: ["ignore", "pipe", "pipe"] });
+  });
+
+  it("with collectStdout, forwards the child's stdout on success", async () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: "installed\n", stderr: "" } as ReturnType<typeof spawnSync>);
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await runCommand("hermes", ["plugins", "install", "x"], { collectStdout: true });
+      expect(write).toHaveBeenCalledWith("installed\n");
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it("passes timeout to spawnSync and reports ETIMEDOUT as a TIMEOUT error", async () => {
     const timeoutError = Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT" });
     spawnSyncMock.mockReturnValue({
@@ -193,6 +222,18 @@ describe("captureCommand", () => {
 
     await expect(captureCommand("tar", ["-xOf", "bad path.tgz", "package.json"])).resolves.toBe("ok");
     expect(spawnSyncMock).toHaveBeenCalled();
+  });
+
+  it("includes stdout in the failure message when the child reports its error there", async () => {
+    spawnSyncMock.mockReturnValue({
+      status: 1,
+      stdout: "Error: Plugin 'clawchat' is pinned\n",
+      stderr: "",
+    } as ReturnType<typeof spawnSync>);
+
+    await expect(captureCommand("hermes", ["plugins", "update", "clawchat"])).rejects.toEqual(
+      new ClawchatError("SUBPROCESS", "hermes plugins update clawchat failed with exit code 1: Error: Plugin 'clawchat' is pinned"),
+    );
   });
 
   it("throws on non-zero capture status and includes stderr", async () => {

@@ -95,8 +95,18 @@ For OpenClaw, `update` delegates to
 For Hermes, `update` requires an installed plugin and delegates to
 `hermes plugins update clawchat` followed by `hermes plugins enable clawchat`,
 even when the installed `plugin.yaml` version already matches the remote
-version. Pass `--force` as the explicit repair path: with `--force`, Hermes
-runs `hermes plugins install clawling/clawchat-plugin-hermes-agent --force --enable`.
+version. Pass `--force` as the explicit repair path: with `--force`, the CLI
+reinstalls from `clawling/clawchat-plugin-hermes-agent`. It first runs
+`hermes plugins install clawling/clawchat-plugin-hermes-agent --enable` without
+the host's `--force`, so Hermes' plugin security scan still applies. Only if that
+attempt passes the scan and reports the plugin already exists does it repeat the
+command with the host's `--force` to replace the copy in place.
+The installer's `--force` never overrides the host scan. If Hermes' security scan
+refuses the plugin, the CLI stops with a `SCAN_BLOCKED` error that quotes the scan
+findings. It never retries automatically. That refusal needs the owner's review.
+If `update` fails because the plugin was installed pinned to a fixed commit (for
+example by name from the Hermes plugin catalog), the error explains how to switch
+back to tracked releases: `hermes plugins remove clawchat`, then install again.
 `--force` also lifts the "not installed" precondition — `update --force` on a
 host with no ClawChat plugin installs it instead of failing, and reports
 `installed`.
