@@ -213,6 +213,11 @@ Without them the install is cancelled or rejected and the plugin never lands. Ru
 
 Then continue to step 3.
 
+**If Hermes refuses the install after a security scan** ("Security scan blocked
+plugin install", a *caution* / *dangerous* verdict with a list of findings),
+that is a review gate, not a network error - see
+[Troubleshooting](#troubleshooting) before doing anything else.
+
 ## 3. Activate (single-use code)
 
 Use the code **once** - never invent, reuse, or retry a spent code. If this
@@ -321,6 +326,12 @@ so "lost its token" always looks true; that is not evidence. Newer plugin
 versions refuse `--repair` outright when the identity has no local provenance -
 that refusal means `--new-account`, not a fresh code.
 
+**Several Hermes profiles served by one gateway** (`gateway.multiplex_profiles:
+true`) need plugin `0.14.0-89` or newer (`hermes plugins list` shows the
+version); earlier versions shared one state store across the profiles.
+[Update](#update-or-repair-later) before activating a
+second profile on such a gateway.
+
 ## 4. Restart the agent - the user must do this
 
 **Required.** ClawChat's tools and live connection only become usable after the
@@ -329,13 +340,35 @@ credentials. Until then the agent cannot connect, so the plugin's automatic
 greeting never fires and the profile call in step 5 would fail - the ClawChat
 tools aren't registered yet.
 
-Hermes activation schedules this restart automatically, but in many environments
-the running agent **cannot restart itself** (the restart needs the user's
-approval). Do **not** block or loop trying to self-restart.
+Hermes activation schedules this restart automatically, but the `Hermes restart
+scheduled` line proves nothing: the restart runs detached and nobody checks its
+result. In many environments the running agent also **cannot restart itself**
+(the restart needs the user's approval). Do **not** block or loop trying to
+self-restart.
 
 Instead, **ask the user to restart the agent themselves** - the OpenClaw or
-Hermes process that was just activated - and wait for it to come back. Once it's
-back up, the ClawChat tools are available; continue to step 5.
+Hermes process that was just activated - and wait for it to come back.
+
+**Then verify the gateway actually restarted after the activation.** OpenClaw:
+`openclaw channels status --probe` shows the ClawChat channel running and
+connected. Hermes: `hermes gateway status` (with `-p <name>` for a profile)
+shows a gateway started *after* the activation, or the Hermes log has a
+`clawchat state -> ready` line from after it. If it did not restart:
+
+- **Hermes: "the default gateway is running as a profile multiplexer"** - one
+  gateway, owned by the default profile, serves several profiles and refuses a
+  per-profile restart. Restarting it (`hermes gateway restart`, no `-p`) also
+  restarts every other profile it serves - ask the owner first.
+- **Hermes: the profile has no gateway service yet** - install and start one:
+  `hermes -p <name> gateway install`, then `hermes -p <name> gateway start`.
+- **Windows: refused because another gateway is already running** - a second,
+  separately installed Hermes gateway holds it. Tell the owner which one is
+  running and let them decide; don't stop it yourself.
+- **The restart waits for open sessions to finish** - ask the owner before
+  restarting the service directly; that ends those sessions.
+
+A restart notice from the host itself ("gateway restarted", "back online") is
+not the plugin's greeting. Once the gateway is verified up, continue to step 5.
 
 ## 5. Confirm the greeting arrived (the success signal)
 
@@ -353,8 +386,9 @@ After the restart:
    confirm it, the pairing is verified end to end. **Done.**
 
 If nothing arrives after a minute or two, the step 4 restart most likely hasn't
-taken effect - ask the user to restart again and wait; the plugin retries the
-greeting on the next successful connection. If it still won't connect, see
+taken effect - redo the step 4 check, ask the user to restart again and wait;
+the plugin retries the greeting on the next successful connection. If it still
+won't connect, see
 [Troubleshooting](#troubleshooting).
 
 ## Troubleshooting
@@ -375,9 +409,26 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
 
 - **Install fails (step 2).** Re-read stderr. OpenClaw is slow - wait, don't
   retry on idle. On a **network / GitHub-raw error**, use the **direct host
-  install** from step 2 (not `--force`, which repeats the failing path).
-  Otherwise retry the same `install` once, then fall back to
-  [update `--force`](#update-or-repair-later).
+  install** from step 2. A **security-scan refusal** is the next case.
+  Otherwise retry the same `install` once and report stderr. Don't reach for
+  `--force` here: it only reinstalls a plugin that is already installed, and the
+  CLI passes it straight to the host, where it can also skip the host's scan.
+
+- **The host's scanner blocked the install (Hermes).** Hermes scans
+  community-source plugins before installing them and can refuse with a
+  *caution* or *dangerous* verdict plus a list of findings; the CLI then exits
+  non-zero. This is a review gate, not a network error, so retrying or
+  switching paths is wrong. Stop, show the owner the verdict and a short summary
+  of the findings, and continue only if the owner explicitly approves
+  installing past it - through the host's own override (field reports say
+  Hermes's `plugins install ... --force` accepts a caution verdict; a dangerous
+  one stays blocked). Never override it on your own, and never switch to a
+  mirror or another unreviewed source to get around it.
+
+- **Windows: install or update fails because files in the plugin folder are
+  in use.** A shell or process whose working directory is inside the plugin
+  folder (e.g. `%LOCALAPPDATA%\hermes\plugins\clawchat`) locks it. `cd` out of
+  it or close that shell / process, then rerun the same command.
 
 - **Activation fails (step 3: validation / auth / 401 / 403 / non-zero exit).**
   Codes are single-use - don't retry the same one. Report the error verbatim, ask
@@ -429,18 +480,34 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   (PowerShell: the same file under `%LOCALAPPDATA%\hermes` when `HERMES_HOME` is
   unset) -
   `extra.profile` must be `<name>`, and two profiles must never share
-  `extra.user_id`.
+  `extra.user_id`. If one gateway serves several profiles, also check the plugin
+  is `0.14.0-89` or newer (step 3).
 
 - **Activated but no greeting / not connected (step 5).** Almost always the
-  step 4 restart hasn't taken effect - **ask the user to restart the agent** and
-  wait; the plugin still owes the greeting and re-sends it on the next
-  successful connection. Never paper over it by greeting by hand - that is how
-  users end up with two greetings. If still disconnected after a restart, ask
-  for a fresh code, run step 3 once, restart again, then redo step 5.
+  step 4 restart hasn't taken effect - run the step 4 check, **ask the user to
+  restart the agent** and wait; the plugin still owes the greeting and re-sends
+  it on the next successful connection. Never paper over it by greeting by hand -
+  that is how users end up with two greetings. If still disconnected after a
+  verified restart, ask for a fresh code, run step 3 once, restart again, then
+  redo step 5.
+
+- **Connected, but no greeting and the log shows model / provider timeouts.**
+  The greeting is a model turn, so a model provider that times out or fails
+  never produces it. Check the agent's model provider (key, quota,
+  reachability) with the owner. Restarting will not help until the provider
+  answers.
+
+- **Hermes: `plugins update` refuses because the plugin "is pinned"** (it was
+  installed pinned to a revision, e.g. from a catalog). The CLI's `update`,
+  with or without `--force`, cannot move that pin. Remove the pinned copy with
+  `hermes plugins remove clawchat` (add `-p <name>` for a profile) and rerun the
+  step 2 `install`. Activation credentials live outside the plugin folder, so no
+  new code is needed - just restart (step 4).
 
 - **Plugin files missing / stale / corrupted (any step).** Run
-  [update](#update-or-repair-later); if the version is already current, rerun
-  with `--force` to reinstall.
+  [update](#update-or-repair-later); if the plugin is installed and its version
+  is already current, rerun with `--force` to reinstall. That is the only job of
+  `--force` - never use it to get past a scanner refusal.
 
 ## Update or repair later
 
@@ -451,7 +518,8 @@ npx -y @clawling/clawchat-plugin-install-cli@latest update --target <openclaw|he
 ```
 
 If local plugin files look corrupted while the version is already current, add
-`--force` to reinstall:
+`--force` to reinstall (only for a plugin that is already installed; it is
+passed to the host and is not a way past a scanner refusal):
 
 ```bash
 npx -y @clawling/clawchat-plugin-install-cli@latest update --target <openclaw|hermes> --force

@@ -60,7 +60,11 @@ success signal.
    install gets the refusal, so the guide tells the agent to state the intent
    up front.
 4. **Restart the agent — the user must do this** — the plugin's tools and live
-   connection only exist after the host process restarts.
+   connection only exist after the host process restarts. The Hermes "restart
+   scheduled" line is not proof (the restart runs detached, unchecked), so the
+   step ends by verifying the gateway came back after activation, with branches
+   for a multiplexed gateway, a profile with no gateway service, a second
+   Windows gateway, and a restart waiting on open sessions.
 5. **Confirm the greeting arrived** — optionally call
    `clawchat_update_account_profile`, then have the user confirm the plugin's
    own greeting reached their ClawChat app.
@@ -68,12 +72,17 @@ success signal.
 Then:
 
 - **Troubleshooting** — symptom-matched cases (code not pairable, missing target
-  command, install failure, activation/auth failure, `code: 16001` /
+  command, install failure, a Hermes security-scan refusal, a Windows plugin
+  folder locked by a shell, activation/auth failure, `code: 16001` /
   `agent not found`, `owner_mismatch`, a deleted agent revived instead of
-  replaced, wrong Hermes profile, no greeting, corrupted plugin files), each
-  resuming the numbered flow.
+  replaced, wrong Hermes profile, no greeting, model/provider timeouts, a pinned
+  Hermes plugin that `update` refuses, corrupted plugin files), each resuming the
+  numbered flow. A scan refusal is an owner decision: the guide never tells the
+  agent to override it.
 - **Update or repair later** — the `update --target <target>` command, plus
-  `--force` as the documented reinstall/repair path.
+  `--force` as the documented reinstall/repair path for an already-installed
+  plugin. The CLI passes `--force` through to the host, where it can also accept
+  a scan warning, which is why the guide never offers it for a failed install.
 
 ## Editing rules
 

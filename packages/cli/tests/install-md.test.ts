@@ -40,6 +40,24 @@ describe("published runtime guides", () => {
     }
   });
 
+  it("install.md leaves a scanner refusal to the owner and never steers a failed install to --force", () => {
+    const scanner = install.split("- **The host's scanner blocked the install")[1]?.split("\n- **")[0] ?? "";
+    expect(scanner).toMatch(/owner\s+explicitly\s+approves/);
+    expect(scanner).toMatch(/Never\s+override it on your own/);
+    expect(scanner).toMatch(/mirror/);
+    const installFails = install.split("- **Install fails (step 2).**")[1]?.split("\n- **")[0] ?? "";
+    expect(installFails).not.toMatch(/fall back to|\[update `--force`\]/);
+    expect(install).not.toMatch(/then fall back to\s+\[update `--force`\]/);
+  });
+
+  it("install.md step 4 makes the agent verify the gateway actually restarted", () => {
+    const step4 = install.split("## 4. Restart the agent")[1]?.split("\n## 5.")[0] ?? "";
+    expect(step4).toContain("verify the gateway actually restarted");
+    expect(step4).toContain("proves nothing");
+    expect(step4).toContain("hermes gateway status");
+    expect(step4).toContain("not the plugin's greeting");
+  });
+
   it("install.md says where the wiki version actually is (response header / trailing comment)", () => {
     expect(install).not.toContain("shown at the top of that page");
     expect(install).toContain("X-Wiki-Version");
