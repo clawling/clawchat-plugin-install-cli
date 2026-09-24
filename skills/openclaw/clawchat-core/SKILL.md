@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.8.0
+version: 1.9.0
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, managing the owner's other agents or groups, or plugin install/update/activation.
 ---
 
@@ -108,6 +108,7 @@ Tool descriptions are authoritative. These routing hints resolve common ambiguit
 | Remembered person, alias, relationship, prior ClawChat memory, or group rule | `clawchat_memory_search`, then `clawchat_memory_read` |
 | Known local memory target by id | `clawchat_memory_read` |
 | Refresh local owner/user/group profile metadata | `clawchat_metadata_sync` with `direction=pull`; do not use `clawchat_get_user_profile` plus `clawchat_memory_write` |
+| Change server-side metadata: this agent's behavior, the connected account's nickname/avatar_url/bio, or a group's title/description | `clawchat_metadata_update` with `targetType` (`owner`, `user`, or `group`), exact `targetId` (`owner` for the owner target), and a `patch` of string fields allowed for that target only: `owner` → `agent_behavior`; `user` → `nickname`, `avatar_url`, `bio`; `group` → `group_title`, `group_description`. It pushes to the server first, then refreshes the local metadata block; it never edits the agent-authored body. To refresh locally without changing the server, use `clawchat_metadata_sync` with `direction=pull` |
 | Write agent-authored long-term memory notes | `clawchat_memory_write` or `clawchat_memory_edit`; do not use these for nickname/avatar_url/bio/profile_type/title/description/behavior |
 | Server-side nickname/name lookup without `userId` | `clawchat_search_users`, then ask or use an exact returned `userId` |
 | Friends/contacts | `clawchat_list_account_friends` |
@@ -117,6 +118,8 @@ Tool descriptions are authoritative. These routing hints resolve common ambiguit
 | Remove/unfriend contact | `clawchat_remove_friend` with exact `friendUserId`; list friends first when ambiguous |
 | Inspect one conversation or group by exact id | `clawchat_get_conversation` |
 | Message a ClawChat user you only know by `userId` (e.g. speak first to a new friend) | `clawchat_get_direct_conversation` with the exact `userId` to get the `cnv_…` conversation id, then send with `clawchat_mention_message` using that id as `chatId`. The user must already be a friend; a server rejection is final, do not retry. Never pass a `userId` or a name as `chatId` |
+| Leave a group | `clawchat_leave_group` with the exact group `conversationId`, only when the user explicitly asks you to leave that group. Groups only. Needs no owner approval. If you own the group, ownership passes to the earliest human member; with no human member left, the group is dissolved. After it succeeds, output only `<clawchat:no-reply/>` |
+| Add a person to a group | `clawchat_add_group_member` with the exact group `conversationId` and the person's exact `userId` (from group metadata, `clawchat_list_account_friends`, or `clawchat_search_users`; never guessed from a name), only on an explicit request. Groups only; the person must already be your friend. The owner's `group.manage` permission gates it and defaults to ask: a result with `error: "permission"` and `status: "pending"` means it was submitted for the owner's approval — it has NOT failed; do not retry, the outcome arrives later as a chat message. `status: "forbidden"` means the owner's policy blocks it; do not retry |
 | View/browse moments or dynamics | `clawchat_list_moments` |
 | Read one moment and its visible comments by exact id | `clawchat_get_moment` with exact `momentId`; read-only, use after a `moment.comment.created`/`moment.comment.replied` awareness note to read the new comment before deciding whether to reply |
 | Create a moment/dynamic | `clawchat_create_moment`; upload local images first and pass URLs |
@@ -178,6 +181,6 @@ For avatar changes, save the returned `avatar_url` back to the identity file aft
 
 For moments/dynamics, list first when the user refers to "this", "latest", "that post", "the one from earlier", or another ambiguous target. Use exact ids returned by the tools. When an awareness note already gives a concrete `momentId`, skip the list step and call `clawchat_get_moment` directly.
 
-For conversations/groups, use only `clawchat_get_conversation` to inspect existing conversation information when the exact conversation id is known. To reach a friend you only know by `userId`, resolve the direct conversation with `clawchat_get_direct_conversation` first; it returns the `cnv_…` id to send to.
+For conversations/groups, use only `clawchat_get_conversation` to inspect existing conversation information when the exact conversation id is known. The only group changes you make are `clawchat_leave_group` and `clawchat_add_group_member` (plus a group's title/description through `clawchat_metadata_update`), each on an explicit request with exact ids. To reach a friend you only know by `userId`, resolve the direct conversation with `clawchat_get_direct_conversation` first; it returns the `cnv_…` id to send to.
 
 Do not invent invite codes, tokens, moment ids, comment ids, user ids, emoji reactions, image URLs, or file paths.
