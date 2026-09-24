@@ -170,7 +170,7 @@ function appendHermesConfigBusyHint(err: unknown): Error {
 }
 
 // --- Host security scan ------------------------------------------------------
-// Hermes (0.20.2+) scans a community plugin tree after cloning it and before
+// Hermes (0.20.3+) scans a community plugin tree after cloning it and before
 // moving it into place. Verdicts: safe → install; caution → needs confirmation
 // (an interactive "yes", or the host's `plugins install --force`, which ALSO
 // means "overwrite an existing install"); dangerous → always refused, even with

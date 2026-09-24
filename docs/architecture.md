@@ -253,7 +253,7 @@ installed. The four result statuses are:
 
 #### Hermes host security scan
 
-Hermes 0.20.2+ scans a community plugin tree after cloning it and before moving
+Hermes 0.20.3+ scans a community plugin tree after cloning it and before moving
 it into place (`plugins.scan_on_install`, on by default). Verdicts: `safe`
 installs; `caution` needs confirmation — an interactive yes, or the host's
 `plugins install --force`; `dangerous` is always refused. The catch is that the
