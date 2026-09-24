@@ -12,6 +12,14 @@ export interface CommandOptions {
    * env, so this is defense-in-depth, not a live injection vector.)
    */
   env?: Readonly<Record<string, string>>;
+  /**
+   * `runCommand` only: pipe the child's stdout instead of inheriting it, so a
+   * host that prints its refusal reason on stdout (Hermes does, via rich) has
+   * that text in the thrown error. On success the collected stdout is written
+   * to our own stdout, so the user still sees the host output (just not
+   * streamed). Ignored by `captureCommand`, which always pipes.
+   */
+  collectStdout?: boolean;
 }
 
 export type CommandRunner = (cmd: string, args: readonly string[], options?: CommandOptions) => Promise<void>;
@@ -120,9 +128,10 @@ function formatCommand(cmd: string, args: readonly string[]): string {
 }
 
 function spawnOptions(capture: boolean, options?: CommandOptions): SpawnSyncOptions {
+  const pipeStdout = capture || options?.collectStdout === true;
   const base: SpawnSyncOptions = {
     shell: usesShell(process.platform),
-    stdio: capture ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "pipe"],
+    stdio: pipeStdout ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "pipe"],
     encoding: "utf8",
   };
   if (options?.timeoutMs && options.timeoutMs > 0) {
@@ -149,6 +158,27 @@ function spawnError(cmd: string, args: readonly string[], error: Error, options?
   return new ClawchatError("SUBPROCESS", `${cmd} failed: ${error.message}`);
 }
 
+/**
+ * Error for a non-zero exit. Includes stderr and, when it was piped, stdout:
+ * some hosts (Hermes prints through rich) report *why* they refused on stdout,
+ * and without it the error would be a bare exit code.
+ */
+function nonZeroExitError(
+  cmd: string,
+  args: readonly string[],
+  status: number | null,
+  stderr: string | Buffer | null | undefined,
+  stdout: string | Buffer | null | undefined,
+): ClawchatError {
+  const detail = [normalizeOutput(stderr).trim(), normalizeOutput(stdout).trim()]
+    .filter((part) => part !== "")
+    .join("\n");
+  return new ClawchatError(
+    "SUBPROCESS",
+    `${formatCommand(cmd, args)} failed with exit code ${status}${detail ? `: ${detail}` : ""}`,
+  );
+}
+
 export async function runCommand(cmd: string, args: readonly string[], options?: CommandOptions): Promise<void> {
   assertSafeCommandName(cmd);
 
@@ -158,12 +188,12 @@ export async function runCommand(cmd: string, args: readonly string[], options?:
   if (result.error) {
     throw spawnError(cmd, args, result.error, options);
   }
+  const stdout = options?.collectStdout === true ? normalizeOutput(result.stdout) : "";
   if (result.status !== 0) {
-    const stderr = normalizeOutput(result.stderr).trim();
-    throw new ClawchatError(
-      "SUBPROCESS",
-      `${formatCommand(cmd, args)} failed with exit code ${result.status}${stderr ? `: ${stderr}` : ""}`,
-    );
+    throw nonZeroExitError(cmd, args, result.status, result.stderr, stdout);
+  }
+  if (stdout !== "") {
+    process.stdout.write(stdout);
   }
 }
 
@@ -175,11 +205,7 @@ export async function captureCommand(cmd: string, args: readonly string[], optio
     throw spawnError(cmd, args, result.error, options);
   }
   if (result.status !== 0) {
-    const stderr = normalizeOutput(result.stderr).trim();
-    throw new ClawchatError(
-      "SUBPROCESS",
-      `${formatCommand(cmd, args)} failed with exit code ${result.status}${stderr ? `: ${stderr}` : ""}`,
-    );
+    throw nonZeroExitError(cmd, args, result.status, result.stderr, result.stdout);
   }
   return normalizeOutput(result.stdout);
 }

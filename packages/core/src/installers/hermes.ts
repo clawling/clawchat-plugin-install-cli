@@ -169,6 +169,132 @@ function appendHermesConfigBusyHint(err: unknown): Error {
   return err instanceof ClawchatError ? new ClawchatError(err.code, hinted) : new Error(hinted);
 }
 
+// --- Host security scan ------------------------------------------------------
+// Hermes (0.20.3+) scans a community plugin tree after cloning it and before
+// moving it into place. Verdicts: safe → install; caution → needs confirmation
+// (an interactive "yes", or the host's `plugins install --force`, which ALSO
+// means "overwrite an existing install"); dangerous → always refused, even with
+// --force. Non-interactively (this CLI never gives the host a TTY) a caution
+// verdict is therefore refused unless --force is passed. The scan runs BEFORE
+// the host's "already exists" check, which is what makes the two-step install
+// below (`installViaHost`) safe.
+
+/**
+ * Heuristic for the host's scan refusal, matched against the host's own
+ * wording (`hermes_cli/plugins_cmd.py` / `tools/plugin_guard.py`):
+ *   "Blocked: Security scan blocked plugin install: Requires confirmation (caution verdict, N findings)"
+ *   "... Blocked (dangerous verdict, N findings). --force does not override a dangerous verdict."
+ * Deliberately conservative: either the literal "security scan blocked", or
+ * "blocked" together with a "caution verdict" / "dangerous verdict" phrase.
+ * Whitespace is collapsed first because rich wraps lines at 80 columns when
+ * stdout is not a terminal.
+ */
+export function isHermesScanRefusal(message: string): boolean {
+  const m = message.replace(/\s+/g, " ").toLowerCase();
+  return m.includes("security scan blocked") ||
+    (m.includes("blocked") && /\b(caution|dangerous) verdict\b/.test(m));
+}
+
+/** Post-`plugins update` rescan: a dangerous verdict makes the host disable the plugin (exit 0). */
+function isHermesUpdateScanDisabled(output: string): boolean {
+  const m = output.replace(/\s+/g, " ").toLowerCase();
+  return m.includes("security scan flagged the updated plugin") && m.includes("has been disabled");
+}
+
+function hermesScanVerdict(message: string): "caution" | "dangerous" | null {
+  const match = /\b(caution|dangerous) verdict\b/i.exec(message.replace(/\s+/g, " "));
+  return match ? ((match[1] ?? "").toLowerCase() as "caution" | "dangerous") : null;
+}
+
+/**
+ * The single error for "the host's security scan refused the plugin". It is
+ * NOT retried (not transient), and the installer never answers it by passing
+ * the host's --force: overriding a caution verdict is the owner's decision.
+ */
+function hermesScanRefusedError(hostOutput: string, context: "install" | "update"): ClawchatError {
+  const verdict = hermesScanVerdict(hostOutput);
+  const lead = context === "install"
+    ? `Hermes' plugin security scan refused the ClawChat plugin${verdict ? ` (${verdict} verdict)` : ""}; nothing was installed or replaced.`
+    : "Hermes' plugin security scan flagged the updated ClawChat plugin and Hermes disabled it; the installer did NOT re-enable it.";
+  const next = context === "update"
+    ? `Re-enabling it (\`hermes plugins enable ${HERMES_PLUGIN_NAME}\`) is the owner's decision, after reviewing the findings.`
+    : verdict === "dangerous"
+    ? "Hermes never installs a plugin with a dangerous verdict, and --force does not change that. Report the findings to the plugin maintainers."
+    : "Only the owner can decide to accept these findings, after reviewing them. The Hermes host's own `plugins install --force` accepts a caution verdict; this installer never passes it on the owner's behalf.";
+  return new ClawchatError(
+    "SCAN_BLOCKED",
+    `${lead}\nThis needs the owner's review. Do not retry automatically and do not re-run with --force to get past it.\n${next}\n--- Hermes output ---\n${hostOutput.trim()}`,
+  );
+}
+
+/** `hermes plugins install` refused because the plugin dir already exists (i.e. the scan already passed). */
+function isHermesAlreadyInstalledError(message: string): boolean {
+  return /\balready exists\b/i.test(message.replace(/\s+/g, " "));
+}
+
+/**
+ * Install `spec` through the host without ever using the host's --force to get
+ * past its security scan.
+ *
+ * Attempt 1 never passes --force. The host scans first: a refusal is reported
+ * as SCAN_BLOCKED and we stop. If the tree is clean but a copy is already
+ * installed the host says "already exists" — that is proof the scan passed, and
+ * only then (and only when `replaceExisting`, i.e. a reinstall/repair was
+ * requested) do we repeat the install with --force so the host performs its
+ * atomic overwrite. Remove-then-install would also avoid --force, but would
+ * leave the agent with no plugin at all whenever the fresh install fails.
+ *
+ * Residual window: attempt 2 re-clones a remote spec, so a commit pushed
+ * between the two clones would be scanned with --force. For the local-clone
+ * (ref) path both attempts read the same checkout, so there is no window.
+ */
+async function installViaHost(opts: {
+  run: CommandRunner;
+  spec: string;
+  replaceExisting: boolean;
+  timeoutMs: number;
+  progress?: InstallProgressReporter;
+}): Promise<void> {
+  const { run, spec, replaceExisting, timeoutMs, progress } = opts;
+  const attempt = async (force: boolean) => {
+    try {
+      await run(
+        "hermes",
+        ["plugins", "install", spec, ...(force ? ["--force"] : []), "--enable"],
+        { timeoutMs, collectStdout: true },
+      );
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      if (isHermesScanRefusal(message)) {
+        throw hermesScanRefusedError(message, "install");
+      }
+      throw err;
+    }
+  };
+  try {
+    await attempt(false);
+    return;
+  } catch (err) {
+    const message = (err as Error).message ?? String(err);
+    if (!replaceExisting || (err as ClawchatError).code === "SCAN_BLOCKED" || !isHermesAlreadyInstalledError(message)) {
+      throw err;
+    }
+  }
+  progress?.("host security scan passed; replacing the existing plugin install");
+  await attempt(true);
+}
+
+const HERMES_PINNED_UPDATE_HINT =
+  "The ClawChat plugin was installed pinned to a fixed commit (for example installed by name from the Hermes plugin " +
+  "catalog), and Hermes refuses `plugins update` for pinned plugins. Reinstalling with --force keeps the pin, so it " +
+  "does not help either. To follow ClawChat releases instead, remove the pinned copy and install again (add " +
+  "`-p <profile>` to the hermes command if you use a profile): `hermes plugins remove " + HERMES_PLUGIN_NAME + "` " +
+  "then `npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes`.";
+
+function isHermesPinnedUpdateError(message: string): boolean {
+  return /\bis pinned\b/i.test(message.replace(/\s+/g, " "));
+}
+
 /**
  * One plugin.yaml GET, with a hard per-attempt cap.
  *
@@ -252,7 +378,8 @@ async function installViaLocalClone(opts: {
   run: CommandRunner;
   cloneUrl: string;
   branch: string;
-  force: boolean;
+  /** Allow replacing an existing install (only after the host's scan passed; see installViaHost). */
+  replaceExisting: boolean;
   progress?: InstallProgressReporter;
   /**
    * Invoked with the local checkout path after a successful clone and before
@@ -262,7 +389,7 @@ async function installViaLocalClone(opts: {
    */
   afterClone?: (dest: string) => void | Promise<void>;
 }): Promise<void> {
-  const { run, cloneUrl, branch, force, progress, afterClone } = opts;
+  const { run, cloneUrl, branch, replaceExisting, progress, afterClone } = opts;
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clawchat-hermes-"));
   const dest = path.join(tmpRoot, "plugin");
   try {
@@ -297,8 +424,13 @@ async function installViaLocalClone(opts: {
       await afterClone(dest);
     }
     progress?.("installing plugin from local checkout");
-    const installArgs = ["plugins", "install", `file://${dest}`, ...(force ? ["--force"] : []), "--enable"];
-    await run("hermes", installArgs, { timeoutMs: HERMES_LOCAL_INSTALL_TIMEOUT_MS });
+    await installViaHost({
+      run,
+      spec: `file://${dest}`,
+      replaceExisting,
+      timeoutMs: HERMES_LOCAL_INSTALL_TIMEOUT_MS,
+      progress,
+    });
   } finally {
     try {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -316,10 +448,15 @@ async function installViaLocalClone(opts: {
  * path (installViaLocalClone) is reserved for the debug/ref flow, where a specific
  * branch/version must be pinned (see installHermesFromRef).
  */
-function installCanonical(run: CommandRunner, force: boolean, progress?: InstallProgressReporter): Promise<void> {
+function installCanonical(run: CommandRunner, replaceExisting: boolean, progress?: InstallProgressReporter): Promise<void> {
   progress?.(`installing plugin from remote ${HERMES_PLUGIN_SPEC}`);
-  const installArgs = ["plugins", "install", HERMES_PLUGIN_SPEC, ...(force ? ["--force"] : []), "--enable"];
-  return run("hermes", installArgs, { timeoutMs: HERMES_REMOTE_INSTALL_TIMEOUT_MS });
+  return installViaHost({
+    run,
+    spec: HERMES_PLUGIN_SPEC,
+    replaceExisting,
+    timeoutMs: HERMES_REMOTE_INSTALL_TIMEOUT_MS,
+    progress,
+  });
 }
 
 async function readHermesInstallerContext(options: InstallerOptions = {}): Promise<HermesInstallerContext> {
@@ -352,7 +489,7 @@ async function installHermesFromRef(options: InstallerOptions, action: "installe
   if (!parsed) {
     // Unrecognized ref (non-GitHub): hand the raw spec to the host installer.
     progress?.(`plugin installing ${spec}`);
-    await run("hermes", ["plugins", "install", spec, "--force", "--enable"], { timeoutMs: HERMES_UPDATE_TIMEOUT_MS });
+    await installViaHost({ run, spec, replaceExisting: true, timeoutMs: HERMES_UPDATE_TIMEOUT_MS, progress });
     return { kind: "plugin", target: "hermes", status: action, version: spec, previousVersion: null };
   }
 
@@ -366,7 +503,7 @@ async function installHermesFromRef(options: InstallerOptions, action: "installe
     run,
     cloneUrl: parsed.cloneUrl,
     branch: parsed.branch,
-    force: true,
+    replaceExisting: true,
     progress,
     afterClone: async (dest) => {
       let artifact: PluginArtifactMetadata | undefined;
@@ -390,11 +527,30 @@ async function installHermesFromRef(options: InstallerOptions, action: "installe
   return { kind: "plugin", target: "hermes", status: action, version, previousVersion: null };
 }
 
-async function runHermesUpdate(run: CommandRunner): Promise<void> {
+function appendHermesPinnedUpdateHint(err: unknown): Error {
+  const message = (err as Error).message ?? String(err);
+  if (!isHermesPinnedUpdateError(message) || message.includes(HERMES_PINNED_UPDATE_HINT)) {
+    return err as Error;
+  }
+  const hinted = `${message}\n${HERMES_PINNED_UPDATE_HINT}`;
+  return err instanceof ClawchatError ? new ClawchatError(err.code, hinted) : new Error(hinted);
+}
+
+async function runHermesUpdate(run: CommandRunner, capture: CommandCapturer): Promise<void> {
+  let output: string;
   try {
-    await run("hermes", ["plugins", "update", HERMES_PLUGIN_NAME], { timeoutMs: HERMES_UPDATE_TIMEOUT_MS });
+    // Captured (not streamed) so the host's post-pull rescan verdict can be read.
+    output = await capture("hermes", ["plugins", "update", HERMES_PLUGIN_NAME], { timeoutMs: HERMES_UPDATE_TIMEOUT_MS });
   } catch (err) {
-    throw appendHermesForceRepairHint(err);
+    throw appendHermesPinnedUpdateHint(appendHermesForceRepairHint(err));
+  }
+  if (output.trim() !== "") {
+    process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
+  }
+  // `plugins update` rescans after pulling and, on a dangerous verdict, disables
+  // the plugin but still exits 0. Re-enabling it here would silently undo that.
+  if (isHermesUpdateScanDisabled(output)) {
+    throw hermesScanRefusedError(output, "update");
   }
   await run("hermes", ["plugins", "enable", HERMES_PLUGIN_NAME], { timeoutMs: HERMES_FAST_TIMEOUT_MS });
 }
@@ -436,7 +592,7 @@ async function installHermesPluginCore(options: InstallerOptions = {}): Promise<
   if (options.ref) {
     return installHermesFromRef(options);
   }
-  const { run, force, progress, artifact, installed } = await readHermesInstallerContext(options);
+  const { run, capture, force, progress, artifact, installed } = await readHermesInstallerContext(options);
 
   if (!installed) {
     progress?.(`plugin installing ${artifact.version}`);
@@ -464,7 +620,7 @@ async function installHermesPluginCore(options: InstallerOptions = {}): Promise<
 
   if (isVersionOlder(installed.version, artifact.version)) {
     progress?.(`plugin updating ${installed.version} -> ${artifact.version}`);
-    await runHermesUpdate(run);
+    await runHermesUpdate(run, capture);
     return {
       kind: "plugin",
       target: "hermes",
@@ -515,7 +671,7 @@ async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<I
   if (options.ref) {
     return installHermesFromRef(options, "updated");
   }
-  const { run, force, progress, artifact, installed } = await readHermesInstallerContext(options);
+  const { run, capture, force, progress, artifact, installed } = await readHermesInstallerContext(options);
 
   if (!installed) {
     if (!force) {
@@ -545,7 +701,7 @@ async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<I
   }
 
   progress?.(`plugin updating ${installed.version} -> ${artifact.version}`);
-  await runHermesUpdate(run);
+  await runHermesUpdate(run, capture);
   return {
     kind: "plugin",
     target: "hermes",

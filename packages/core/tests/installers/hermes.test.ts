@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "../../src/config";
 import { ClawchatError } from "../../src/errors";
-import { installHermesPlugin, updateHermesPlugin } from "../../src/installers/hermes";
+import { installHermesPlugin, isHermesScanRefusal, updateHermesPlugin } from "../../src/installers/hermes";
 
 const HERMES_CLONE_URL = "https://github.com/clawling/clawchat-plugin-hermes-agent.git";
 
@@ -47,6 +47,9 @@ function createCapture(installedVersion: string | null, hostVersion = "Hermes Ag
     if (cmd === "hermes" && args.join(" ") === "plugins list") {
       return hermesList(installedVersion, status);
     }
+    if (cmd === "hermes" && args.join(" ") === `plugins update ${HERMES_PLUGIN_NAME}`) {
+      return "Plugin clawchat updated.\n";
+    }
     throw new Error(`unexpected capture: ${cmd} ${args.join(" ")}`);
   });
 }
@@ -70,7 +73,12 @@ function installCall(run: MockLike): readonly string[] | undefined {
   return call?.[1];
 }
 
-function expectLocalClone(run: MockLike, opts: { branch: string; force: boolean }) {
+/**
+ * The first host install call must never carry the host's --force: that flag
+ * also accepts a "caution" security-scan verdict, so passing it up front would
+ * skip the scan (see installViaHost in hermes.ts).
+ */
+function expectLocalClone(run: MockLike, opts: { branch: string }) {
   const git = cloneCall(run);
   expect(git, "expected a git clone call").toBeTruthy();
   expect(git!).toEqual(expect.arrayContaining(["clone", "--depth", "1", "--single-branch", "--branch", opts.branch]));
@@ -80,11 +88,7 @@ function expectLocalClone(run: MockLike, opts: { branch: string; force: boolean 
   expect(install, "expected a hermes plugins install call").toBeTruthy();
   expect(install![2]).toMatch(/^file:\/\/.+\/plugin$/);
   expect(install!).toContain("--enable");
-  if (opts.force) {
-    expect(install!).toContain("--force");
-  } else {
-    expect(install!).not.toContain("--force");
-  }
+  expect(install!).not.toContain("--force");
 }
 
 /**
@@ -92,18 +96,14 @@ function expectLocalClone(run: MockLike, opts: { branch: string; force: boolean 
  * <owner/repo>` with no CLI-side git clone. file:// is reserved for the debug/ref
  * path.
  */
-function expectRemoteInstall(run: MockLike, opts: { force: boolean }) {
+function expectRemoteInstall(run: MockLike) {
   expect(cloneCall(run), "canonical install must not git clone").toBeUndefined();
 
   const install = installCall(run);
   expect(install, "expected a hermes plugins install call").toBeTruthy();
   expect(install![2]).toBe(HERMES_PLUGIN_SPEC);
   expect(install!).toContain("--enable");
-  if (opts.force) {
-    expect(install!).toContain("--force");
-  } else {
-    expect(install!).not.toContain("--force");
-  }
+  expect(install!).not.toContain("--force");
 }
 
 describe("Hermes installer", () => {
@@ -121,7 +121,7 @@ describe("Hermes installer", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(HERMES_PLUGIN_YAML_URL, expect.anything());
     expect(capture.mock.calls.some((c) => c[0] === "curl")).toBe(false);
-    expectRemoteInstall(run, { force: false });
+    expectRemoteInstall(run);
   });
 
   it("falls back to curl when a proxy is configured, which fetch would ignore", async () => {
@@ -223,7 +223,7 @@ describe("Hermes installer", () => {
       previousVersion: "0.1.1",
     });
 
-    expectRemoteInstall(run, { force: true });
+    expectRemoteInstall(run);
   });
 
   it("force installs from the remote spec when Hermes plugin is missing", async () => {
@@ -236,7 +236,7 @@ describe("Hermes installer", () => {
       previousVersion: null,
     });
 
-    expectRemoteInstall(run, { force: true });
+    expectRemoteInstall(run);
   });
 
   it("updates and enables during install when installed plugin is stale", async () => {
@@ -249,8 +249,8 @@ describe("Hermes installer", () => {
       previousVersion: "0.1.0",
     });
 
+    expect(headCalls(capture)).toContainEqual(["hermes", ["plugins", "update", HERMES_PLUGIN_NAME]]);
     expect(headCalls(run)).toEqual([
-      ["hermes", ["plugins", "update", HERMES_PLUGIN_NAME]],
       ["hermes", ["plugins", "enable", HERMES_PLUGIN_NAME]],
     ]);
   });
@@ -265,8 +265,8 @@ describe("Hermes installer", () => {
       previousVersion: "0.1.1",
     });
 
+    expect(headCalls(capture)).toContainEqual(["hermes", ["plugins", "update", HERMES_PLUGIN_NAME]]);
     expect(headCalls(run)).toEqual([
-      ["hermes", ["plugins", "update", HERMES_PLUGIN_NAME]],
       ["hermes", ["plugins", "enable", HERMES_PLUGIN_NAME]],
     ]);
   });
@@ -283,20 +283,20 @@ describe("Hermes installer", () => {
   });
 
   it("does not fallback to force reinstall when update is blocked by untracked files", async () => {
-    const run = vi.fn(async (_cmd: string, args: readonly string[]) => {
+    const run = vi.fn(async () => undefined);
+    const baseCapture = createCapture("0.1.0");
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
       if (args.join(" ") === `plugins update ${HERMES_PLUGIN_NAME}`) {
         throw new Error(
           "hermes plugins update clawchat failed with exit code 1: error: The following untracked working tree files would be overwritten by merge",
         );
       }
+      return baseCapture(cmd, args);
     });
-    const capture = createCapture("0.1.0");
 
     await expect(updateHermesPlugin({ run, capture })).rejects.toThrow("update --target hermes --force");
 
-    expect(headCalls(run)).toEqual([
-      ["hermes", ["plugins", "update", HERMES_PLUGIN_NAME]],
-    ]);
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("force reinstalls from the remote spec when installed Hermes plugin is stale", async () => {
@@ -309,7 +309,7 @@ describe("Hermes installer", () => {
       previousVersion: "0.1.0",
     });
 
-    expectRemoteInstall(run, { force: true });
+    expectRemoteInstall(run);
   });
 
   it("stops before installing when Hermes is too old", async () => {
@@ -369,7 +369,7 @@ describe("Hermes installer with @ref", () => {
     const result = await installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF });
 
     expect(result).toMatchObject({ kind: "plugin", target: "hermes", status: "installed", version: "0.14.0-22" });
-    expectLocalClone(run, { branch: "dev", force: true });
+    expectLocalClone(run, { branch: "dev" });
     // The redundant raw.githubusercontent.com read is gone — version comes from the clone.
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -421,7 +421,7 @@ describe("Hermes installer with @ref", () => {
     const result = await updateHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF });
 
     expect(result).toMatchObject({ kind: "plugin", target: "hermes", status: "updated" });
-    expectLocalClone(run, { branch: "dev", force: true });
+    expectLocalClone(run, { branch: "dev" });
   });
 
   it("stops before installing from a ref when Hermes is too old", async () => {
@@ -447,7 +447,7 @@ describe("Hermes installer with @ref", () => {
     const result = await installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF });
 
     expect(result.status).toBe("installed");
-    expectLocalClone(run, { branch: "dev", force: true });
+    expectLocalClone(run, { branch: "dev" });
     expect(capture).not.toHaveBeenCalled();
   });
 
@@ -462,7 +462,7 @@ describe("Hermes installer with @ref", () => {
     const result = await installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF });
 
     expect(result.status).toBe("installed");
-    expectLocalClone(run, { branch: "dev", force: true });
+    expectLocalClone(run, { branch: "dev" });
     expect(capture).not.toHaveBeenCalled(); // version check skipped → --version never read
   });
 
@@ -578,9 +578,174 @@ describe("Hermes installer with @ref", () => {
 
     expect(result.status).toBe("installed");
     expect(headCalls(run)).toEqual([
-      ["hermes", ["plugins", "install", "git@example.com:weird", "--force", "--enable"]],
+      ["hermes", ["plugins", "install", "git@example.com:weird", "--enable"]], // redact-allow:email (placeholder SSH git spec)
     ]);
     expect(cloneCall(run)).toBeUndefined();
     expect(capture).not.toHaveBeenCalled();
+  });
+});
+
+// Host wording (Hermes 0.20.2+, hermes_cli/plugins_cmd.py + tools/plugin_guard.py). The
+// host prints it on stdout through rich, which wraps at 80 columns when not a TTY —
+// hence the mid-phrase line breaks, which the matcher must survive.
+const HOST_CAUTION_REFUSAL =
+  "hermes plugins install clawling/clawchat-plugin-hermes-agent --enable failed with exit code 1: " +
+  "Blocked: Security scan blocked plugin install: Requires confirmation (caution\nverdict, 2 findings)\n\n" +
+  "  [caution] network: outbound request in adapter.py\n";
+const HOST_DANGEROUS_REFUSAL =
+  "hermes plugins install clawling/clawchat-plugin-hermes-agent --enable failed with exit code 1: " +
+  "Blocked: Security scan blocked plugin install: Blocked (dangerous verdict, 1 findings). " +
+  "--force does not override a dangerous verdict.\n";
+const HOST_ALREADY_EXISTS =
+  "hermes plugins install clawling/clawchat-plugin-hermes-agent --enable failed with exit code 1: " +
+  "Error: Plugin 'clawchat' already exists. Use force reinstall or run `hermes plugins update clawchat`.";
+
+function hostInstallCalls(run: MockLike): Array<readonly string[]> {
+  return run.mock.calls
+    .filter((c) => c[0] === "hermes" && c[1][0] === "plugins" && c[1][1] === "install")
+    .map((c) => c[1]);
+}
+
+describe("Hermes host security scan", () => {
+  it("recognises the host's caution and dangerous refusals, even when rich wrapped the line", () => {
+    expect(isHermesScanRefusal(HOST_CAUTION_REFUSAL)).toBe(true);
+    expect(isHermesScanRefusal(HOST_DANGEROUS_REFUSAL)).toBe(true);
+    expect(isHermesScanRefusal("Security scan\n   blocked plugin install")).toBe(true);
+    expect(isHermesScanRefusal(HOST_ALREADY_EXISTS)).toBe(false);
+    expect(isHermesScanRefusal("git clone failed: network is blocked by proxy")).toBe(false);
+  });
+
+  it("reports a scan refusal as SCAN_BLOCKED with the host output and never retries with --force", async () => {
+    const run = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "hermes" && args[1] === "install") throw new ClawchatError("SUBPROCESS", HOST_CAUTION_REFUSAL);
+    });
+    const capture = createCapture(null);
+
+    const err = (await installHermesPlugin({ run, capture }).then(
+      () => { throw new Error("expected a rejection"); },
+      (e: unknown) => e,
+    )) as ClawchatError;
+
+    expect(err).toBeInstanceOf(ClawchatError);
+    expect(err.code).toBe("SCAN_BLOCKED");
+    expect(err.message).toContain("security scan refused the ClawChat plugin (caution verdict)");
+    expect(err.message).toContain("owner's review");
+    expect(err.message).toContain("Do not retry automatically");
+    expect(err.message).toContain("[caution] network: outbound request in adapter.py");
+    expect(hostInstallCalls(run)).toEqual([["plugins", "install", HERMES_PLUGIN_SPEC, "--enable"]]);
+  });
+
+  it("does not let the installer's --force turn into a scan override", async () => {
+    const run = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "hermes" && args[1] === "install") throw new ClawchatError("SUBPROCESS", HOST_CAUTION_REFUSAL);
+    });
+    const capture = createCapture("0.1.1");
+
+    await expect(updateHermesPlugin({ run, capture, force: true })).rejects.toMatchObject({ code: "SCAN_BLOCKED" });
+
+    const calls = hostInstallCalls(run);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).not.toContain("--force");
+  });
+
+  it("explains that a dangerous verdict cannot be overridden at all", async () => {
+    const run = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "hermes" && args[1] === "install") throw new ClawchatError("SUBPROCESS", HOST_DANGEROUS_REFUSAL);
+    });
+
+    await expect(installHermesPlugin({ run, capture: createCapture(null) })).rejects.toThrow(
+      /dangerous verdict[\s\S]*never installs a plugin with a dangerous verdict/,
+    );
+    expect(hostInstallCalls(run)).toHaveLength(1);
+  });
+
+  it("reinstalls with the host's --force only after a scan-clean attempt reports the plugin already exists", async () => {
+    const run = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "hermes" && args[1] === "install" && !args.includes("--force")) {
+        throw new ClawchatError("SUBPROCESS", HOST_ALREADY_EXISTS);
+      }
+    });
+    const progress = vi.fn();
+
+    await expect(
+      installHermesPlugin({ run, capture: createCapture("0.1.1"), force: true, onProgress: progress }),
+    ).resolves.toMatchObject({ status: "updated" });
+
+    expect(hostInstallCalls(run)).toEqual([
+      ["plugins", "install", HERMES_PLUGIN_SPEC, "--enable"],
+      ["plugins", "install", HERMES_PLUGIN_SPEC, "--force", "--enable"],
+    ]);
+    expect(progress).toHaveBeenCalledWith(expect.stringContaining("host security scan passed"));
+  });
+
+  it("does not replace an existing copy on a plain install that finds a stray plugin dir", async () => {
+    const run = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "hermes" && args[1] === "install") throw new ClawchatError("SUBPROCESS", HOST_ALREADY_EXISTS);
+    });
+
+    await expect(installHermesPlugin({ run, capture: createCapture(null) })).rejects.toThrow("already exists");
+    expect(hostInstallCalls(run)).toHaveLength(1);
+  });
+
+  it("stops a ref install on a scan refusal without a --force retry", async () => {
+    const base = runThatClones();
+    const run = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "hermes" && args[1] === "install") throw new ClawchatError("SUBPROCESS", HOST_CAUTION_REFUSAL);
+      return base(cmd, args);
+    });
+
+    await expect(
+      installHermesPlugin({ run, capture: captureVersionOnly(), writeBaseUrls: vi.fn(), ref: REF }),
+    ).rejects.toMatchObject({ code: "SCAN_BLOCKED" });
+
+    const calls = hostInstallCalls(run);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).not.toContain("--force");
+  });
+
+  it("does not re-enable a plugin the host disabled after its post-update rescan", async () => {
+    const run = vi.fn(async () => undefined);
+    const baseCapture = createCapture("0.1.0");
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (args.join(" ") === `plugins update ${HERMES_PLUGIN_NAME}`) {
+        return "Updating clawchat...\n\u26a0 Security scan flagged the updated plugin: Blocked (dangerous verdict, 1 findings).\n" +
+          "Plugin 'clawchat' has been disabled. Review the findings, then re-enable with `hermes plugins enable clawchat`.\n";
+      }
+      return baseCapture(cmd, args);
+    });
+
+    await expect(updateHermesPlugin({ run, capture })).rejects.toMatchObject({
+      code: "SCAN_BLOCKED",
+      message: expect.stringContaining("did NOT re-enable it"),
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("Hermes pinned plugin update", () => {
+  it("explains a pinned-plugin update refusal and how to switch back to tracked releases", async () => {
+    const run = vi.fn(async () => undefined);
+    const baseCapture = createCapture("0.1.0");
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (args.join(" ") === `plugins update ${HERMES_PLUGIN_NAME}`) {
+        throw new ClawchatError(
+          "SUBPROCESS",
+          "hermes plugins update clawchat failed with exit code 1: Error: Plugin 'clawchat' is pinned to " +
+            "0123456789abcdef0123456789abcdef01234567. To move it, run `hermes plugins install <source> --force --ref <40-character commit SHA>`.",
+        );
+      }
+      return baseCapture(cmd, args);
+    });
+
+    const err = (await updateHermesPlugin({ run, capture }).then(
+      () => { throw new Error("expected a rejection"); },
+      (e: unknown) => e,
+    )) as ClawchatError;
+
+    expect(err.code).toBe("SUBPROCESS");
+    expect(err.message).toContain("installed pinned to a fixed commit");
+    expect(err.message).toContain(`hermes plugins remove ${HERMES_PLUGIN_NAME}`);
+    expect(err.message).toContain("install --target hermes");
+    expect(run).not.toHaveBeenCalled();
   });
 });
