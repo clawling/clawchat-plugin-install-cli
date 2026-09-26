@@ -31,7 +31,7 @@ export const OFFICIAL_SKILLS_BASE =
 // constant (and all of `skills/`) is tree-shaken out of it. Agents read the tag
 // through the adapters' copies — shipping a skills change never requires an npm
 // release of this package.
-export const DEFAULT_SKILLS_REF = "skills-v1.15.1";
+export const DEFAULT_SKILLS_REF = "skills-v1.15.2";
 // Refuse to treat an absurdly large response as a skill file (defence in depth
 // against a poisoned/oversized download before it is hashed and written).
 export const MAX_SKILL_BYTES = 256 * 1024;
