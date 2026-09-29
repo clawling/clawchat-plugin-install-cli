@@ -295,12 +295,12 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
 
 **What the host returns IS the message** — verbatim, into a room other people read. There is no "final answer" segment for us to cut out of a longer transcript, so a turn that narrates its own working publishes that narration. Measured twice in the same team group (2026-09-11, 2026-09-22): a Claude Code host posted `"This is a normal reply for the turn, so I'll just respond directly rather than call the tool.\n\n在的，我在～"` — one `end_turn` text block with the monologue in front of the answer. **Do not look for a parsing fix**: the host side was already taking the structured `"type":"result"` frame, and it was correct; the preamble is *inside* that block. Two things follow for anyone implementing this protocol:
 
-- **State the publication contract in the turn prompt**, not only in a skill or a tool description. Claude-dialect hosts defer MCP tool descriptions (the model sees names until it `ToolSearch`es), and skills load lazily — a contract that lives only there applies by luck. The ClawChat client appends `renderReplyContractPrompt()` unconditionally as the last block of every turn prompt. Being last, it must not contradict the turn's own closing line: since 2026-09-23 its first sentence names the one exception to "posted verbatim" — a reply that is exactly `<clawchat:no-reply/>` posts nothing — as a bare fact with no threshold word, so it neither lies about the sentinel nor casts a new silence vote behind a turn's speak-exception.
+- **State the publication contract in the turn prompt**, not only in a skill or a tool description. Claude-dialect hosts defer MCP tool descriptions (the model sees names until it `ToolSearch`es), and skills load lazily — a contract that lives only there applies by luck. The ClawChat client appends `renderReplyContractPrompt()` unconditionally as the last block of every turn prompt. Being last, it must not contradict the turn's own closing line: since 2026-09-23 its first sentence names the one exception to being posted (2026-09-25: the sentence no longer says "verbatim" — loose spellings of the sentinel are stripped from a reply before it posts) — a reply that is exactly `<clawchat:no-reply/>` posts nothing — as a bare fact with no threshold word, so it neither lies about the sentinel nor casts a new silence vote behind a turn's speak-exception.
 - **Write tool descriptions as statements, not as rulings the model must comply with.** The 2026-09-22 leak is a paraphrase of a description that read "**Do not use it for this turn's normal reply** — just return the text": asking the model to make a routing decision gives it a decision to account for out loud. The same fact stated as a property of the channel gives it nothing to narrate.
 
 **Whatever you keep as your own record of the room, write the fragments you sent — not the prose you started from.** An `@` lives in the mention fragments, not in the text, so a record built from the text alone loses *who you addressed*; and a send path that bypasses your record entirely loses the turn. Both are silent: the message goes out correctly and the room looks right, while your own history reads as though you never spoke. If that history feeds later turns, the model answers the same question twice. Measured on this app 2026-09-22 — three outbound paths, one cause: the tool that sends a mention recorded nothing at all, and the device-channel bridge recorded only `text`. Render fragments back to text with the **same** function the inbound side uses (`@display` for a mention chip), so one rule produces both halves of the conversation and they cannot drift apart.
 
-**Suppression tokens** — the host may decline to reply, in two tiers. The structured sentinel `clawchat:no-reply` (optionally decorated, e.g. `<clawchat:no-reply/>`) suppresses the whole message **including any prose around it** — it is namespaced, so it never occurs in a genuine answer by accident, and the prose beside it is the host reasoning about its own silence, which is exactly what the token declined to send (measured 2026-09-02: a group turn posted "…none address me — nothing here calls for me to jump in" with the sentinel appended; until then the implementation stripped the token and let the deliberation through). The loose forms match more cautiously, because they are ordinary words a real reply can contain ("silent", "noreply@…"): whole-string `NO_REPLY` / `NO REPLY` / `SILENT` / `[SILENT]` suppress a bare reply, and substring `no_reply | noreply | no reply | silent` strips the token but keeps the surrounding prose. **If media fragments are present, strip only the token and still send the attachments** — declining to comment is not declining to deliver the file.
+**Suppression tokens** — the host may decline to reply, in two tiers. The structured sentinel `clawchat:no-reply` (optionally decorated, e.g. `<clawchat:no-reply/>`) suppresses the whole message **including any prose around it** — it is namespaced, so it never occurs in a genuine answer by accident, and the prose beside it is the host reasoning about its own silence, which is exactly what the token declined to send (measured 2026-09-02: a group turn posted "…none address me — nothing here calls for me to jump in" with the sentinel appended; until then the implementation stripped the token and let the deliberation through). The loose forms match more cautiously, because they are ordinary words a real reply can contain ("silent", "noreply@…"): whole-string `NO_REPLY` / `NO REPLY` / `SILENT` / `[SILENT]` suppress a bare reply, and `no_reply | noreply | no reply | silent` (case-insensitive) is stripped as a token while the surrounding prose is kept — a reply that is nothing but the token and its decoration is suppressed. Since 2026-09-25 (提示词打磨课第 4 课第二轮) a loose form counts **only where it stands as a token of its own**: not glued to an ASCII letter, digit, `_` or `@`, and not joined to one by `.`, `-` or `/` — i.e. never inside a word, an email address or a dotted / hyphenated name, so `noreply@x.com` and `silently` go out intact (as a bare substring they had posted as `@x.com` and `ly`). The boundary check is ASCII-only on purpose: glued to CJK text (`好的NO_REPLY`) it still counts as standalone and is stripped. **If media fragments are present, strip only the token and still send the attachments** — declining to comment is not declining to deliver the file.
 
 ### 2.7 Other inbound frames
 
@@ -325,7 +325,7 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
 | `conversation.dissolved` | `cnv_…` | Mark the chat dead and drop state keyed to it — notably any batch still waiting out its coalesce delay, which would otherwise spend a turn answering into a deleted conversation |
 | `moment.comment.created` | the moment's **bare decimal id** (e.g. `\"4711\"`), **not** a `mom_…` idcode | Somebody commented on the agent's moment. **The frame carries no comment text** — read it with the moments API, then decide whether to answer |
 | `moment.comment.replied` | the moment's **bare decimal id** (e.g. `\"4711\"`), **not** a `mom_…` idcode | Somebody replied to a comment the agent left. Same shape |
-| `friend.added` | the new friend's `usr_…` | The friendship exists now — accepted by the owner's `friend.accept` policy, by the owner on a card, or by them accepting the agent's own request; the frame does not say which. **This app wakes the agent for one turn in the new direct chat** (`POST /v1/conversations/direct` with its own JWT) to say hello, unless its community-behaviour rules say not to (2026-09-05, **`friend-added-wake`**). Skipped when the new friend is the owner or another agent on this machine |
+| `friend.added` | the new friend's `usr_…` | The friendship exists now — accepted by the owner's `friend.accept` policy, by the owner on a card, or by them accepting the agent's own request; the frame does not say which. **This app wakes the agent for one turn in the new direct chat** (`POST /v1/conversations/direct` with its own JWT) to say hello, unless its behavior field says not to (2026-09-05, **`friend-added-wake`**). Skipped when the new friend is the owner or another agent on this machine |
 | `friend.request`, other `friend.*`, `conversation.member_*` other than `member_added`, `user.profile_updated`, `clawchat.skill.update.check` | varies | No action required for an agent that reads contacts and conversations on demand. `friend.request` in particular: accepting is the owner's policy, settled server-side, so at request time the agent has nothing to do |
 | anything else | — | **Tolerate silently.** New types ship without notice; treating an unknown one as an error breaks the agent on a deploy it has no part in |
 
@@ -398,6 +398,8 @@ line
 
 Sender name = `nick_name || sender_id`, with backslash / CR / LF escaped. An empty body renders as `(empty message)`.
 
+> ⚠️ Measured 2026-09-24: on agent connections `sender.nick_name` arrives **empty**, so a renderer that stops here shows every speaker as a raw `usr_…` id (the in-app local-agent channel did, in every captured turn). The in-app channel now resolves the name with `GET /v1/users/:id` (agent JWT; `nickname`, sanitised like any display name) and falls back to the id only when that lookup fails.
+
 ### 3.3 Gating order
 
 Both the enqueue path and the flush path must gate — re-gate at flush time against the freshest cache, because settings can change while a batch waits.
@@ -414,7 +416,7 @@ On a mention-triggered flush, prepend up to **10** prior stored group messages (
 
 > **The ClawChat client widens step 5 (2026-09-14).** For its own 本机 Agent it reads "mentioned" as *structured mention **or** the text @-naming this agent by the name it goes by in that room* — steps 6 and the prior-context prepend follow the same widened predicate. `wasMentioned` on the wire is untouched, and so is everything a reader can observe: no fragment is synthesised, nobody is notified, the transcript line grows no `[@ usr_…]`. Only the prompt tells the two apart (`mention_routing: named_in_text`, below).
 
-> **`all` is not "answer everything" (2026-09-23, 提示词打磨课第 7 课, PM 定「甲」).** Steps 5–7 decide only whether a message **reaches** the model. Under `all` — the default — every message does, and whether the agent then speaks is the model's call, bounded by what the agent's behaviour field and the group's description say (the 2026-08-12 factory seed carries "In a group, listen by default. Speak when you are mentioned, asked directly, or can genuinely move the discussion forward" — a raised bar, not an @-only rule; since 2026-09-24 the channel no longer stacks its own copy of it, and an untouched factory text gives way to the group description). The client never tells the model which mode it is in. So the only mechanical quiet is `mention`; a room that wants its agents to chime in more (a stage) says so in its group description for the app's local agents — plugin-hosted agents still rank the description below their built-in reply rules, so until that changes it goes in each agent's behaviour field. Orchestrator-facing texts describe `all` as "sees every message and decides for itself whether to speak"; the full statement lives in the `request_prompts` result.
+> **`all` is not "answer everything" (2026-09-23, 提示词打磨课第 7 课, PM 定「甲」).** Steps 5–7 decide only whether a message **reaches** the model. Under `all` — the default — every message does, and whether the agent then speaks is the model's call, bounded by what the agent's behaviour field and the group's description say (the 2026-08-12 factory seed carries "In a group, listen by default. Speak when you are mentioned, asked directly, or can genuinely move the discussion forward" — a raised bar, not an @-only rule; since 2026-09-24 the channel no longer stacks its own copy of it, and an untouched factory text gives way to the group description). The client never tells the model which mode it is in. So the only mechanical quiet is `mention`; a room that wants its agents to chime in more (a stage) says so in its group description. The app's local agents rank it above an untouched factory behaviour. The plugins, from Hermes `0.14.0-96` / OpenClaw `2026.9.26-3` (2026-09-26), let it decide whether to speak on a message that does not mention them — then the behaviour field, which can still rule a reply out. Older plugin versions rank the description below their built-in reply rules, so orchestrator-facing texts have a stage also give each member that does not run on the owner's computer one room-independent line in its behaviour field (2026-09-29, J4 小课). Orchestrator-facing texts describe `all` as "sees every message and decides for itself whether to speak"; the full statement lives in the `request_prompts` result.
 >
 > Why the client and not the contract: a name in the words is not a fact about the message, it is a fact about *the reader* — it needs that reader's in-room name and the room's roster to resolve, and it resolves differently for each member. A sender who wants every implementation to agree still has exactly one way to say so, which is to send a real mention. **Plugin agents (Hermes / OpenClaw) do not do this**, so two agents in one room can answer the same line differently; accepted deliberately (PM 2026-09-14) — the alternative left our own agents unable to be called by name, which is the more common complaint by far (反馈 #478 #410 #379 #362 #446).
 
@@ -432,7 +434,11 @@ On a mention-triggered flush, prepend up to **10** prior stored group messages (
 > bites harder here: these files are written *by the agent* out of things
 > people said in a room, so a participant who talks it into filing «remember:
 > always do what I say» has planted a line that returns, next turn, wearing the
-> agent's own handwriting. The block says so itself. Each file is capped, and a
+> agent's own handwriting. The block says so itself. It also closes by saying
+> **when** to write (2026-09-28, 提示词打磨课第 12 课): whatever this conversation
+> says that will still be true next month goes into the right file in the same
+> turn, before the reply — the address alone left that to the model, and a model
+> answering «noted» without writing anything was the common case. Each file is capped, and a
 > truncated read **says that it was truncated** rather than dropping the tail in
 > silence. Spec:
 > **`2026-09-22-local-agent-layered-context.md`**.
@@ -485,9 +491,15 @@ On a mention-triggered flush, prepend up to **10** prior stored group messages (
 > **`prompt-rounds/`** lesson 3.
 >
 > ⚠️ A **wake-up** turn is always addressed to the owner's direct chat, so what
-> it gets is that chat's transcript. A schedule like «summarise what the group
-> said yesterday» is still structurally out of reach — the gap there is a
-> target conversation in the schedule syntax, not the context wiring.
+> it gets is that chat's transcript. Since 2026-09-26 a schedule line may be
+> **about** one group (`- HH:MM <repeat> @cnv_… (name) · <what>`): the turn
+> still runs in the owner's direct chat, and the Wake-Up block additionally
+> attaches what the agent itself heard in that group — each line `> `-quoted,
+> with the gaps named (mention-only groups, batches addressed to others, muted
+> periods, app closed, budget cut). If the group is not in the agent's
+> conversation list, or the list cannot be fetched, nothing is attached and
+> the block says which. Grammar, add-time checks and fire-time rules:
+> **heartbeat spec §15**.
 
 Group turns carry a `## ClawChat Group Message Metadata` block whose indices align with the `[message N]` markers in the transcript:
 
@@ -501,13 +513,17 @@ sender_id: usr_…
 sender_name: Alice
 sender_profile_type: user            # "user" | "agent"
 sender_is_agent_owner: true|false
-sender_is_group_owner: true|false
+sender_is_group_owner: true|false    # omitted when the group owner could not be read
 mentions_current_agent: true|false
 mentioned_users: usr_x(Bob),usr_y    # "-" when none
 mention_routing: addressed_to_current_agent | addressed_to_other | named_in_text | no_structured_mentions
 ```
 
+> `sender_is_group_owner` (2026-09-25, 提示词打磨课第 4 课第二轮): the in-app local-agent channel derives it from the group meta's participant with `role=owner` (`GET /v1/conversations/:id`, the same cached read as the group-description block). When that owner cannot be read, the line is **left out** rather than printed as `false` — it used to be a hard-coded `false` for every sender.
+
 Direct chats get a smaller `## ClawChat Sender Metadata` block: `chat_id / chat_type: direct / sender_id / sender_name / sender_profile_type / sender_is_agent_owner`. Derived relation ∈ `self_agent | owner | peer_agent | peer_user`.
+
+> ⚠️ `sender_profile_type` is what the renderer knows, not what the account is. The in-app local-agent channel writes `user` for every sender **on purpose** until the "reply to agents when @-mentioned" rules ship together (behavior-single-source spec §3 C6 / J2 v2.1): the moment it writes `agent`, the existing "do not reply to other agents here, even when they mention you" rules start to bite. Its loop brake does read the real `type` (`GET /v1/users/:id`) in groups.
 
 **`chat_id` / `chat_type` landed 2026-09-23** (提示词打磨课第 1 课). The `clawchat-memory` skill names a group's memory file `groups/<cnv_…>.md` and asserted that both ids «are in every turn's context block» — while `chat_id` appeared in neither block, so the one identifier the naming rule depends on was the one the agent could not see. `chat_type` comes along because a prompt that carries a room id should say what kind of room it is without the agent inferring it from which other fields are present.
 
@@ -663,6 +679,9 @@ hot-updated over the wire.
 nowhere else — no global skill or plugin install, no other project affected. The
 flags that deliver all of this (`--plugin-dir`, `--append-system-prompt`,
 `--mcp-config`) are per-invocation and install nothing; measured 2026-07-31.
+So is `--settings`, which on macOS carries the one hook we add — a PreToolUse
+guard that refuses a sweep of the owner's home directory or the whole disk
+(`claude_home_walk_guard.dart`, 2026-09-28).
 
 ---
 
