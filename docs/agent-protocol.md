@@ -339,24 +339,35 @@ Some operations are gated on the owner's approval. The REST call returns a gate 
 
 | Code | Meaning |
 |---|---|
-| **21001** | `pending_owner_approval` → `{request_id: "prq_…", operation, expires_at}` (≈300 s) |
+| **21001** | `pending_owner_approval` → `{request_id: "prq_…", operation, expires_at}` (≈300 s; **60 min** for the `orchestrate.*` operations below). May also carry `capped: true` — see below |
 | **21003** | `forbidden_by_owner` → `{operation}` |
 
-On 21001 an approval card renders in the owner's chat with the agent. **On approval the server executes the gated operation itself** — the agent must *not* re-issue the call (a later retry returns `13001 not found`). The outcome arrives as a `permission_result` system message: `message.send` with `sender.id="system"` and
+On 21001 an approval card renders in the owner's chat with the agent. **On approval the server executes the gated operation itself** — the agent must *not* re-issue the call (a later retry returns `13001 not found`), **except on outcome `approved_retry`** (below). The outcome arrives as a `permission_result` system message: `message.send` with `sender.id="system"` and
 
 ```
 payload.metadata = { kind:"permission_result", operation,
-                     outcome:"approved|denied|expired|failed|auto_allowed|auto_denied",
-                     reason, request_id:"prq_…" }
+                     outcome:"approved|denied|expired|failed|auto_allowed|auto_denied|approved_retry",
+                     reason, request_id:"prq_…", result? }
 ```
 
 Dedupe by `request_id`. A synthetic turn generated from it **must be addressed to the owner's `cnv_…`** — a `usr_…` chat_id is rejected and silently dropped.
 
 > **Do not let this frame fall through the normal inbound chain.** It carries no renderable body, so a chain that filters on "has text or media" (§2.5 step 7) discards the verdict entirely — and the agent, which was told to wait, waits forever. This app's channel branches it out at step 4 instead; see **`local-agents.md`** §4.
 
+**Owner-scoped orchestration** — `orchestrate.read`, `orchestrate.group.create`, `orchestrate.group.members`, `orchestrate.group.settings`, `orchestrate.agent.behavior`, `orchestrate.connect_code`, i.e. the `/v1/agents/me/orchestration/*` routes, which on approval run **as the owner**, not as the agent — use the same gate with four differences:
+
+- **The wait is up to 60 minutes**, not 5 (`expires_at` says which).
+- **At most 3 pending cards per agent and operation.** A further attempt creates no card: the 21001 reply carries the **oldest pending** `request_id` with `capped: true`. That is not a new request — keep waiting on that one.
+- **`orchestrate.read` is not replayed.** Approval opens a read window of **at least 10 minutes** and the receipt says `approved_retry`: *call the same endpoint again* — the one case where re-issuing is right. Reads inside the window pass with no card.
+- **The receipt can carry `result`** — what the replay produced: `{conversation_id}` of the group it created, `{code, expires_at}` of a minted connect code, `{conversation_id, applied, total}` for member changes, `{agent_id}` for a behavior edit. A `failed` member change still says how far it got (`applied` / `total`, or `problems`).
+
+`auto_allowed` with `reason:"window_allow"` means the owner had opened a time-limited window on that operation (allow for 1 hour / 1 day, or the read window above), so the call ran without a card; `reason:"policy_allow"` means the policy itself is `allow`. An `auto_allowed` receipt is informational; for a call you made, the answer already came back with the call.
+
 > ⚠️ **A warning that used to stand here was wrong, and is withdrawn (2026-08-30).** It read: *"`allow_once` is unreliable on current app builds — after the first success, subsequent approvals land as `owner_denied`."* That claim came out of the 2026-07-31 investigation, and this app's own code records what actually happened (`core/models/system_message_text.dart`): five consecutive receipts carried outcome `failed` — the owner **did** approve, the server then could not carry the action out — and the client's renderer fell back to 「已拒绝」 for any outcome it did not recognize. The investigation read those as denials and went looking for an uplink bug that did not exist. `owner_denied` is not even in the receipt vocabulary (§2.8), which is the tell of a second-hand claim.
 >
-> The renderer was fixed on 2026-08-12 (unknown outcomes now fall back to the server's own line — "denied" is never a safe default in a permission system). **Measured 2026-08-31** (prod backend `release-v0.0.146`, machine-channel agent JWT, ops `friend.add` and `group.manage`): approving one 21001 card is **not** "once" — after the owner's single tap (the in-chat approve button; the client permission-settings page is not shipped yet), `GET /v1/agents/me/permissions` reports that op as `allow` and subsequent calls under the same op pass ungated (`PATCH /v1/conversations/:id` answered a plain 200 right after a gated group creation). The server-executes-on-approval contract held: the approved `POST /v1/conversations` was carried out server-side **with `member_ids` honored** (all members landed in one step), and the receipt carries no conversation id — recover it via `GET /v1/conversations` by title. Whether a true single-shot `allow_once` outcome exists remains unmeasured; what is measured is that today's approve-tap durably lands the op as `allow`.
+> The renderer was fixed on 2026-08-12 (unknown outcomes now fall back to the server's own line — "denied" is never a safe default in a permission system). **Measured 2026-08-31** (prod backend `release-v0.0.146`, machine-channel agent JWT, ops `friend.add` and `group.manage`): after the owner's single tap on one 21001 card (the in-chat approve button; the client permission-settings page was not shipped yet), `GET /v1/agents/me/permissions` reported that op as `allow` and subsequent calls under the same op passed ungated (`PATCH /v1/conversations/:id` answered a plain 200 right after a gated group creation). The server-executes-on-approval contract held: the approved `POST /v1/conversations` was carried out server-side **with `member_ids` honored** (all members landed in one step), and the `group.manage` receipt carries no conversation id — recover it via `GET /v1/conversations` by title (an orchestration receipt does carry one, in `result`).
+>
+> **Reading that observation correctly (revised for backend `release-v0.0.188`).** The owner's approval comes in several flavours that the receipt does not tell apart (its `outcome` is `approved` — `approved_retry` for a read — whichever button the owner used): `allow_once` and `deny_once` leave the stored policy as it was, `allow_always` / `deny_always` set the operation to `allow` / `deny`, and `allow_1h` / `allow_1d` open a time-limited window and leave the stored policy alone. The 2026-08-31 record did not note which button was tapped, so it is consistent with an `allow_always` and shows nothing about `allow_once`. **An agent must never assume its next call will pass ungated** — treat every gated call as possibly returning 21001 again; an agent that wants to know can read `GET /v1/agents/me/permissions` (its policy map, plus `permission_windows` — the open time-limited windows as `{operation: unixMs}`).
 
 ---
 
@@ -366,8 +377,10 @@ Dedupe by `request_id`. A synthetic turn generated from it **must be addressed t
 > announcements) is open to agent JWTs since backend `release-v0.0.146`, gated
 > as one `group.manage` operation under the §2.8 owner-permission gate. Route
 > shapes and the measured gate behavior (server-executes-on-approval with
-> `member_ids` honored, no id in the receipt, cards not deduped — never retry
-> a 21001) live in **`api.md`** §Conversations.
+> `member_ids` honored, no id in the `group.manage` receipt, cards not deduped —
+> never retry a 21001) live in **`api.md`** §Conversations. The
+> owner-scoped alternative — the group is created **as the owner**, and the
+> receipt carries its `conversation_id` — is `orchestrate.group.create` (§2.8).
 
 ### 3.1 `GET /v1/agents/me/group-settings`
 
@@ -590,7 +603,7 @@ The channel downloads each file into a per-agent inbox first; the URL in the bod
 | Group batch default / max-wait | 10 s / `max(30 s, idle)` |
 | Typing re-send / app lapse window | ~4 s / 6 s |
 | Media cap | 100 MiB (since 2026-06-03) |
-| Permission request TTL | ≈300 s |
+| Permission request TTL | ≈300 s; 60 min for the `orchestrate.*` operations (§2.8) |
 
 ---
 
