@@ -50,6 +50,20 @@ describe("published runtime guides", () => {
     expect(install).not.toMatch(/then fall back to\s+\[update `--force`\]/);
   });
 
+  it("install.md treats Hermes' [y/N] scan prompt as the owner's to answer, never the agent's", () => {
+    const scanner = install.split("- **The host's scanner blocked the install")[1]?.split("\n- **")[0] ?? "";
+    expect(scanner).toContain("Install anyway?");
+    expect(scanner).toContain("clawling/clawchat-plugin-hermes-agent");
+    expect(scanner).toMatch(/\*\*owner\*\*\s+answers\s+`y`/);
+    expect(scanner).toMatch(/only\s+when\s+the\s+owner\s+explicitly\s+tells\s+you\s+to/);
+    expect(scanner).toMatch(/don't\s+type\s+`y`\s+yourself/);
+    expect(scanner).toMatch(/Unattended\s+install/);
+    expect(scanner).toMatch(/rather\s+than\s+forcing/);
+    const step2 = install.split("## 2. Install")[1]?.split("\n## 3.")[0] ?? "";
+    expect(step2).toMatch(/expected\s+for\s+this\s+plugin/);
+    expect(step2).toMatch(/don't\s+answer\s+the\s+prompt/);
+  });
+
   it("install.md step 4 makes the agent verify the gateway actually restarted", () => {
     const step4 = install.split("## 4. Restart the agent")[1]?.split("\n## 5.")[0] ?? "";
     expect(step4).toContain("verify the gateway actually restarted");

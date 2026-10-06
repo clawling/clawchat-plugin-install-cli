@@ -78,11 +78,15 @@ Then:
   replaced, wrong Hermes profile, no greeting, model/provider timeouts, a pinned
   Hermes plugin that `update` refuses, corrupted plugin files), each resuming the
   numbered flow. A scan refusal is an owner decision: the guide never tells the
-  agent to override it.
+  agent to override it. A *caution* verdict (with Hermes' `[y/N]` prompt on a
+  terminal) is expected for this plugin; the agent relays it to the owner, who
+  answers, and uses the host's `--force` only on the owner's explicit
+  instruction. Unattended installs stop and report.
 - **Update or repair later** — the `update --target <target>` command, plus
   `--force` as the documented reinstall/repair path for an already-installed
-  plugin. The CLI passes `--force` through to the host, where it can also accept
-  a scan warning, which is why the guide never offers it for a failed install.
+  plugin. It only reinstalls and never gets past the host's scan (for Hermes
+  the CLI never hands the host's `--force` a scan decision), which is why the
+  guide never offers it for a failed install.
 
 ## Editing rules
 

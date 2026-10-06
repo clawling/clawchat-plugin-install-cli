@@ -199,7 +199,7 @@ CLI's GitHub-raw fetch:
 
 ```bash
 # Hermes
-hermes plugins install clawling/clawchat-plugin-hermes-agent
+hermes plugins install clawling/clawchat-plugin-hermes-agent --enable
 # OpenClaw 2026.8 and newer
 openclaw plugins install @clawling/clawchat-plugin-openclaw --force --accept-capabilities
 # OpenClaw older than 2026.8 (it rejects --accept-capabilities as an unknown option)
@@ -213,9 +213,14 @@ Without them the install is cancelled or rejected and the plugin never lands. Ru
 
 Then continue to step 3.
 
-**If Hermes refuses the install after a security scan** ("Security scan blocked
-plugin install", a *caution* / *dangerous* verdict with a list of findings),
-that is a review gate, not a network error - see
+**Hermes stops on its security scan - expected for this plugin.** Hermes 0.20.3
+and newer scan every third-party plugin before installing it, and for ClawChat
+the scan reports a couple of dozen findings (matches in comments and docs) with
+a *caution* verdict and a `Decision: BLOCKED` line. Through the `npx` command
+the install then fails with `SCAN_BLOCKED`; a direct `hermes plugins install` in
+a real terminal instead **waits** at `Install anyway? ... [y/N]`. Either way it
+is the **owner's** decision, not yours: don't answer the prompt, don't add
+`--force`, and don't sit on it silently - see
 [Troubleshooting](#troubleshooting) before doing anything else.
 
 ## 3. Activate (single-use code)
@@ -306,9 +311,21 @@ OpenClaw config and re-run the step 3 `channels add`. With no stored identity to
 replay, that pairs as a brand-new agent. Clearing `userId` alone is not enough -
 it is recovered from the token.
 
-To run a **second** agent alongside this one rather than replacing it, give it
-its own OpenClaw home instead: `OPENCLAW_HOME=<path> openclaw channels login
---channel clawchat-plugin-openclaw`.
+To run a **second** agent alongside this one rather than replacing it, activate
+it as a named **account** on the same gateway (plugin `2026.9.13-1` or newer;
+[update](#update-or-repair-later) first on an older one):
+
+```bash
+openclaw channels add --channel clawchat-plugin-openclaw --account <name> --token "CLAWCHAT_CODE_GOES_HERE"
+```
+
+or `/clawchat-activate CLAWCHAT_CODE_GOES_HERE --account <name>` from a chat on
+an already-active account. Each account is stored under
+`channels.clawchat-plugin-openclaw.accounts.<name>` with its own `userId` and
+tokens, so it never touches the first agent. The name is lowercased and any
+character outside `a-z0-9_-` becomes `-`. Which OpenClaw agent answers it is
+the host's routing: `bindings[].match.accountId`. Don't use `channels login` for
+this - it only refreshes a channel that already exists.
 
 **Hermes: if activation refuses with "this Hermes profile is already paired".**
 The code is **not** spent. Pick the flag by intent, not by which sentence in the
@@ -409,21 +426,41 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
 
 - **Install fails (step 2).** Re-read stderr. OpenClaw is slow - wait, don't
   retry on idle. On a **network / GitHub-raw error**, use the **direct host
-  install** from step 2. A **security-scan refusal** is the next case.
+  install** from step 2. A **security-scan refusal or prompt** is the next case.
   Otherwise retry the same `install` once and report stderr. Don't reach for
-  `--force` here: it only reinstalls a plugin that is already installed, and the
-  CLI passes it straight to the host, where it can also skip the host's scan.
+  `--force` here: it only reinstalls a plugin that is already installed, and it
+  does not get past the host's scan either.
 
-- **The host's scanner blocked the install (Hermes).** Hermes scans
-  community-source plugins before installing them and can refuse with a
-  *caution* or *dangerous* verdict plus a list of findings; the CLI then exits
-  non-zero. This is a review gate, not a network error, so retrying or
-  switching paths is wrong. Stop, show the owner the verdict and a short summary
-  of the findings, and continue only if the owner explicitly approves
-  installing past it - through the host's own override (field reports say
-  Hermes's `plugins install ... --force` accepts a caution verdict; a dangerous
-  one stays blocked). Never override it on your own, and never switch to a
-  mirror or another unreviewed source to get around it.
+- **The host's scanner blocked the install (Hermes).** Hermes 0.20.3+ scans
+  every third-party plugin before installing it. For ClawChat a *caution*
+  verdict is **expected**: a couple of dozen findings, all matches in comments
+  and docs, ending in `Decision: BLOCKED ... Use --force to override.` That
+  line is the scanner's generic wording, not an instruction to you. What
+  follows depends on how Hermes ran:
+  - **Through the `npx` CLI** (it never hands Hermes a terminal): the CLI exits
+    with `SCAN_BLOCKED` and nothing is installed or replaced. The CLI never
+    passes `--force` on the owner's behalf, and its own `--force` does not
+    change that.
+  - **`hermes plugins install` in a real terminal:** Hermes prints the report
+    and waits at `Install anyway? Only continue if you trust the source. [y/N]`
+    with no timeout. An agent that just waits there stalls the install
+    indefinitely.
+
+  This is a review gate, not a network error, so retrying or switching paths is
+  wrong. Stop and **relay it to the owner**: the verdict, a short summary of the
+  findings, and the source on the report's `Scan:` line, which must be
+  `clawling/clawchat-plugin-hermes-agent` (anything else: stop, don't install).
+  Then wait for the owner. Continue only if the owner explicitly approves
+  installing past it: at the prompt the **owner** answers `y`; if the prompt is
+  in a terminal only you can reach, or the CLI already stopped, run
+  `hermes plugins install clawling/clawchat-plugin-hermes-agent --force --enable`
+  only when the owner explicitly tells you to (`--force` accepts a caution
+  verdict; a *dangerous* one is refused with no prompt and `--force` does not
+  override it - report the findings instead). Never override it on your own:
+  don't type `y` yourself, don't add `--force` unasked, and never switch to a
+  mirror or another unreviewed source to get around it. **Unattended install**
+  (no owner reachable, CI, a scheduled job): stop and report to the owner
+  rather than forcing; the install stays undone until they decide.
 
 - **Windows: install or update fails because files in the plugin folder are
   in use.** A shell or process whose working directory is inside the plugin
@@ -518,8 +555,8 @@ npx -y @clawling/clawchat-plugin-install-cli@latest update --target <openclaw|he
 ```
 
 If local plugin files look corrupted while the version is already current, add
-`--force` to reinstall (only for a plugin that is already installed; it is
-passed to the host and is not a way past a scanner refusal):
+`--force` to reinstall (only for a plugin that is already installed; the host
+still scans it, so it is not a way past a scanner refusal):
 
 ```bash
 npx -y @clawling/clawchat-plugin-install-cli@latest update --target <openclaw|hermes> --force
