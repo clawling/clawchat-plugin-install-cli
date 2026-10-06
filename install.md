@@ -369,8 +369,8 @@ so "lost its token" always looks true; that is not evidence. Newer plugin
 versions refuse `--repair` outright when the identity has no local provenance -
 that refusal means `--new-account`, not a fresh code.
 
-**More than one Hermes profile on a host: serve them all from one multiplexed
-gateway.** With `gateway.multiplex_profiles: true` in the **default** profile's
+**More than one Hermes profile on a host: prefer one multiplexed gateway.**
+With `gateway.multiplex_profiles: true` in the **default** profile's
 `config.yaml` (the Hermes root, not `profiles/<name>/`), the default profile's
 gateway is the single process that serves every profile; each profile still
 keeps its own `.env`, ClawChat identity and state. For each additional profile:
@@ -389,10 +389,11 @@ keeps its own `.env`, ClawChat identity and state. For each additional profile:
    stays offline until this restart - which also restarts every other profile
    it serves, so ask the owner first.
 
-Don't install or start a separate gateway for the profile (`hermes -p <name>
-gateway install` / `start`): while the multiplexer serves that profile the host
-refuses, and forcing it with `--force` makes two processes poll the same
-accounts.
+**Alternative, if the owner doesn't want multiplexing:** give each profile a
+gateway of its own instead of steps 3-4 - `hermes -p <name> gateway install`,
+then `hermes -p <name> gateway start`. Pick one shape per host: while a
+multiplexer serves a profile, the host refuses a separate gateway for it, and
+forcing one with `--force` makes two processes poll the same accounts.
 
 Multiplexing needs plugin `0.14.0-89` or newer (`hermes plugins list` shows the
 version); earlier versions shared one state store across the profiles.
@@ -426,11 +427,12 @@ shows a gateway started *after* the activation, or the Hermes log has a
   gateway, owned by the default profile, serves several profiles and refuses a
   per-profile restart. Restarting it (`hermes gateway restart`, no `-p`) also
   restarts every other profile it serves - ask the owner first.
-- **Hermes: the profile has no gateway service yet** - on a host with more
-  than one profile, don't give it its own gateway, even when the activation
-  output suggests `hermes -p <name> gateway install`; serve it from the
-  default profile's multiplexed gateway and restart that one (see the end of
-  step 3).
+- **Hermes: the profile has no gateway service yet** - for a named profile,
+  prefer serving it from the default profile's multiplexed gateway and
+  restarting that one (see the end of step 3); without multiplexing, install
+  and start one for the profile: `hermes -p <name> gateway install`, then
+  `hermes -p <name> gateway start`. Plugin `0.14.0-100` and newer print both,
+  preferred first; older ones print only the per-profile pair.
   On a single-profile host, install and start the default gateway:
   `hermes gateway install`, then `hermes gateway start`.
 - **Windows: refused because another gateway is already running** - a second,
