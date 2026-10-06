@@ -126,6 +126,8 @@ If the chosen command is still missing, stop and report it - don't switch
 targets. Then check whether ClawChat is already installed (`openclaw plugins
 list --json` or `hermes plugins list`). If it already shows ClawChat, skip step 2
 and run the [update](#update-or-repair-later) command instead, then go to step 3.
+If that update fails only because it cannot fetch plugin metadata from GitHub,
+the installed copy still works: go on to step 3 and update later.
 
 **Hermes with more than one profile** - confirm which profile you are on before
 installing or activating. Every ClawChat identity is keyed on the active
@@ -184,6 +186,13 @@ Hermes:
 npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
+Each block is a separate terminal call, so a venv you activated in step 1 is
+gone here. If `npx` fails with `spawn hermes ENOENT`, put the venv on `PATH`
+in the same call: `PATH="/opt/hermes/.venv/bin:$PATH" npx -y
+@clawling/clawchat-plugin-install-cli@latest install --target hermes`
+(PowerShell: prepend the venv's `Scripts` folder to `$env:PATH` first, as in
+the step 1 *(Windows)* block, in the same call).
+
 The CLI delegates to the host's plugin manager (OpenClaw -> `openclaw plugins
 install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`,
 plus `--accept-capabilities` when the host advertises it, which OpenClaw 2026.8+
@@ -211,6 +220,11 @@ source, and `--accept-capabilities` consents to the plugin's declared capabiliti
 Without them the install is cancelled or rejected and the plugin never lands. Run
 `openclaw plugins install --help` if you are unsure which line your host wants.
 
+The direct Hermes install also clones from GitHub, so it does not help when
+GitHub is unreachable altogether (DNS failures, connection resets, certificate
+revocation-check errors). Never turn off certificate verification to get past
+that; stop and ask the owner for a source this machine can reach.
+
 Then continue to step 3.
 
 **Hermes stops on its security scan - expected for this plugin.** Hermes 0.20.3
@@ -222,6 +236,15 @@ a real terminal instead **waits** at `Install anyway? ... [y/N]`. Either way it
 is the **owner's** decision, not yours: don't answer the prompt, don't add
 `--force`, and don't sit on it silently - see
 [Troubleshooting](#troubleshooting) before doing anything else.
+
+**Hermes: check the plugin is enabled before you activate.** `hermes plugins
+list` (with `-p <name>` for a profile) must show `clawchat` as **enabled**. If
+it shows disabled, or `hermes clawchat` is an unknown command, the host could
+not rebuild its plugin environment: run `hermes plugins enable clawchat` and
+read its error, which may name an unrelated dependency. If the plugin was
+disabled by the security scan, that is the owner's call (see above), not
+something to undo. Don't activate a disabled plugin - the step 4 restart would
+load no ClawChat.
 
 ## 3. Activate (single-use code)
 
@@ -250,6 +273,9 @@ Hermes one-step alternative (does activation as part of install, so you skip thi
 step - only with a fresh code): add `--activate "CLAWCHAT_CODE_GOES_HERE"` to the
 step 2 `install` command. Hermes 0.12 fallback:
 `python "${HERMES_HOME:-$HOME/.hermes}/plugins/clawchat/clawchat_cli.py" activate CLAWCHAT_CODE_GOES_HERE`.
+Run it with the **Hermes venv's** Python (e.g. `/opt/hermes/.venv/bin/python`;
+on Windows the venv's `Scripts\python.exe`), not the shell's own `python`:
+activation needs `hermes_cli` and PyYAML, which only the Hermes venv has.
 
 *(Windows)* same 0.12 fallback:
 
@@ -381,6 +407,12 @@ shows a gateway started *after* the activation, or the Hermes log has a
 - **Windows: refused because another gateway is already running** - a second,
   separately installed Hermes gateway holds it. Tell the owner which one is
   running and let them decide; don't stop it yourself.
+- **Linux / WSL2: the agent goes offline again after the machine reboots** -
+  the gateway's systemd user service only starts at boot when lingering is on
+  for the user. Ask the owner to run `loginctl enable-linger "$USER"`. On WSL2,
+  systemd itself must be on as well (`[boot]` `systemd=true` in
+  `/etc/wsl.conf`, then `wsl --shutdown` from Windows) - that restarts the
+  whole WSL VM, so it is the owner's call.
 - **The restart waits for open sessions to finish** - ask the owner before
   restarting the service directly; that ends those sessions.
 
@@ -469,7 +501,11 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
 
 - **Activation fails (step 3: validation / auth / 401 / 403 / non-zero exit).**
   Codes are single-use - don't retry the same one. Report the error verbatim, ask
-  for a fresh code, run the step 3 command once, continue.
+  for a fresh code, run the step 3 command once, continue. One exception: if the
+  failure is a network / TLS timeout rather than an answer from the server, the
+  code may still be unspent. Re-run the step 0 check first: `pairable: true`
+  means run the same step 3 command once more; `paired` means it was spent, so
+  ask for a fresh code.
 
 - **`code: 16001` / `agent not found` on activation, while step 0 said
   `pairable: true`.** The stored `user_id` in the local config names an agent
@@ -532,7 +568,8 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   The greeting is a model turn, so a model provider that times out or fails
   never produces it. Check the agent's model provider (key, quota,
   reachability) with the owner. Restarting will not help until the provider
-  answers.
+  answers. A newly created Hermes profile starts with no model key of its own,
+  so connected-but-silent on a new profile usually means exactly this.
 
 - **Hermes: `plugins update` refuses because the plugin "is pinned"** (it was
   installed pinned to a revision, e.g. from a catalog). The CLI's `update`,
