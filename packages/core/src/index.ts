@@ -5,6 +5,7 @@ export * from "./errors";
 export * from "./installers/hermes";
 export * from "./installers/openclaw";
 export * from "./installers/openclaw-config-migration";
+export * from "./installers/openclaw-qclaw";
 export * from "./installers/run";
 export * from "./installers/types";
 export * from "./methods/registry";

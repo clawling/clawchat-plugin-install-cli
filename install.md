@@ -602,6 +602,17 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   answers. A newly created Hermes profile starts with no model key of its own,
   so connected-but-silent on a new profile usually means exactly this.
 
+- **OpenClaw inside QClaw: installed, but the gateway says `plugin not found`.**
+  QClaw (a desktop app that bundles OpenClaw) keeps its state in `~/.qclaw/`
+  (Windows: `C:\Users\<user>\.qclaw\`) and only loads plugins listed in
+  `plugins.load.paths` of `~/.qclaw/openclaw.json`. The step 2 `install` adds the
+  plugin there itself and says so (`QClaw detected: ...`). If you installed
+  directly via the host, or the entry is missing, add the installed package
+  directory to that `plugins.load.paths` list (keep QClaw's own entries):
+  `~/.qclaw/npm/projects/clawling-clawchat-plugin-openclaw-<hash>/node_modules/@clawling/clawchat-plugin-openclaw`.
+  Then ask the user to restart QClaw (step 4). `openclaw doctor --fix` may remove the entry as
+  stale; if the plugin disappears after it, rerun the step 2 `install`.
+
 - **Hermes: `plugins update` refuses because the plugin "is pinned"** (it was
   installed pinned to a revision, e.g. from a catalog). The CLI's `update`,
   with or without `--force`, cannot move that pin. Remove the pinned copy with

@@ -72,6 +72,15 @@ describe("published runtime guides", () => {
     expect(step4).toContain("not the plugin's greeting");
   });
 
+  it("install.md tells a QClaw user how the plugin gets onto plugins.load.paths", () => {
+    const qclaw = install.split("- **OpenClaw inside QClaw")[1]?.split("\n- **")[0] ?? "";
+    expect(qclaw).toContain("plugin not found");
+    expect(qclaw).toContain("~/.qclaw/openclaw.json");
+    expect(qclaw).toContain("plugins.load.paths");
+    expect(qclaw).toContain("node_modules/@clawling/clawchat-plugin-openclaw");
+    expect(qclaw).toContain("openclaw doctor --fix");
+  });
+
   it("install.md says where the wiki version actually is (response header / trailing comment)", () => {
     expect(install).not.toContain("shown at the top of that page");
     expect(install).toContain("X-Wiki-Version");

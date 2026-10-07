@@ -22,6 +22,8 @@ function mockHostWorkspaceCapture() {
 }
 
 const CAPABILITY_PROBE: [string, string[]] = ["openclaw", ["plugins", "install", "--help"]];
+// Asked after the install to tell a QClaw config from a stock OpenClaw one.
+const CONFIG_FILE_PROBE: [string, string[]] = ["openclaw", ["config", "file"]];
 
 describe("OpenClaw installer", () => {
   afterEach(() => {
@@ -44,6 +46,7 @@ describe("OpenClaw installer", () => {
     expect(capture.mock.calls).toEqual([
       ["openclaw", ["config", "get", "agents.defaults.workspace"]],
       CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
     ]);
   });
 
@@ -126,6 +129,7 @@ describe("OpenClaw installer", () => {
     expect(capture.mock.calls).toEqual([
       ["openclaw", ["config", "get", "agents.defaults.workspace"]],
       CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
     ]);
   });
 
@@ -145,6 +149,7 @@ describe("OpenClaw installer", () => {
     expect(capture.mock.calls).toEqual([
       ["openclaw", ["config", "get", "agents.defaults.workspace"]],
       CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
     ]);
   });
 
@@ -164,6 +169,7 @@ describe("OpenClaw installer", () => {
     expect(capture.mock.calls).toEqual([
       ["openclaw", ["config", "get", "agents.defaults.workspace"]],
       CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
     ]);
   });
 

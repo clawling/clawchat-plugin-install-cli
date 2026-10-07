@@ -5,6 +5,7 @@ import {
 } from "../config";
 import { writeOpenClawBaseUrls } from "../baseurl/write-openclaw";
 import { applyLegacyOpenClawConfigMigration } from "./openclaw-config-migration";
+import { ensureQClawPluginLoadPath } from "./openclaw-qclaw";
 import { captureCommand, runCommand, type CommandCapturer, type CommandRunner } from "./run";
 import { applyBaseUrlOverrides, type BaseUrlWriter, type InstallActionResult, type InstallProgressReporter, type InstallerOptions } from "./types";
 
@@ -135,6 +136,8 @@ export async function installOpenClawPlugin(options: InstallerOptions = {}): Pro
   // makes `openclaw plugins install`'s own config validation fail with
   // "unknown channel id" on hosts that strictly validate config.
   applyBaseUrlOverrides(options, defaultOpenClawBaseUrlWriter);
+  // QClaw never discovers a managed npm install on its own; point its load paths at it.
+  await ensureQClawPluginLoadPath({ capture, homeDir: options.homeDir, onProgress: progress });
   return {
     kind: "plugin",
     target: "openclaw",
@@ -163,6 +166,7 @@ export async function updateOpenClawPlugin(options: InstallerOptions = {}): Prom
   migrateLegacyOpenClawConfig(options);
   // Write channel base URLs AFTER the plugin is installed (see installOpenClawPlugin).
   applyBaseUrlOverrides(options, defaultOpenClawBaseUrlWriter);
+  await ensureQClawPluginLoadPath({ capture, homeDir: options.homeDir, onProgress: progress });
   return {
     kind: "plugin",
     target: "openclaw",

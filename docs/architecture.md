@@ -132,8 +132,23 @@ Both `install` and `update` may rewrite the user's OpenClaw config
 - **Base URLs.** When any of `--apibaseurl` / `--wsbaseurl` / `--mediabaseurl` is
   passed, `writeOpenClawBaseUrls` upserts them under
   `channels.clawchat-plugin-openclaw.*`.
+- **QClaw load path.** Last, `ensureQClawPluginLoadPath`
+  (`packages/core/src/installers/openclaw-qclaw.ts`) asks the host which config
+  it reads (`openclaw config file`, falling back to `getOpenClawConfigPath`). Only
+  when that is QClaw's (`~/.qclaw/openclaw.json`; `C:\Users\<user>\.qclaw\` on
+  Windows) does it act: QClaw's engine never discovers a managed npm install —
+  its `plugins.load.paths` lists only QClaw's bundled `config/extensions` and no
+  installed-plugin index is written, so the gateway reports `plugin not found`.
+  The step finds the package the host just installed
+  (`<state dir>/npm/projects/clawling-clawchat-plugin-openclaw-<hash>[__openclaw-generation__…]/node_modules/@clawling/clawchat-plugin-openclaw`,
+  newest generation wins) and appends it to `plugins.load.paths`: idempotent,
+  other entries kept, an entry for an older generation of the same package
+  replaced. A config that is not plain JSON, or a `load.paths` that is not a
+  list, is left untouched. Any failure is a warning that prints the manual step.
+  `openclaw doctor --fix` may drop the entry as stale; rerunning the installer
+  restores it. On stock OpenClaw this step writes nothing.
 
-Both happen **after** the plugin install, and in that order: the channel id is
+The first two happen **after** the plugin install, and in that order: the channel id is
 not registered until install completes, so writing `channels.<id>.*` earlier
 makes `openclaw plugins install`'s own config validation fail with "unknown
 channel id" on hosts that validate strictly. The migration runs first so the

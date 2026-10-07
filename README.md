@@ -31,6 +31,8 @@ plugin id is migrated onto `clawchat-plugin-openclaw` (channel block,
 `plugins.allow`, entries, tools) so upgrading from the old plugin keeps the
 existing pairing. Nothing is written when no legacy id is present, and a
 migration failure is reported as a warning rather than aborting the install.
+On QClaw (an app bundling OpenClaw, config `~/.qclaw/openclaw.json`) the installed
+plugin directory is also appended to `plugins.load.paths`, which QClaw needs to load it.
 ClawChat is a third-party (non-catalog) plugin: on older OpenClaw the flag
 bypasses the install-time safety scan that would block it; on newer OpenClaw it
 is a deprecated no-op (installs allowed by default, operator gating via
