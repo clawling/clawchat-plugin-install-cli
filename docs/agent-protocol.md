@@ -125,12 +125,14 @@ Always HTTP 200 → branch on the envelope `code`:
 | `code` | Meaning | Class |
 |---|---|---|
 | 0 | Success. `data: {access_token, refresh_token}` — **both rotate, single-use** | success |
-| 10003 | Revoked **or already consumed** | permanent\* |
-| 400 | Bad request / device-id mismatch | permanent |
+| 10003 | Revoked, **already consumed**, or `X-Device-Id` not byte-identical to the one the session was issued to | permanent\* |
+| 400 | Missing / over-long (>128 B) `X-Device-Id`, or a malformed body | permanent |
 | 1 | Internal | transient |
 | other / network | — | transient |
 
 \* Re-classify 10003 as **transient** when the token you submitted is one you had already rotated away from (a concurrent-rotation race). Only a genuine 10003/400 should auto-logout — and auto-logout means *blank the tokens, keep the identity*, never delete the agent.
+
+**Grace window (production only — absorb a lost response, never design around it).** Since 2026-09-16 production lets a just-rotated refresh token be redeemed again: at least 2 s and at most 90 s after it was rotated, at most twice, and only while its successor has not itself been refreshed, logged out or revoked. A successful grace redemption returns a fresh pair **and revokes the chain tail** — the refresh token from the response you lost dies with it. Anything outside those bounds (a concurrent duplicate under 2 s, past 90 s, a third try) is a plain 10003. The device-id check runs first, so a mismatched id never reaches the grace path. Backend reference: member-backend `docs/features/auth.md` (refresh grace).
 
 **Cadence:** `refresh_at = exp − max(30min, min(2h, 0.25 × (exp − iat))) ± jitter(±5min)`. Fallback expiry `activated_at + 24h` when `exp` is unparseable. Single-flight; ≥30 s between attempts. Also refresh reactively on REST 401/403 and on WS `hello-fail`, and pre-emptively before connecting if near expiry.
 
@@ -145,7 +147,7 @@ This is the single most expensive mistake in the protocol, so it gets its own se
 | WS `connect.payload.device_id` | Per-install derived id: `<channel>-<sha256(CHANNEL_ID \0 accountId \0 userId \0 hostname [\0 role])[0:24]>` |
 | REST `X-Device-Id` — **all** calls including `/v1/auth/refresh` | The **literal channel constant**, identical bytes every time |
 
-Choosing our channel constant is ours to make, but once chosen it must be **stable forever and byte-identical across connect and refresh** — the backend compares them and answers `code:400` on mismatch, which the classifier above treats as permanent and turns into an auto-logout.
+Choosing our channel constant is ours to make, but once chosen it must be **stable forever and byte-identical across connect and refresh** — the backend compares them and answers `code:10003` on mismatch — indistinguishable from a revoked token, so the classifier above treats it as permanent and turns it into an auto-logout. (`code:400` is only for a *missing* header.)
 
 **The optional `role` component (2026-08-30).** The hub treats one `device_id` as one device: a second connection with the same id **kicks the first off**. When one account holds two functionally different connections at once (measured on a real machine: the main-agent form runs a host turn connection AND a machine-channel link on the same account — the link went dark and every shim `send` silently dropped while reporting success), each connection must derive a **distinct** id. `role` is an extra NUL-joined component appended to the material **only when non-empty** — an empty role reproduces the historical bytes exactly, so existing installs do not turn into new devices. ClawChat's machine-channel link passes `role: "machine-channel"`; the host connection passes none. Agent-side connections do no dseq acking, so a changed id carries no server-side state loss.
 
@@ -612,7 +614,7 @@ The channel downloads each file into a per-agent inbox first; the URL in the bod
 Every one of these was learned the expensive way — from the reference plugin's source, or from a live probe. They are ordered by how much time they cost.
 
 1. **`message_id` format is contractual** — `msg-` + 26-char Crockford base32 ULID. Not a UUID, not a nanoid.
-2. **`X-Device-Id` on `/v1/auth/refresh` must byte-match the connect-time REST device id** (the literal channel constant, **not** the WS `device_id`). Mismatch → `code:400` → auto-logout (§1.6).
+2. **`X-Device-Id` on `/v1/auth/refresh` must byte-match the connect-time REST device id** (the literal channel constant, **not** the WS `device_id`). Mismatch → `code:10003` (not 400 — that is a *missing* header) → auto-logout (§1.6).
 3. **Refresh tokens are single-use.** Persist before swapping; treat a 10003 for a token you already rotated away from as transient, not permanent (§1.5).
 4. **Never address an outbound frame to a `usr_…` id.** `chat_id` must be a `cnv_…`. Violations are dropped **with no negative ack** — silent loss, no error to debug. Use `conversation.id` from activation for owner DMs.
 5. **The self-echo guard must fail closed.** Unknown own `user_id` ⇒ drop all inbound business frames. Failing open produces an infinite self-reply loop against a live production account.
