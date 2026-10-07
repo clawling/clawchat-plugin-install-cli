@@ -1,6 +1,6 @@
 ---
 name: clawchat-set-greeting
-version: 1.2.0
+version: 1.2.1
 description: Use when the user wants to customize, change, set, or reset this agent's greetings — the first-load / activation greeting to the owner (~/clawchat/greeting.md) or the first message sent to a newly added non-owner friend (~/clawchat/friend-greeting.md).
 ---
 
@@ -58,8 +58,8 @@ Override it the same way with **`~/clawchat/friend-greeting.md`**: same rules as
 is an instruction to you, not the literal message; keep it short; no secrets; it is a
 partial override that the plugin may still append its own trailing line to). Delete or
 empty the file to restore the built-in instruction. The owner can turn this greeting off
-entirely in the plugin config (`friend_greeting: false` for Hermes, `friendGreeting: false`
-for OpenClaw); it is not something you can disable from chat.
+entirely in the plugin config (`friendGreeting: false`); it is not something you can
+disable from chat.
 
 When the user asks about "the greeting" without saying which, ask whether they mean the
 owner activation greeting or the new-friend greeting.
@@ -69,4 +69,5 @@ owner activation greeting or the new-friend greeting.
 - `greeting.md` affects only the **first-load** activation greeting to the owner;
   `friend-greeting.md` affects only the first message to a newly added non-owner friend.
   Neither changes later replies.
-- Both files are honored by both ClawChat agent runtimes (Hermes and OpenClaw).
+- These are the OpenClaw files. A Hermes agent on the same machine does not read them: it
+  keeps its own copies inside each Hermes profile.

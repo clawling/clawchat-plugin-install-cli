@@ -18,8 +18,13 @@ skills/
 
 The `clawchat-core` skill is **host-specific** (it teaches each host's own CLI:
 `openclaw channels …` / `SOUL.md` sync vs `hermes clawchat activate` /
-`/clawchat-activate`), so it lives once per host. `clawchat-liveware` is identical
-across hosts and lives once under `shared/`.
+`/clawchat-activate`), so it lives once per host. So do `clawchat-set-greeting`
+(OpenClaw reads its greeting files from `~/clawchat/`; Hermes from each profile's
+`$HERMES_HOME/clawchat/`, the default profile falling back to `~/clawchat/`) and
+`clawchat-liveware` (on Hermes every `liveware` command carries the agent's own
+`--account`, because several profiles share one liveware login file).
+`clawchat-liveware-dev` and `clawchat-orchestration` are identical across hosts and live
+once under `shared/`.
 
 > The plugin repos (`clawchat-plugin-openclaw`, `clawchat-plugin-hermes-agent`)
 > keep a **bundled snapshot** of their own host's files for offline / first-run

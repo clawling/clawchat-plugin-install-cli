@@ -30,17 +30,17 @@ const MANIFEST_PATH = path.join(SKILLS_DIR, "manifest.json");
 const LAYOUT = {
   openclaw: {
     "clawchat-core": "openclaw/clawchat-core/SKILL.md",
-    "clawchat-liveware": "shared/clawchat-liveware/SKILL.md",
+    "clawchat-liveware": "openclaw/clawchat-liveware/SKILL.md",
     "clawchat-liveware-dev": "shared/clawchat-liveware-dev/SKILL.md",
-    "clawchat-set-greeting": "shared/clawchat-set-greeting/SKILL.md",
+    "clawchat-set-greeting": "openclaw/clawchat-set-greeting/SKILL.md",
     "clawchat-liveware-sample": "openclaw/clawchat-liveware-sample/SKILL.md",
     "clawchat-orchestration": "shared/clawchat-orchestration/SKILL.md",
   },
   hermes: {
     "clawchat-core": "hermes/clawchat-core/SKILL.md",
-    "clawchat-liveware": "shared/clawchat-liveware/SKILL.md",
+    "clawchat-liveware": "hermes/clawchat-liveware/SKILL.md",
     "clawchat-liveware-dev": "shared/clawchat-liveware-dev/SKILL.md",
-    "clawchat-set-greeting": "shared/clawchat-set-greeting/SKILL.md",
+    "clawchat-set-greeting": "hermes/clawchat-set-greeting/SKILL.md",
     "clawchat-liveware-sample": "hermes/clawchat-liveware-sample/SKILL.md",
     "clawchat-orchestration": "shared/clawchat-orchestration/SKILL.md",
   },

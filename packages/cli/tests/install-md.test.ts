@@ -88,17 +88,100 @@ describe("published runtime guides", () => {
   });
 });
 
+const readSkill = (target: string, id: string) =>
+  readFileSync(resolve(__dirname, `../../../skills/${target}/${id}/SKILL.md`), "utf8");
+
 describe("bundled clawchat-core skills", () => {
-  const SKILLS = ["hermes", "openclaw"].map((t) =>
-    readFileSync(resolve(__dirname, `../../../skills/${t}/clawchat-core/SKILL.md`), "utf8"),
-  );
+  const SKILLS = ["hermes", "openclaw"].map((t) => readSkill(t, "clawchat-core"));
   it("route reconnects and reports to the wiki, and no longer name retired app screens", () => {
     for (const text of SKILLS) {
       expect(text).toContain("https://agent-connection.clawling.com/reconnect.md");
       expect(text).toContain("https://agent-connection.clawling.com/start.md");
-      expect(text).toContain("~/clawchat/onboarding.json");
       expect(text).not.toContain("注册 Agent");
       expect(text).not.toContain("创建新身份");
     }
+  });
+
+  it("keep onboarding.json per Hermes profile and in the OS home on OpenClaw", () => {
+    expect(readSkill("openclaw", "clawchat-core")).toContain("~/clawchat/onboarding.json");
+    const hermes = readSkill("hermes", "clawchat-core");
+    expect(hermes).toContain("`<agent_files_dir>/onboarding.json`");
+    expect(hermes).toContain("## ClawChat Agent Files");
+    expect(hermes).toContain('"${HERMES_HOME:-$HOME/.hermes}/clawchat/onboarding.json"');
+    expect(hermes).toContain("Join-Path $env:LOCALAPPDATA 'hermes'");
+    expect(hermes).not.toContain("write it to `~/clawchat/onboarding.json`");
+  });
+
+  it("let Hermes send a file to another conversation via clawchat_send_file, not send_message", () => {
+    const hermes = readSkill("hermes", "clawchat-core");
+    expect(hermes).toMatch(/call `clawchat_send_file` with `chat_id`/);
+    expect(hermes).toMatch(/Owner says "send this file to group X"/);
+    expect(hermes).toMatch(/`clawchat_mention_message` is \*\*text only\*\*/);
+    expect(hermes).toMatch(/then `clawchat_send_file` to the same `chat_id` in the same turn/);
+    expect(hermes).toContain("`as_document: true`");
+    expect(hermes).not.toContain('target: "clawchat:cnv_<id>"');
+    expect(hermes).not.toMatch(/call Hermes `send_message`/);
+    expect(hermes).not.toContain("only supported way to attach media");
+  });
+
+  it("say an approved receipt is done and only approved_retry calls again", () => {
+    for (const text of SKILLS) {
+      expect(text).toMatch(/\*\*`approved`\*\* — the server already carried out the operation/);
+      expect(text).toMatch(/do not call it again/);
+      expect(text).toMatch(/\*\*`approved_retry`\*\* — the only outcome that asks you to call again/);
+      expect(text).toMatch(/receipt's `result`/);
+    }
+  });
+
+  it("let moment images be an http(s) URL or an absolute local path, with no phantom upload tool", () => {
+    for (const text of SKILLS) {
+      expect(text).toMatch(/`images` (entry )?(of `clawchat_create_moment` )?is an http\(s\) URL or an absolute local file path/);
+      expect(text).not.toContain("moment-image tools");
+      expect(text).not.toContain("upload local images first");
+    }
+  });
+});
+
+describe("per-host greeting and liveware skills", () => {
+  it("point Hermes greetings at the profile's HERMES_HOME and OpenClaw's at ~/clawchat", () => {
+    const hermes = readSkill("hermes", "clawchat-set-greeting");
+    expect(hermes).toContain("$HERMES_HOME/clawchat/");
+    expect(hermes).toMatch(/default profile only/i);
+    expect(hermes).toMatch(/Named profiles never fall back/);
+    expect(hermes).not.toContain("`~/clawchat/greeting.md` (the");
+    expect(hermes).toContain("`agent_files_dir: <absolute path>`");
+    expect(hermes).toMatch(/empty\s+file resets to the built-in prompt/);
+    const openclaw = readSkill("openclaw", "clawchat-set-greeting");
+    expect(openclaw).toContain("~/clawchat/greeting.md");
+    expect(openclaw).toContain("~/clawchat/friend-greeting.md");
+  });
+
+  it("make every Hermes liveware command name the agent's own account", () => {
+    const hermes = readSkill("hermes", "clawchat-liveware");
+    const commands = [...hermes.matchAll(/`(liveware (?:app|tunnel|status)\b[^`]*)`/g)].map((m) => m[1]!);
+    expect(commands.length).toBeGreaterThan(10);
+    // Bare subcommand names in prose (e.g. "if `liveware app inspect` is rejected") are not commands.
+    const runnable = commands.filter((c) => /\s(<|"|http|--)/.test(c) || /^liveware (app list|status)$/.test(c));
+    for (const command of runnable) {
+      expect(command, command).toMatch(/--account <account>$/);
+    }
+    expect(hermes).toContain("clawchat_liveware_login");
+    expect(hermes).toMatch(/`account` field of the `clawchat_liveware_login` result/);
+    for (const sub of ["`tunnel bind` / `bind-static`", "`agent`", "`uninstall`"]) {
+      expect(hermes).toContain(sub);
+    }
+    const openclaw = readSkill("openclaw", "clawchat-liveware");
+    expect(openclaw).not.toContain("--account");
+  });
+});
+
+describe("shared orchestration skill", () => {
+  it("explains a 21001 pending approval and its permission-result outcomes", () => {
+    const text = readSkill("shared", "clawchat-orchestration");
+    const row = text.split("\n").find((line) => line.startsWith("| `21001` |"));
+    expect(row).toBeDefined();
+    expect(row).toMatch(/`approved_retry` = call the same tool once more/);
+    expect(row).toMatch(/`denied` \/ `auto_denied` \/ `expired` \/ `failed` = do not retry/);
+    expect(row).toContain("`conversation_id`");
   });
 });
