@@ -342,7 +342,7 @@ Some operations are gated on the owner's approval. The REST call returns a gate 
 | **21001** | `pending_owner_approval` → `{request_id: "prq_…", operation, expires_at}` (≈300 s; **60 min** for the `orchestrate.*` operations below). May also carry `capped: true` — see below |
 | **21003** | `forbidden_by_owner` → `{operation}` |
 
-On 21001 an approval card renders in the owner's chat with the agent. **On approval the server executes the gated operation itself** — the agent must *not* re-issue the call (a later retry returns `13001 not found`), **except on outcome `approved_retry`** (below). The outcome arrives as a `permission_result` system message: `message.send` with `sender.id="system"` and
+On 21001 an approval card renders in the owner's chat with the agent. **On approval the server executes the gated operation itself** — the agent must *not* re-issue the call, **except on outcome `approved_retry`** (below). A re-issue is not harmless: if the owner chose `allow_always` / `allow_1h` / `allow_1d` it simply runs again — a creation creates twice — and if they chose `allow_once` the policy is still `ask`, so it raises a fresh card (`friend.accept` reuses its pending card; `orchestrate.*` stops at 3 and answers `capped:true`). Only a replay of an already-executed `moment.delete` answers `13001 not found` (member-backend `agentperm/service.go`, Joe 2026-10-06). The outcome arrives as a `permission_result` system message: `message.send` with `sender.id="system"` and
 
 ```
 payload.metadata = { kind:"permission_result", operation,
