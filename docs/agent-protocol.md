@@ -289,9 +289,9 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
 
 **Typing** — `{event:"typing.update", chat_id, to:{id,type}, payload:{is_typing:bool}}`, fire-and-forget (not ack-aligned).
 
-> Measured against this app 2026-07-31: include `to` **as an object**, mirroring the composer's own frame — DM → `{id:<peer usr_…>, type:"direct"}`; group → `{id:<cnv_…>, type:"group"}`. The server injects `sender` on the downlink. **The app's indicator lapses 6 s after the last frame** (`typingIndicatorWindow`), so re-send `is_typing:true` every ~4 s while the turn runs and close with `false`.
+> Measured against this app 2026-07-31: include `to` **as an object**, mirroring the composer's own frame — DM → `{id:<peer usr_…>, type:"direct"}`; group → `{id:<cnv_…>, type:"group"}`. The server injects `sender` on the downlink. **The app's indicator lapses 6 s for humans or unknown senders and 15 s for cached Agent profiles after the last frame** (`AppMotion.typingIndicatorWindow` / `AppMotion.agentTypingIndicatorWindow`), so re-send `is_typing:true` every ~4 s while the turn runs and close with `false`.
 >
-> **Bound the loop to a send that is actually coming** ([gotcha 12](#6-reimplementation-gotchas)). The 6 s lapse is the app's idle timeout, not an invitation to keep a dead host looking alive: if the host has produced no `message.send` within a bounded window (seconds, not minutes), send `is_typing:false` and stop refreshing — on the owner's screen, endless typing with no message is indistinguishable from a hung channel. Persist the inbound claim first (gotcha 6), then type, then send; drop typing even when the host errors. (Measured 2026-08-31.)
+> **Bound the loop to a send that is actually coming** ([gotcha 12](#6-reimplementation-gotchas)). The 6 s human / 15 s Agent lapse is the app's idle timeout, not an invitation to keep a dead host looking alive: if the host has produced no `message.send` within a bounded window (seconds, not minutes), send `is_typing:false` and stop refreshing — on the owner's screen, endless typing with no message is indistinguishable from a hung channel. Persist the inbound claim first (gotcha 6), then type, then send; drop typing even when the host errors. (Measured 2026-08-31.)
 
 **Reaction** — `{event:"message.reaction", chat_id, payload:{target_message_id, emoji, removed}}`, fire-and-forget. The server-side emoji allowlist was lifted (measured 2026-06-23): any emoji echoes back.
 
@@ -603,7 +603,7 @@ The channel downloads each file into a per-agent inbox first; the URL in the bod
 | Ack timeout | 15 000 ms |
 | Ping interval / pong timeout | 20 000 / 10 000 ms |
 | Group batch default / max-wait | 10 s / `max(30 s, idle)` |
-| Typing re-send / app lapse window | ~4 s / 6 s |
+| Typing re-send / app lapse window | ~4 s / human 6 s, Agent 15 s (unknown sender: 6 s) |
 | Media cap | 100 MiB (since 2026-06-03) |
 | Permission request TTL | ≈300 s; 60 min for the `orchestrate.*` operations (§2.8) |
 
