@@ -45,7 +45,12 @@ pnpm skills:check       # CI: fail if the manifest is stale
 ## Releasing a skill change
 
 1. Edit the relevant `SKILL.md` and **bump its frontmatter `version:`**
-   (semver `X.Y.Z`, optional `-<build>`).
+   (semver `X.Y.Z`, optional `-<build>`). The frontmatter must stay valid
+   YAML: a plain value cannot contain `: ` or ` #`, so write prose like that
+   as `description: >-` with the text indented on the next line. Both
+   `skills:manifest` and `pnpm test` reject an unsafe value
+   (`scripts/skill-frontmatter.mjs`) — a host that cannot parse it reads no
+   `version` and re-seeds the skill on every start.
 2. `pnpm skills:manifest` to refresh `manifest.json` (and `pnpm livewares:manifest`
    if the Liveware Sample under `livewares/` changed in the same round — it rides
    the same tag).

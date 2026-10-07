@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { frontmatterProblems } from "./skill-frontmatter.mjs";
 
 const SKILLS_DIR = path.resolve(fileURLToPath(new URL("../skills", import.meta.url)));
 const MANIFEST_PATH = path.join(SKILLS_DIR, "manifest.json");
@@ -109,6 +110,8 @@ function build() {
       const abs = path.join(SKILLS_DIR, rel);
       const buf = fs.readFileSync(abs);
       const text = buf.toString("utf8");
+      const problems = frontmatterProblems(text, rel);
+      if (problems.length > 0) throw new Error(problems.join("\n"));
       skills[target][skillId] = {
         version: frontmatterVersion(text, rel),
         path: rel,

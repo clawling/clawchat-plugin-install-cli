@@ -27,10 +27,10 @@
         "bytes": 4184
       },
       "clawchat-liveware-sample": {
-        "version": "2.0.0",
+        "version": "2.0.1",
         "path": "openclaw/clawchat-liveware-sample/SKILL.md",
-        "sha256": "edafa5f802907c97c32af63feb5b62dcbb41c064649912c710808d27187aaa57",
-        "bytes": 13938
+        "sha256": "9b789fdd8e867af73dd0b851134b4287298f08e2fde87e3138f3d5b841aed0c5",
+        "bytes": 13943
       },
       "clawchat-orchestration": {
         "version": "2.1.0",
@@ -65,10 +65,10 @@
         "bytes": 4184
       },
       "clawchat-liveware-sample": {
-        "version": "2.0.0",
+        "version": "2.0.1",
         "path": "hermes/clawchat-liveware-sample/SKILL.md",
-        "sha256": "8278db2646d1553e41f4cf061c710b5363c3f41fa9ae32d8b1021fa2175b9a41",
-        "bytes": 13838
+        "sha256": "93d489ee7ee7607bc9a61defd16e06b1ee3c93d09a1115fa809ef06879e57cc4",
+        "bytes": 13843
       },
       "clawchat-orchestration": {
         "version": "2.1.0",
