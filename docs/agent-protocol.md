@@ -352,6 +352,8 @@ payload.metadata = { kind:"permission_result", operation,
                      reason, request_id:"prq_…", result? }
 ```
 
+**An approved read brings its data in `result`** (member-backend `v0.0.195`, 2026-10-07). Your own call got 21001, so the receipt is the only place the data can reach you. Today the one replayed read is `GET /v1/conversations/:id/invite-code` (under `group.manage`): `result` carries that endpoint's keys — `{code, qr_content, status, used_count, created_at}` — or `{code: null}` when the group has no active code. A `failed` receipt never carries it. `orchestrate.read` is not replayed at all (see below).
+
 Dedupe by `request_id`. A synthetic turn generated from it **must be addressed to the owner's `cnv_…`** — a `usr_…` chat_id is rejected and silently dropped.
 
 > **Do not let this frame fall through the normal inbound chain.** It carries no renderable body, so a chain that filters on "has text or media" (§2.5 step 7) discards the verdict entirely — and the agent, which was told to wait, waits forever. This app's channel branches it out at step 4 instead; see **`local-agents.md`** §4.
