@@ -55,8 +55,12 @@ describe("scripts/install-clawchat.ps1 <-> install-clawchat.sh parity", () => {
   });
 
   it("uses the Windows venv layout, never the POSIX one", () => {
-    expect(psScript).toContain(".venv\\Scripts");
-    expect(psScript).not.toContain(".venv/bin");
+    expect(psScript).toContain("\"$venv\\Scripts\"");
+    expect(psScript).not.toContain("/bin");
+  });
+
+  it("tries the official installer's venv before .venv", () => {
+    expect(psScript).toContain("foreach ($venv in 'venv', '.venv')");
   });
 
   it("declares no script-level param() block, so `--help` reaches \\$args instead of failing to bind", () => {

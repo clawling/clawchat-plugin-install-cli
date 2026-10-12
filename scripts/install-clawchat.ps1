@@ -53,7 +53,8 @@ function Test-CommandExists([string] $Name) {
 Put the Hermes venv on PATH when `hermes` is not already resolvable.
 
 The POSIX script sources the venv's activate script under its bin directory; on
-Windows the venv layout is `.venv\Scripts\` instead. Prefer the venv's own
+Windows the venv keeps it in `Scripts\` instead. The official Hermes installer
+names the venv `venv`; a manual install may use `.venv`. Prefer the venv's own
 Activate.ps1, but fall back to putting Scripts\ on PATH directly — Activate.ps1
 is absent from some venvs and can be blocked by execution policy, while the
 PATH edit always works.
@@ -68,8 +69,11 @@ function Enable-HermesVenv {
     if ($env:LOCALAPPDATA) { [void] $roots.Add((Join-Path $env:LOCALAPPDATA 'hermes\hermes-agent')) }
     if ($env:USERPROFILE) { [void] $roots.Add((Join-Path $env:USERPROFILE '.hermes\hermes-agent')) }
 
-    foreach ($root in $roots) {
-        $scripts = Join-Path $root '.venv\Scripts'
+    $candidates = foreach ($root in $roots) {
+        foreach ($venv in 'venv', '.venv') { Join-Path $root "$venv\Scripts" }
+    }
+
+    foreach ($scripts in $candidates) {
         if (-not (Test-Path -LiteralPath $scripts)) { continue }
 
         $activate = Join-Path $scripts 'Activate.ps1'

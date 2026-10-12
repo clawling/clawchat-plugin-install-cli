@@ -64,11 +64,14 @@ case "$TARGET" in
 esac
 
 if [[ "$TARGET" == "hermes" ]] && ! command -v hermes >/dev/null 2>&1; then
-  if [[ -d /opt/hermes/.venv/bin ]]; then
-    . /opt/hermes/.venv/bin/activate
-  elif [[ -d "$HOME/.hermes/hermes-agent/.venv/bin" ]]; then
-    . "$HOME/.hermes/hermes-agent/.venv/bin/activate"
-  fi
+  # Official Hermes installers name the venv `venv`; the Docker image and some
+  # manual installs use `.venv`.
+  for venv in /opt/hermes/.venv "$HOME/.hermes/hermes-agent/venv" "$HOME/.hermes/hermes-agent/.venv"; do
+    if [[ -f "$venv/bin/activate" ]]; then
+      . "$venv/bin/activate"
+      break
+    fi
+  done
 fi
 
 if ! command -v "$TARGET" >/dev/null 2>&1; then

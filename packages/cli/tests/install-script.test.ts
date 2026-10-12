@@ -150,9 +150,9 @@ exit 2
     expect(calls).toContain("npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes");
   });
 
-  it("activates a discovered Hermes virtualenv before checking PATH", () => {
+  it.each([".venv", "venv"])("activates a discovered Hermes virtualenv (%s) before checking PATH", (venvName) => {
     const { dir, bin, log } = createHarness();
-    const hermesBin = join(dir, ".hermes", "hermes-agent", ".venv", "bin");
+    const hermesBin = join(dir, ".hermes", "hermes-agent", venvName, "bin");
     mkdirSync(hermesBin, { recursive: true });
     writeFileSync(join(hermesBin, "activate"), `PATH="${hermesBin}:$PATH"\n`, "utf8");
     makeExecutable(join(hermesBin, "hermes"), "#!/usr/bin/env bash\nexit 0\n");
@@ -168,6 +168,24 @@ exit 2
 
     expect(result.status).toBe(0);
     expect(readFileSync(log, "utf8")).toContain("npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes");
+  });
+
+  it("prefers the official installer's venv over .venv when both exist", () => {
+    const { dir, bin, log } = createHarness();
+    for (const venvName of ["venv", ".venv"]) {
+      const venvBin = join(dir, ".hermes", "hermes-agent", venvName, "bin");
+      mkdirSync(venvBin, { recursive: true });
+      writeFileSync(join(venvBin, "activate"), `echo "activate ${venvName}" >> "${log}"\nPATH="${venvBin}:$PATH"\n`, "utf8");
+      makeExecutable(join(venvBin, "hermes"), "#!/usr/bin/env bash\nexit 0\n");
+    }
+    makeExecutable(join(bin, "npx"), "#!/usr/bin/env bash\nexit 0\n");
+
+    const result = runScript(["hermes"], bin, { HOME: dir });
+
+    expect(result.status).toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("activate venv\n");
+    expect(calls).not.toContain("activate .venv");
   });
 
   it("uses npx even when a stale global clawchat CLI exists", () => {

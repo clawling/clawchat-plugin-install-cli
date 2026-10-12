@@ -99,25 +99,28 @@ Hermes (source its venv first if `hermes` isn't on `PATH`):
 
 ```bash
 if ! command -v hermes >/dev/null 2>&1; then
-  if [ -d /opt/hermes/.venv/bin ]; then . /opt/hermes/.venv/bin/activate
-  elif [ -d "$HOME/.hermes/hermes-agent/.venv/bin" ]; then . "$HOME/.hermes/hermes-agent/.venv/bin/activate"
-  fi
+  # Official installers name the venv `venv`; the Docker image and some manual
+  # installs use `.venv`.
+  for venv in /opt/hermes/.venv "$HOME/.hermes/hermes-agent/venv" "$HOME/.hermes/hermes-agent/.venv"; do
+    if [ -f "$venv/bin/activate" ]; then . "$venv/bin/activate"; break; fi
+  done
 fi
 hermes --version
 ```
 
-*(Windows)* - the venv lives in `.venv\Scripts\`, not `.venv/bin/`:
+*(Windows)* - a Windows venv keeps its commands in `Scripts\`, not `bin/`:
 
 ```powershell
 if (-not (Get-Command hermes -ErrorAction SilentlyContinue)) {
   # Native Windows keeps the Hermes home at %LOCALAPPDATA%\hermes, NOT
-  # %USERPROFILE%\.hermes (that is the POSIX / WSL2 layout).
+  # %USERPROFILE%\.hermes (that is the POSIX / WSL2 layout). The official
+  # installer names the venv `venv`; a manual install may use `.venv`.
   $root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
-  $scripts = Join-Path $root 'hermes-agent\.venv\Scripts'
-  if (-not (Test-Path $scripts)) {
-    $scripts = Join-Path $env:USERPROFILE '.hermes\hermes-agent\.venv\Scripts'
+  $candidates = foreach ($base in $root, (Join-Path $env:USERPROFILE '.hermes')) {
+    foreach ($venv in 'venv', '.venv') { Join-Path $base "hermes-agent\$venv\Scripts" }
   }
-  if (Test-Path $scripts) { $env:PATH = "$scripts;$env:PATH" }
+  $scripts = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($scripts) { $env:PATH = "$scripts;$env:PATH" }
 }
 hermes --version
 ```
@@ -187,11 +190,13 @@ npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
 Each block is a separate terminal call, so a venv you activated in step 1 is
-gone here. If `npx` fails with `spawn hermes ENOENT`, put the venv on `PATH`
-in the same call: `PATH="/opt/hermes/.venv/bin:$PATH" npx -y
+gone here. If `npx` fails with `spawn hermes ENOENT`, put the venv's `bin`
+folder on `PATH` in the same call - the folder step 1 found, e.g.
+`PATH="$HOME/.hermes/hermes-agent/venv/bin:$PATH" npx -y
 @clawling/clawchat-plugin-install-cli@latest install --target hermes`
-(PowerShell: prepend the venv's `Scripts` folder to `$env:PATH` first, as in
-the step 1 *(Windows)* block, in the same call).
+(`/opt/hermes/.venv/bin` in the Docker image; PowerShell: prepend the venv's
+`Scripts` folder to `$env:PATH` first, as in the step 1 *(Windows)* block, in
+the same call).
 
 The CLI delegates to the host's plugin manager (OpenClaw -> `openclaw plugins
 install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`,
@@ -239,9 +244,16 @@ is the **owner's** decision, not yours: don't answer the prompt, don't add
 
 **Hermes: check the plugin is enabled before you activate.** `hermes plugins
 list` (with `-p <name>` for a profile) must show `clawchat` as **enabled**. If
-it shows disabled, or `hermes clawchat` is an unknown command, the host could
-not rebuild its plugin environment: run `hermes plugins enable clawchat` and
-read its error, which may name an unrelated dependency. If the plugin was
+it shows disabled, or `hermes clawchat` is an unknown command, the plugin's
+Python dependencies were never prepared. Hermes 0.21.6 and newer ask before
+installing them and, when nobody can answer, skip them and leave the plugin
+disabled - the `npx` CLI and the one-shot scripts never give Hermes a terminal,
+so on those hosts this is the normal outcome, not a failed install (the host
+may print `Non-interactive install — skipping dependency install`). On older
+hosts the cause is that the host could not rebuild its plugin environment.
+Either way, run `hermes plugins enable clawchat` (with `-p <name>` for a
+profile): it prepares the dependencies itself. If it fails, read its error,
+which may name an unrelated dependency. If the plugin was
 disabled by the security scan, that is the owner's call (see above), not
 something to undo. Don't activate a disabled plugin - the step 4 restart would
 load no ClawChat.
@@ -273,8 +285,10 @@ Hermes one-step alternative (does activation as part of install, so you skip thi
 step - only with a fresh code): add `--activate "CLAWCHAT_CODE_GOES_HERE"` to the
 step 2 `install` command. Hermes 0.12 fallback:
 `python "${HERMES_HOME:-$HOME/.hermes}/plugins/clawchat/clawchat_cli.py" activate CLAWCHAT_CODE_GOES_HERE`.
-Run it with the **Hermes venv's** Python (e.g. `/opt/hermes/.venv/bin/python`;
-on Windows the venv's `Scripts\python.exe`), not the shell's own `python`:
+Run it with the **Hermes venv's** Python - the one next to the `hermes` that
+step 1 found (e.g. `~/.hermes/hermes-agent/venv/bin/python`, or
+`/opt/hermes/.venv/bin/python` in the Docker image; on Windows the venv's
+`Scripts\python.exe`), not the shell's own `python`:
 activation needs `hermes_cli` and PyYAML, which only the Hermes venv has.
 
 *(Windows)* same 0.12 fallback:
@@ -481,10 +495,11 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   and re-run step 0. `paired` -> already used; ask whether to re-pair with a fresh
   code or repair the existing agent (handle as the activation/auth case below).
 
-- **Target command missing (step 1).** Source the Hermes venv
-  (`source /opt/hermes/.venv/bin/activate`; on Windows use the step 1 *(Windows)*
-  block, which puts `.venv\Scripts` on `PATH`) or call the absolute binary, then
-  retry. If the runtime genuinely isn't installed, stop and report it - don't
+- **Target command missing (step 1).** Source the Hermes venv (re-run the
+  step 1 block, which tries `/opt/hermes/.venv`, then
+  `~/.hermes/hermes-agent/venv` and `.venv`; on Windows the step 1 *(Windows)*
+  block, which puts the venv's `Scripts` folder on `PATH`) or call the absolute
+  binary, then retry. If the runtime genuinely isn't installed, stop and report it - don't
   install the other target instead.
 
 - **Install fails (step 2).** Re-read stderr. OpenClaw is slow - wait, don't
