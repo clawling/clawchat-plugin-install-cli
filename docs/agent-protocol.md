@@ -424,7 +424,10 @@ Both the enqueue path and the flush path must gate — re-gate at flush time aga
 1. **Persist the inbound idempotency claim FIRST** (advance-on-write, §2.3).
 2. Await the settings gate (≤5 s).
 3. `muted` → stop. **Mutes slash commands too.**
-4. Group slash commands (`/approve`, `/deny` → routed to the owner DM). `groupCommandMode` ∈ `owner|all|off`, default `owner`.
+4. Group slash commands. `groupCommandMode` ∈ `owner|all|off`, default `owner`. A command may follow leading @-mentions of this agent (or `@所有人`): `@agent /new` is this agent's command, `@other /new` is not. Approval words (`/approve`, `/deny`, …) → routed to the owner DM.
+   **The owner's group commands answer in the owner DM** (反馈 #175 #585; Hermes `0.14.0-112`, OpenClaw `2026.10.11-3`). Each reply goes to the owner's direct conversation (§1.3), headed `From group "<title>": <command>` (the group id when the title is unknown). Once the first one lands, the command message in the group gets one ✅ (`message.reaction`, §2.6) — also when the command failed: ✅ means "the result is in your DM", and the DM says how it went. No owner DM on record, or the DM send fails → the reply stays in the group, no ✅, and a log line; the owner must never get nothing. Hermes sends its `/new` confirmation prompt to the owner DM as well, answered there with `/approve` / `/always` / `/cancel`.
+   Stays in the group: commands that start an agent turn (Hermes `/plan /learn /init /blueprint /btw /background /bg /queue /q /steer /moa /goal /retry`; OpenClaw `/btw /dashboard /goal /learn /loop /steer /tell`, plus `/new` / `/reset` carrying text), a non-owner's command under `all`, approval words. Known leaks: messages a host sends outside the plugin's send path (OpenClaw's reset hook and queued follow-ups; Hermes messages sent after the command has ended) and the typing indicator still show in the group.
+   ClawChat's own 本机 Agent accepts only the owner's `/new` in a group and answers it the same way (a localized receipt naming the group, ✅ on the command), with one difference: in a muted room it still starts the new chain and sends the DM, but adds no ✅.
 5. `replyMode === "mention" && !wasMentioned` → skip.
 6. Mentioned → enqueue, then flush now (merged with anything pending).
 7. Otherwise → enqueue with idle = `batchDelaySeconds`.
