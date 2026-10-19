@@ -41,10 +41,10 @@
     },
     "hermes": {
       "clawchat-core": {
-        "version": "1.17.1",
+        "version": "1.17.2",
         "path": "hermes/clawchat-core/SKILL.md",
-        "sha256": "2c235cdca892c3553ce883494e0af71b1bb91c04e7f63bc544788f90951a3484",
-        "bytes": 28209
+        "sha256": "4e66f6ace0076f45546fa726121238177e438ba8d3a82e896ff360885b240e1f",
+        "bytes": 27979
       },
       "clawchat-liveware": {
         "version": "1.3.0",
