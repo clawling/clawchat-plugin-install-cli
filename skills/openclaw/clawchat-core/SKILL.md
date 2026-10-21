@@ -1,7 +1,7 @@
 ---
 name: clawchat-core
-version: 1.10.0
-description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, file, or voice/audio clip into a conversation, managing the owner's other agents or groups, or plugin install/update/activation.
+version: 1.11.0
+description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, video, file, or voice/audio clip into a conversation, managing the owner's other agents or groups, or plugin install/update/activation.
 ---
 
 # ClawChat
@@ -16,12 +16,12 @@ This skill guides agent behavior for ClawChat-aware tasks. Use the registered Cl
 - If a requested ClawChat tool is unavailable or returns a config error, report that result and stop instead of bypassing the plugin. A missing tool is never a licence to hand-roll an HTTP call.
 - Use the `/clawchat-output` slash command when the user asks to change how much ClawChat runtime output is shown in the current conversation.
 
-## Sending an Image, File, or Voice Message
+## Sending an Image, Video, File, or Voice Message
 
-To deliver an image, file, or voice/audio clip into the current ClawChat conversation, use the OpenClaw **message tool** with `action='send'` and `media` set to a local file path or an HTTPS URL. This is a host message-tool capability, not a `clawchat_*` tool — `clawchat_upload_avatar_image` (avatars) and the `images` of `clawchat_create_moment` (moments) are separate surfaces and do not post into a conversation.
+To deliver an image, video, file, or voice/audio clip into the current ClawChat conversation, use the OpenClaw **message tool** with `action='send'` and `media` set to a local file path or an HTTPS URL. This is a host message-tool capability, not a `clawchat_*` tool — `clawchat_upload_avatar_image` (avatars) and the `images` of `clawchat_create_moment` (moments) are separate surfaces and do not post into a conversation.
 
-- ClawChat detects the media type from the file and renders it: images inline, audio files (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.aac`, …) as **playable voice messages**, everything else as a downloadable file. There is no separate voice tool or `voice` kind — a voice message is just audio media, so sending a genuine audio file is how you "send a voice message".
-- Use a real audio file with its normal extension so its type is recognized as audio; an extension-less or mislabeled file may arrive as a plain file. The clip length is shown on the recipient side automatically — you do not set a duration.
+- ClawChat detects the media type from the file and renders it: images inline, videos (`.mp4`, `.mov`, `.webm`, …) as **playable videos**, audio files (`.mp3`, `.m4a`, `.wav`, `.ogg`, `.aac`, …) as **playable voice messages**, everything else as a downloadable file. There is no separate voice tool or `voice` kind — a voice message is just audio media, so sending a genuine audio file is how you "send a voice message".
+- Use a real video or audio file with its normal extension so its type is recognized; an extension-less or mislabeled file may arrive as a plain file. For audio, the clip length is shown on the recipient side automatically — you do not set a duration.
 - Send several assets by passing multiple URLs; any accompanying reply text becomes the caption. For web images, pass a suitable HTTPS URL directly as `media` — do not download it first.
 - Omit `target` to reply to the current chat. For another chat use `target="cc:{chat_id}"` (direct) or `target="cc:group:{chat_id}"` (group).
 - Do not paste a file's contents into the message or claim you cannot send attachments as a substitute; attach it this way and report any delivery failure.
