@@ -158,10 +158,10 @@ describe("per-host greeting and liveware skills", () => {
 
   it("make every Hermes liveware command name the agent's own account", () => {
     const hermes = readSkill("hermes", "clawchat-liveware");
-    const commands = [...hermes.matchAll(/`(liveware (?:app|tunnel|status)\b[^`]*)`/g)].map((m) => m[1]!);
+    const commands = [...hermes.matchAll(/`((?:liveware|"\$LIVEWARE_BIN") (?:app|tunnel|status)\b[^`]*)`/g)].map((m) => m[1]!);
     expect(commands.length).toBeGreaterThan(10);
     // Bare subcommand names in prose (e.g. "if `liveware app inspect` is rejected") are not commands.
-    const runnable = commands.filter((c) => /\s(<|"|http|--)/.test(c) || /^liveware (app list|status)$/.test(c));
+    const runnable = commands.filter((c) => /\s(<|"|http|--)/.test(c) || /^(?:liveware|"\$LIVEWARE_BIN") (app list|status)$/.test(c));
     for (const command of runnable) {
       expect(command, command).toMatch(/--account <account>$/);
     }
