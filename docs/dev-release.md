@@ -127,15 +127,17 @@ either tell them to run the `npx … @dev` command above directly, or refresh a
 
 ## (Optional) Dev copy of the R2 install assets
 
-The production `install.md`, `install-clawchat.sh`, and `install-clawchat.ps1`
-live at the R2 prefix `clawchat/` (see [`release.md`](release.md)). To stage a dev
-copy without overwriting the production objects, override `R2_PREFIX`:
+The production `install.md`, `install-clawchat.sh`, `install-clawchat.ps1`, and
+`agent-protocol.md` live at the R2 prefix `clawchat/` (see
+[`release.md`](release.md)). To stage a dev copy without overwriting the
+production objects, override `R2_PREFIX`:
 
 ```bash
 cp scripts/.env.r2.example scripts/.env.r2     # fill in the AWS_* keys
 R2_PREFIX=clawchat-dev scripts/upload-install-md-to-r2.sh
 # → uploads clawchat-dev/install.md, clawchat-dev/install-clawchat.sh
-#   and clawchat-dev/install-clawchat.ps1 (all three, always)
+#   clawchat-dev/install-clawchat.ps1, and clawchat-dev/agent-protocol.md
+#   (all four, always)
 ```
 
 If your dev `install.md` should drive a dev CLI build, edit the `npx` spec in

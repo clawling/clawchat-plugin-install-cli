@@ -4,8 +4,8 @@ This project ships three artifacts that are released independently:
 
 1. The npm package `@clawling/clawchat-plugin-install-cli`, published from
    `packages/cli`.
-2. The runtime install assets — `install.md` plus both one-shot installer
-   scripts — uploaded to a public R2 prefix by
+2. The runtime install assets — `install.md`, both one-shot installer
+   scripts, and `docs/agent-protocol.md` — uploaded to a public R2 prefix by
    `scripts/upload-install-md-to-r2.sh`. Agents and end-users fetch these at
    install time.
 3. The `skills/` and `livewares/` trees, released together under a
@@ -34,20 +34,29 @@ Tag namespaces in this repo:
 
 | Tag | Marks | Published from it |
 | --- | --- | --- |
-| `cli-vX.Y.Z` | a CLI release; equals `packages/cli/package.json` `version` | npm `latest`, plus the R2 upload when `install.md` / the installer scripts changed in the same round |
+| `cli-vX.Y.Z` | a CLI release; equals `packages/cli/package.json` `version` | npm `latest`, plus the R2 upload when `install.md`, either installer script, or `docs/agent-protocol.md` changed in the same round |
 | `skills-vX.Y.Z` | a skills / livewares release | nothing is uploaded; the adapters fetch the tree from GitHub at this tag |
-| `install-YYYY.M.D-N` | an `install.md` / installer-script change shipped without a CLI release | the R2 upload |
+| `install-YYYY.M.D-N` | a change to `install.md`, either installer script, or `docs/agent-protocol.md` shipped without a CLI release | the R2 upload |
 
 Use annotated tags (`git tag -a`); the tag message is public, like every
-commit message.
+commit message. Never move or delete a pushed release tag; use a new tag for
+corrections.
+
+From the original repo root, replace the quoted placeholders below. Copy the
+**full squash commit SHA from the merged release PR's page**, even if other PRs
+have since merged. Do not substitute the current `origin/main` tip. The ancestry
+check must pass before tagging; any command failure stops this sequence.
 
 ```bash
-git fetch origin --tags
-SHA=$(git rev-parse origin/main)                # the squash commit of the release PR
-git log -1 --format='%h %s' "$SHA"              # confirm it is the release commit
-git tag -a <tag> "$SHA" -m "<tag>: <one-line summary>"
-git push origin <tag>
-git worktree add --detach .worktrees/release-<tag> <tag>   # clean checkout to publish from
+RELEASE_PR_SHA='paste-full-squash-commit-SHA-from-merged-PR'
+TAG='replace-with-release-tag'
+git fetch origin --tags || exit 1
+SHA=$(git rev-parse --verify "${RELEASE_PR_SHA}^{commit}") || exit 1
+git merge-base --is-ancestor "$SHA" origin/main || exit 1
+git log -1 --format='%H %s' "$SHA" || exit 1
+git tag -a "$TAG" "$SHA" -m "$TAG: release" || exit 1
+git push origin "refs/tags/$TAG" || exit 1
+git worktree add --detach ".worktrees/release-$TAG" "$TAG" || exit 1
 ```
 
 ## Publish the CLI to npm
@@ -78,12 +87,16 @@ git worktree add --detach .worktrees/release-<tag> <tag>   # clean checkout to p
 5. Publish from the clean tag checkout:
 
    ```bash
-   cd .worktrees/release-cli-vX.Y.Z           # detached at the tag; git status must be clean
-   pnpm install --frozen-lockfile
-   pnpm release:dry                            # re-validate exactly what will ship
-   pnpm --filter @clawling/clawchat-plugin-install-cli build
-   cd packages/cli
-   npm publish
+   # From the original repo root; use the TAG set above (cli-vX.Y.Z).
+   : "${TAG:?set TAG to the release tag selected above}"
+   cd ".worktrees/release-$TAG" || exit 1
+   test "$(git rev-parse HEAD)" = "$(git rev-parse --verify "${TAG}^{commit}")" || exit 1
+   test -z "$(git status --porcelain)" || exit 1
+   pnpm install --frozen-lockfile &&
+     pnpm release:dry &&                       # re-validate exactly what will ship
+     pnpm --filter @clawling/clawchat-plugin-install-cli build &&
+     cd packages/cli &&
+     npm publish
    ```
 
    `packages/cli/package.json` declares `publishConfig.access: "public"`, so
@@ -111,7 +124,9 @@ The script aborts if any of them is missing, so a step added to the guide
 that a script also performs means updating the guide **and** both scripts before
 uploading.
 
-Merging into `main` does not update R2, and R2 must never get ahead of `main`:
+Any change to these four source files, including a protocol-only change,
+requires an R2 upload to reach readers. Merging into `main` does not update R2,
+and R2 must never get ahead of `main`:
 merge the change via PR, tag the `main` commit (`cli-vX.Y.Z` if it ships with a
 CLI release, otherwise `install-YYYY.M.D-N`), then upload from a clean checkout
 of that tag. They are hosted at the public R2 prefix configured in
@@ -122,10 +137,13 @@ of that tag. They are hosted at the public R2 prefix configured in
 - endpoint: set `R2_ENDPOINT`
 - public base URL: set `R2_PUBLIC_BASE_URL` if public URLs should be printed
 
-To upload, from the tag checkout:
+To upload, start from the original repo root and use the `TAG` selected above:
 
 ```bash
-cd .worktrees/release-<tag>                    # detached at the tag; git status must be clean
+: "${TAG:?set TAG to the release tag selected above}"
+cd ".worktrees/release-$TAG" || exit 1
+test "$(git rev-parse HEAD)" = "$(git rev-parse --verify "${TAG}^{commit}")" || exit 1
+test -z "$(git status --porcelain)" || exit 1
 # credentials: a fresh checkout has no scripts/.env.r2 (gitignored) — point at an existing one
 export R2_ENV_FILE=/path/to/your/.env.r2       # template: scripts/.env.r2.example
 scripts/upload-install-md-to-r2.sh
@@ -137,8 +155,11 @@ To validate without uploading:
 scripts/upload-install-md-to-r2.sh --no-upload
 ```
 
-The script reads `$REPO_ROOT/install.md` and `$REPO_ROOT/scripts/install-clawchat.{sh,ps1}`
-directly — do not move those files without also updating the script.
+The script reads `$REPO_ROOT/install.md`,
+`$REPO_ROOT/scripts/install-clawchat.{sh,ps1}`, and
+`$REPO_ROOT/docs/agent-protocol.md` directly — do not move those files without
+also updating the script. The protocol file is an exported copy; update its
+source and re-export it rather than editing it here.
 
 ## Release a skills / livewares change
 
