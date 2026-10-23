@@ -31,7 +31,7 @@ once under `shared/`.
 > fallback. That snapshot must be kept in sync with this directory — this tree
 > wins on any divergence. Bundled snapshots now include **every** skill for that
 > target plus `manifest.json`; each plugin repo has a consistency test that fails
-> CI on drift.
+> on drift (run by that repo's test suite; there is no CI).
 
 ## `manifest.json` (generated — do not hand-edit)
 
@@ -44,7 +44,7 @@ Regenerate / verify:
 
 ```bash
 pnpm skills:manifest    # rewrite skills/manifest.json from the SKILL.md tree
-pnpm skills:check       # CI: fail if the manifest is stale
+pnpm skills:check       # fail if the manifest is stale (run manually; not part of pnpm test)
 ```
 
 ## Releasing a skill change

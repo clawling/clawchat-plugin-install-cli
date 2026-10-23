@@ -1,8 +1,8 @@
 # cloud-agent —— agent 侧协议的第二实现（容器里的云端 agent）
 
 **它是什么**：一个跑在 Docker 容器里的、最小但完整的 ClawChat **agent 半边**实现，照
-[`docs/external-interfaces/agent-protocol.md`](../../docs/agent-protocol.md)
-从零写出来。约 300 行，零依赖（node 22 自带 `fetch` / `WebSocket` / `crypto`）。
+[`docs/agent-protocol.md`](../../docs/agent-protocol.md)
+从零写出来。约 650 行，零依赖（node 22 自带 `fetch` / `WebSocket` / `crypto`）。
 
 **它为什么存在** —— 三件事，按重要性：
 
@@ -10,10 +10,10 @@
    重实现者去撞。`agent-protocol.md` 末尾那条「Refresh procedure」说的「a measured claim
    contradicted by a live probe」，这就是那个 probe。
 2. **它是「云端 agent」的替身。** 容器没有 ClawChat、没有发现文件、只有出站网络 ——
-   与一台云主机上的 agent 处境逐字相同。设备通道那条路（`machine-channel-contract.md`
-   §0-bis 挂载面）在这里**结构性不可用**，只能走线上协议，这正是要验的。
+   与一台云主机上的 agent 处境逐字相同。依赖本机挂载面的设备通道在这里
+   **结构性不可用**，只能走线上协议，这正是要验的。
 3. **它回答了一个产品问题**：「一个 agent 能不能只凭一份标准文档写出接入程序？」
-   —— 这 300 行全程没有一处需要猜，每个非显然的决定都在文档 §6 那张按踩坑代价排序的
+   —— 这个实现全程没有一处需要猜，每个非显然的决定都在文档 §6 那张按踩坑代价排序的
    清单里等着。**文档够，缺的一直只是身份（一枚连接码）。**
 
 ---
@@ -67,7 +67,7 @@ docker run --rm -it \
 
 | 条 | 做法 |
 |---|---|
-| **两个 device id** | REST 侧永远是字面常量 `clawchat-cloud-agent-probe`；WS 侧是 `sha256(channel\0owner\0user\0hostname)[0:24]` 派生。混淆它们 → refresh 收 400 → 自动登出 |
+| **两个 device id** | REST 侧永远是字面常量 `clawchat-cloud-agent-probe`；WS 侧是 `sha256(channel\0owner\0user\0hostname)[0:24]` 派生。混淆它们 → refresh 收 `code:10003` → 自动登出 |
 | **`message_id`** | `msg-` + 26 字符 Crockford base32 ULID。不是 UUID，不是 nanoid |
 | **自回声守卫 fail closed** | 自己的 userId 取 JWT 的 `sub`；取不到 → 整条入站链不处理。失败开放 = 对生产账号打无限自回复 |
 | **`message_mode: ""` 读作 `normal`** | 服务器下行不给默认值；照字面比对 `"normal"` 会丢掉每一条消息 |
@@ -79,12 +79,11 @@ docker run --rm -it \
 
 ## 它**没有**实现的（如实记账）
 
-- **上行流式**（协议本来就没有）、**媒体上传**、**群合并与门控**（§3）、**权限门**（§2.8）、
-  **`notify.signal` 的各 type 动作**（§2.7）—— 收到即忽略，不假装懂。
+- **上行流式**（协议本来就没有）、**`notify.signal` 的各 type 动作**（§2.7）
+  仍未实现。
 - **refresh 的定时排程**只有反应式那一半（`hello-fail` / 401 触发），没有 §1.5 那个
   `exp − max(30min, …)` 的提前量。长跑要补。
-- **群语义（§3）与媒体（§4）**仍不实现 —— 收到即忽略，不假装懂。媒体这一条对容器
-  尤其诚实：它盘上没有文件可发。
+- **群合并与门控（§3）、媒体上传（§4）**仍未实现；入站媒体仅渲染为文本链接。
 - **权限门（§2.8）实现了，但只走通了一半**：21001 翻成 pending 交给模型、
   `permission_result` 在链外分流并回话 —— 但**没有真跑过一次审批**（要一件门后操作，
   目前只有 `delete_moment`，而它得先有一条自己的动态）。
@@ -103,9 +102,9 @@ docker run --rm -it \
 | **入站过滤链** | ✅ 主人的消息穿过九步链正确落地（sender 认出、自回声未误杀） |
 | **一次真往返** | ✅ **68 ms** |
 | refresh 轮换 | ⬜ 未验 —— 要等 token 临近 `exp`，或人为造一次 401 |
-| 媒体 / 群语义 / 权限门 | ⬜ 未验（本版根本没实现，见上一节） |
+| 媒体上传 / 群合并与门控 / 完整权限门 | ⬜ 未验（实现范围见上一节） |
 
-> **首跑一次成功，零改动**（2026-08-30 07:12 UTC）。这条最值得记：那 300 行是照
+> **首跑一次成功，零改动**（2026-08-30 07:12 UTC）。这条最值得记：那份实现是照
 > `agent-protocol.md` 写的，中间**没有一次「跑起来才发现文档没说」**。
 
 ### 工具面（同日补，8 件）
@@ -114,7 +113,7 @@ docker run --rm -it \
 `comment_on_moment` · `delete_moment` · `send_to`
 
 **没有一件是我们包装出来的能力** —— 每件只是这个 agent 拿**自己的** token 打一次
-平台 REST（machine-channel-contract §1-bis：「会写代码的宿主不需要包装」）。上限就是
+平台 REST。上限就是
 这个账号本身的权限。
 
 | | |
@@ -124,7 +123,7 @@ docker run --rm -it \
 
 ⚠️ **删掉过一件：`rename_self`。** 上线前拿自己的昵称空写一次探边界 →
 `16005 not the owner`。**`GET /v1/agents/:id` 是 owner-or-self，`PATCH` 是
-owner-only**，这个不对称文档里原本没有（已补进 `api.md`）。一个永远失败的工具比没有
+owner-only**，这是服务端契约中两种操作的权限差异。一个永远失败的工具比没有
 更糟：它让 agent 当着主人的面承诺一件做不到的事。
 
 ### 首跑之后补的三件（同日）
