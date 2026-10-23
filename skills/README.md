@@ -61,9 +61,12 @@ pnpm skills:check       # fail if the manifest is stale (run manually; not part 
    the same tag).
 3. `pnpm skills:sync` to copy the tree + manifest into the sibling plugin
    repos (flags `--hermes/--openclaw` override the default sibling paths),
-   then commit the synced files in each plugin repo.
-4. Tag the repo `skills-vX.Y.Z` (decoupled from the CLI's npm release). **Both
-   adapters read a pinned tag, not `main`**, so the tag is what agents fetch.
+   then commit the synced files in each plugin repo (through that repo's PR
+   flow).
+4. Merge the change into `main` via PR, then tag the resulting `main` commit
+   `skills-vX.Y.Z` (decoupled from the CLI's npm release) and push the tag.
+   **Both adapters read a pinned tag, not `main`**, so the tag is what agents
+   fetch — never tag a commit that is not on `main`.
 5. Move the pin in each consumer and release it — a new tag reaches nobody
    until this happens:
    - `clawchat-plugin-hermes-agent`: `clawchat_gateway/skill_update.py`
