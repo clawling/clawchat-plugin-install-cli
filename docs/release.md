@@ -4,8 +4,8 @@ This project ships three artifacts that are released independently:
 
 1. The npm package `@clawling/clawchat-plugin-install-cli`, published from
    `packages/cli`.
-2. The runtime install assets — `install.md` plus both one-shot installer
-   scripts — uploaded to a public R2 prefix by
+2. The runtime install assets — `install.md`, both one-shot installer
+   scripts, and `docs/agent-protocol.md` — uploaded to a public R2 prefix by
    `scripts/upload-install-md-to-r2.sh`. Agents and end-users fetch these at
    install time.
 3. The `skills/` and `livewares/` trees, released together under a
@@ -19,7 +19,7 @@ This project ships three artifacts that are released independently:
 
 1. Make sure the working tree is clean and you are on the release branch.
 2. Bump `packages/cli/package.json` `version` to the new value (Conventional
-   Commits would call this `chore(cli): release X.Y.Z`).
+   Commits follow `chore(release): install-cli A -> B`).
 3. Run a dry release from the repo root:
 
    ```bash
@@ -48,8 +48,8 @@ This project ships three artifacts that are released independently:
    `packages/cli/package.json` declares `publishConfig.access: "public"`, so
    no extra flag is needed for the scoped package.
 
-5. Tag the commit and push (release tagging convention follows the existing
-   `chore(cli): release X.Y.Z` commits in `git log`).
+5. Tag the release commit `cli-vX.Y.Z` and push the tag (for example,
+   `cli-v0.4.7`).
 
 There is no GitHub Actions release workflow today; publishing is manual.
 
@@ -57,16 +57,20 @@ There is no GitHub Actions release workflow today; publishing is manual.
 
 `install.md` at the repo root is the file end-users (or AI agents on their
 behalf) read after running `npx -y @clawling/clawchat-plugin-install-cli`. The
-upload script publishes **three** objects under the configured prefix, and always
-all three together:
+upload script publishes **four** objects under the configured prefix, and always
+all four together:
 
 | Local file | R2 object (default prefix) | Content-Type |
 |------------|----------------------------|--------------|
 | `install.md` | `clawchat/install.md` | `text/markdown` |
 | `scripts/install-clawchat.sh` | `clawchat/install-clawchat.sh` | `text/x-shellscript` |
 | `scripts/install-clawchat.ps1` | `clawchat/install-clawchat.ps1` | `text/plain` |
+| `docs/agent-protocol.md` | `clawchat/agent-protocol.md` | `text/markdown` |
 
-The script aborts if any of the three is missing, so a step added to the guide
+`docs/agent-protocol.md` is an exported copy of the protocol source; fix it at
+the source and re-export. Every upload also publishes this copy publicly.
+
+The script aborts if any of the four is missing, so a step added to the guide
 that a script also performs means updating the guide **and** both scripts before
 uploading. They are hosted at the public R2 prefix configured in
 `scripts/.env.r2.example`:
@@ -90,8 +94,9 @@ To validate without uploading:
 scripts/upload-install-md-to-r2.sh --no-upload
 ```
 
-The script reads `$REPO_ROOT/install.md` and `$REPO_ROOT/scripts/install-clawchat.{sh,ps1}`
-directly — do not move those files without also updating the script.
+The script reads `$REPO_ROOT/install.md`, `$REPO_ROOT/scripts/install-clawchat.{sh,ps1}`,
+and `$REPO_ROOT/docs/agent-protocol.md` directly — do not move those files without
+also updating the script.
 
 ## Release a skills / livewares change
 
@@ -102,7 +107,7 @@ tag reaches nobody until every consumer's pin is moved.
 
 1. Edit the files and bump their versions — a `SKILL.md` frontmatter `version:`,
    and/or the Liveware Sample's `liveware.json` `version`.
-2. Regenerate the manifests and let CI verify them:
+2. Regenerate the manifests and run the checks manually before release:
 
    ```bash
    pnpm skills:manifest && pnpm skills:check
@@ -112,9 +117,11 @@ tag reaches nobody until every consumer's pin is moved.
 3. `pnpm skills:sync` to refresh the bundled snapshots in the sibling plugin
    repos, and commit those.
 4. Tag this repo `skills-vX.Y.Z` and push the tag.
-5. **Move the pin in all three consumers**, then release each:
+5. **Move the pin in all three consumers**, then release both agent plugins:
    `DEFAULT_SKILLS_REF` in `packages/core/src/config.ts` here, plus the matching
    constant in each agent plugin repo. They must all name the same tag.
+   This repo's constant is a library default; the published CLI bundle excludes
+   the skills subsystem, so moving this pin alone needs no CLI npm release.
 
 [`../skills/README.md`](../skills/README.md) has the full per-consumer checklist
 and the tombstone rules for retired skill ids.

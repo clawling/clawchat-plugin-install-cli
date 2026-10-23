@@ -1,8 +1,8 @@
 # Install ClawChat Plugin
 
 > Runtime guide for end-users and AI agents at install time. This file is the
-> source of truth; the connection wiki (https://agent-connection.clawling.com/start.md)
-> serves a versioned mirror of it, and a copy is published to R2 by
+> source of truth; the connection wiki (entry: https://agent-connection.clawling.com/start.md)
+> inlines a versioned mirror into its official install pages, and a copy is published to R2 by
 > `scripts/upload-install-md-to-r2.sh` (see `docs/runtime-install-guide.md`).
 >
 > **Something here was wrong, missing, or cost you time?** File a field report the

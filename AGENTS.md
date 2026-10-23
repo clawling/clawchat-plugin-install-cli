@@ -11,6 +11,12 @@ anything not covered here, follow the documentation map below.
   [`docs/development.md`](docs/development.md).
 - How to publish the CLI and refresh the R2-hosted install guide —
   [`docs/release.md`](docs/release.md).
+- Pre-release builds on the `dev` channel —
+  [`docs/dev-release.md`](docs/dev-release.md).
+- Skill authoring, frontmatter rules, and release steps —
+  [`skills/README.md`](skills/README.md).
+- Agent wire protocol — [`docs/agent-protocol.md`](docs/agent-protocol.md).
+  This is an exported copy: fix its source and re-export; do not edit it here.
 - The runtime install guide consumed by end-users / AI agents —
   [`install.md`](install.md) and the context page
   [`docs/runtime-install-guide.md`](docs/runtime-install-guide.md).
@@ -34,6 +40,21 @@ behavior, update the matching `docs/` page in the same change set.
 - There is no dedicated linter; consistency with neighbouring files is the
   bar.
 
+## Changing a skill
+
+Follow the release checklist in [`skills/README.md`](skills/README.md):
+
+1. Edit `skills/{shared,openclaw,hermes}/<id>/SKILL.md` and bump its frontmatter
+   `version`. Plain frontmatter values must not contain `: ` or ` #`; use a
+   folded YAML value (`description: >-`) for prose containing either sequence.
+2. Run `pnpm skills:manifest` to regenerate `skills/manifest.json`.
+3. Run `pnpm skills:sync` to refresh the bundled snapshots in both plugin repos.
+4. Release under a `skills-vX.Y.Z` tag, independently of the CLI npm package.
+5. Move `DEFAULT_SKILLS_REF` in all three consumers: this repo's
+   `packages/core/src/config.ts`, the Hermes plugin's
+   `clawchat_gateway/skill_update.py`, and the OpenClaw plugin's
+   `src/skill-update.ts`. Release both plugins; this alone needs no CLI npm release.
+
 ## Testing
 
 - Vitest is configured per package. Add or update tests in the affected
@@ -43,6 +64,8 @@ behavior, update the matching `docs/` page in the same change set.
 - Run `pnpm test` and `pnpm typecheck` before submitting changes. The
   bootstrap-script integration tests in
   `packages/cli/tests/install-script.test.ts` run as part of `pnpm test`.
+- When changing `skills/` or `livewares/`, also run `pnpm skills:check` and
+  `pnpm livewares:check` manually before release; `pnpm test` does not run them.
 
 ## Commits and pull requests
 
