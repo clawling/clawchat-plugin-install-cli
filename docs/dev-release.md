@@ -151,9 +151,11 @@ When the dev build is validated, you do **not** re-tag the `…-dev.N` version �
 cut a clean final version:
 
 1. Bump `packages/cli/package.json` to the final version (drop the `-dev.N`
-   suffix), e.g. `0.2.0-dev.3` → `0.2.0`.
-2. Follow [`release.md`](release.md) (publish to `latest`, then refresh the
-   production R2 `install.md`).
+   suffix), e.g. `0.2.0-dev.3` → `0.2.0`, on a branch.
+2. Follow [`release.md`](release.md): merge the PR into `main`, tag that `main`
+   commit `cli-v0.2.0`, then publish to `latest` (and refresh the production R2
+   `install.md`) from a clean checkout of the tag. A dev build may come from any
+   branch; a `latest` build only ever comes from a tag on `main`.
 
 (You *can* alternatively move the tag with
 `npm dist-tag add @clawling/clawchat-plugin-install-cli@0.2.0 latest`, but
@@ -177,4 +179,6 @@ npx -y @clawling/clawchat-plugin-install-cli@dev install --target openclaw
 ```
 
 There is no GitHub Actions release workflow today; dev publishing is manual,
-just like production.
+just like production. Dev builds are not releases: they need no PR, no tag, and
+may be published from an unmerged branch — which is exactly why they must never
+go to `latest`.

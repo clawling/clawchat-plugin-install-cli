@@ -15,12 +15,47 @@ This project ships three artifacts that are released independently:
 > dist-tag flow in [`dev-release.md`](dev-release.md) so you don't push
 > unfinished work to `latest`.
 
+## Release order (applies to all three artifacts)
+
+Since 2026-10-23 every release follows the same order:
+
+1. **Merge first.** The release commit — version bump included — reaches `main`
+   through a GitHub PR (squash-merged). Nothing is pushed to `main` directly.
+2. **Tag the `main` commit that PR produced** and push the tag. Never tag a
+   branch head, a local commit, or anything that is not on `origin/main`.
+3. **Publish from a clean checkout of that tag** — `npm publish`, the R2
+   upload. Never from a dirty tree, an unmerged branch, or `main` plus local
+   edits.
+
+Publishing first and merging later is not allowed. Dev-channel builds
+([`dev-release.md`](dev-release.md)) are test artifacts and are exempt.
+
+Tag namespaces in this repo:
+
+| Tag | Marks | Published from it |
+| --- | --- | --- |
+| `cli-vX.Y.Z` | a CLI release; equals `packages/cli/package.json` `version` | npm `latest`, plus the R2 upload when `install.md` / the installer scripts changed in the same round |
+| `skills-vX.Y.Z` | a skills / livewares release | nothing is uploaded; the adapters fetch the tree from GitHub at this tag |
+| `install-YYYY.M.D-N` | an `install.md` / installer-script change shipped without a CLI release | the R2 upload |
+
+Use annotated tags (`git tag -a`); the tag message is public, like every
+commit message.
+
+```bash
+git fetch origin --tags
+SHA=$(git rev-parse origin/main)                # the squash commit of the release PR
+git log -1 --format='%h %s' "$SHA"              # confirm it is the release commit
+git tag -a <tag> "$SHA" -m "<tag>: <one-line summary>"
+git push origin <tag>
+git worktree add --detach .worktrees/release-<tag> <tag>   # clean checkout to publish from
+```
+
 ## Publish the CLI to npm
 
-1. Make sure the working tree is clean and you are on the release branch.
-2. Bump `packages/cli/package.json` `version` to the new value (Conventional
-   Commits would call this `chore(cli): release X.Y.Z`).
-3. Run a dry release from the repo root:
+1. On a branch off `main`, bump `packages/cli/package.json` `version` to the
+   new value (recent release commits are titled
+   `chore(release): install-cli X.Y.Z -> X.Y.Z+1`).
+2. Run a dry release from the repo root before opening the PR:
 
    ```bash
    pnpm release:dry
@@ -37,9 +72,15 @@ This project ships three artifacts that are released independently:
    - the tarball contents match `packages/cli/package.json:files`
      (currently `["dist", "README.md"]`).
 
-4. Publish:
+3. Open the PR against `main` and squash-merge it once reviewed.
+4. Tag the resulting `main` commit `cli-vX.Y.Z` and push the tag (see
+   [Release order](#release-order-applies-to-all-three-artifacts)).
+5. Publish from the clean tag checkout:
 
    ```bash
+   cd .worktrees/release-cli-vX.Y.Z           # detached at the tag; git status must be clean
+   pnpm install --frozen-lockfile
+   pnpm release:dry                            # re-validate exactly what will ship
    pnpm --filter @clawling/clawchat-plugin-install-cli build
    cd packages/cli
    npm publish
@@ -48,27 +89,32 @@ This project ships three artifacts that are released independently:
    `packages/cli/package.json` declares `publishConfig.access: "public"`, so
    no extra flag is needed for the scoped package.
 
-5. Tag the commit and push (release tagging convention follows the existing
-   `chore(cli): release X.Y.Z` commits in `git log`).
-
-There is no GitHub Actions release workflow today; publishing is manual.
+There is no GitHub Actions release workflow today; publishing is manual, and
+nothing in the scripts checks that you are on a tag — the order above is on
+you.
 
 ## Refresh the runtime install assets on R2
 
 `install.md` at the repo root is the file end-users (or AI agents on their
 behalf) read after running `npx -y @clawling/clawchat-plugin-install-cli`. The
-upload script publishes **three** objects under the configured prefix, and always
-all three together:
+upload script publishes **four** objects under the configured prefix, and always
+all four together:
 
 | Local file | R2 object (default prefix) | Content-Type |
 |------------|----------------------------|--------------|
 | `install.md` | `clawchat/install.md` | `text/markdown` |
 | `scripts/install-clawchat.sh` | `clawchat/install-clawchat.sh` | `text/x-shellscript` |
 | `scripts/install-clawchat.ps1` | `clawchat/install-clawchat.ps1` | `text/plain` |
+| `docs/agent-protocol.md` | `clawchat/agent-protocol.md` | `text/markdown` |
 
-The script aborts if any of the three is missing, so a step added to the guide
+The script aborts if any of them is missing, so a step added to the guide
 that a script also performs means updating the guide **and** both scripts before
-uploading. They are hosted at the public R2 prefix configured in
+uploading.
+
+Merging into `main` does not update R2, and R2 must never get ahead of `main`:
+merge the change via PR, tag the `main` commit (`cli-vX.Y.Z` if it ships with a
+CLI release, otherwise `install-YYYY.M.D-N`), then upload from a clean checkout
+of that tag. They are hosted at the public R2 prefix configured in
 `scripts/.env.r2.example`:
 
 - bucket: set `R2_BUCKET`
@@ -76,11 +122,12 @@ uploading. They are hosted at the public R2 prefix configured in
 - endpoint: set `R2_ENDPOINT`
 - public base URL: set `R2_PUBLIC_BASE_URL` if public URLs should be printed
 
-To upload:
+To upload, from the tag checkout:
 
 ```bash
-cp scripts/.env.r2.example scripts/.env.r2     # if not already set
-# fill in AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, R2_ENDPOINT, and R2_BUCKET
+cd .worktrees/release-<tag>                    # detached at the tag; git status must be clean
+# credentials: a fresh checkout has no scripts/.env.r2 (gitignored) — point at an existing one
+export R2_ENV_FILE=/path/to/your/.env.r2       # template: scripts/.env.r2.example
 scripts/upload-install-md-to-r2.sh
 ```
 
@@ -110,8 +157,10 @@ tag reaches nobody until every consumer's pin is moved.
    ```
 
 3. `pnpm skills:sync` to refresh the bundled snapshots in the sibling plugin
-   repos, and commit those.
-4. Tag this repo `skills-vX.Y.Z` and push the tag.
+   repos, and commit those there (through each plugin repo's own PR flow).
+4. Merge the skills change into `main` via PR, then tag the resulting `main`
+   commit `skills-vX.Y.Z` and push the tag. The tag is what agents fetch, so it
+   must never point at a commit that is not on `main`.
 5. **Move the pin in all three consumers**, then release each:
    `DEFAULT_SKILLS_REF` in `packages/core/src/config.ts` here, plus the matching
    constant in each agent plugin repo. They must all name the same tag.
