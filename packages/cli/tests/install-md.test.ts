@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const INSTALL_MD = resolve(__dirname, "../../../install.md");
@@ -79,6 +81,29 @@ describe("published runtime guides", () => {
     expect(qclaw).toContain("plugins.load.paths");
     expect(qclaw).toContain("node_modules/@clawling/clawchat-plugin-openclaw");
     expect(qclaw).toContain("openclaw doctor --fix");
+  });
+
+  it("install.md reads active_profile from the Hermes root even when HERMES_HOME is a named profile", () => {
+    const section = install.split("**Hermes with more than one profile**")[1] ?? "";
+    const bash = section.match(/```bash\n([\s\S]*?)```/)?.[1] ?? "";
+    expect(bash).toContain("active_profile");
+    const root = mkdtempSync(join(tmpdir(), "hermes-root-"));
+    const profile = join(root, "profiles", "coder");
+    const bin = join(root, "bin");
+    mkdirSync(profile, { recursive: true });
+    mkdirSync(bin);
+    writeFileSync(join(root, "active_profile"), "coder\n");
+    writeFileSync(join(bin, "hermes"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const out = execFileSync("bash", ["-c", bash], {
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: root, HERMES_HOME: profile },
+      encoding: "utf8",
+    });
+    expect(out.split("\n")).toContain("coder");
+    expect(out).not.toContain("active_profile=default");
+
+    const powershell = section.match(/```powershell\n([\s\S]*?)```/)?.[1] ?? "";
+    expect(powershell).toContain("Join-Path $root 'active_profile'");
+    expect(powershell).toContain("$root -match '[\\\\/]profiles[\\\\/]");
   });
 
   it("install.md says where the wiki version actually is (response header / trailing comment)", () => {
