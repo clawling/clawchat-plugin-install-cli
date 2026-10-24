@@ -50,7 +50,7 @@ const HERMES_INSTALL_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cl
 // --- Timeout / retry budget -------------------------------------------------
 // Designed so a healthy install finishes in well under a minute, and a dead
 // network fails fast (bounded retries with short per-attempt caps) instead of
-// hanging on OS/git defaults. Worst-case total stays comfortably under 3 min.
+// hanging on OS/git defaults. The canonical remote install cap is configurable.
 
 /** Per-attempt cap on the plugin.yaml read (matches curl's `--max-time 15`). */
 const PLUGIN_YAML_TIMEOUT_MS = 15_000;
@@ -82,10 +82,41 @@ const HERMES_LOCAL_INSTALL_TIMEOUT_MS = 60_000;
 /**
  * Canonical remote install: `hermes plugins install <owner/repo>` makes the host
  * clone the repo itself over the network. The host caps its own clone at ~60s
- * (no retry); this backstop sits above that (clone + enable + config write) so we
- * never SIGKILL the host mid-clone.
+ * (no retry); the default backstop sits above that (clone + enable + config write).
  */
 const HERMES_REMOTE_INSTALL_TIMEOUT_MS = 120_000;
+const HERMES_MAX_INSTALL_TIMEOUT_SECONDS = 3600;
+
+/** Shared CLI/env validation for the canonical remote install budget. */
+export function parseHermesInstallTimeoutSeconds(value: unknown): number {
+  const seconds = typeof value === "number" || (typeof value === "string" && value.trim() !== "")
+    ? Number(value)
+    : NaN;
+  if (!Number.isInteger(seconds) || seconds <= 0 || seconds > HERMES_MAX_INSTALL_TIMEOUT_SECONDS) {
+    throw new ClawchatError(
+      "VALIDATION",
+      `Invalid Hermes install timeout ${typeof value === "string" ? JSON.stringify(value) : String(value)}: --install-timeout / CLAWCHAT_INSTALL_TIMEOUT_SECONDS must be an integer from 1 to ${HERMES_MAX_INSTALL_TIMEOUT_SECONDS} seconds.`,
+    );
+  }
+  return seconds;
+}
+
+/** Resolve an explicit millisecond budget before the environment and default. */
+export function resolveHermesInstallTimeoutMs(optionMs: number | undefined, env: NodeJS.ProcessEnv): number {
+  if (optionMs !== undefined) {
+    const maxMs = HERMES_MAX_INSTALL_TIMEOUT_SECONDS * 1000;
+    if (!Number.isInteger(optionMs) || optionMs <= 0 || optionMs > maxMs) {
+      throw new ClawchatError(
+        "VALIDATION",
+        `Invalid installTimeoutMs ${String(optionMs)}: expected an integer from 1 to ${maxMs} milliseconds.`,
+      );
+    }
+    return optionMs;
+  }
+  const seconds = env.CLAWCHAT_INSTALL_TIMEOUT_SECONDS;
+  return seconds === undefined ? HERMES_REMOTE_INSTALL_TIMEOUT_MS : parseHermesInstallTimeoutSeconds(seconds) * 1000;
+}
+
 // Per-attempt cap on the CLI-owned git clone. The plugin repo is tiny, so a
 // healthy shallow clone finishes in a few seconds; 15s comfortably covers a
 // slow-but-alive network while keeping the worst case (3 attempts + backoff
@@ -253,15 +284,16 @@ async function installViaHost(opts: {
   spec: string;
   replaceExisting: boolean;
   timeoutMs: number;
+  timeoutHint?: string;
   progress?: InstallProgressReporter;
 }): Promise<void> {
-  const { run, spec, replaceExisting, timeoutMs, progress } = opts;
+  const { run, spec, replaceExisting, timeoutMs, timeoutHint, progress } = opts;
   const attempt = async (force: boolean) => {
     try {
       await run(
         "hermes",
         ["plugins", "install", spec, ...(force ? ["--force"] : []), "--enable"],
-        { timeoutMs, collectStdout: true },
+        { timeoutMs, ...(timeoutHint ? { timeoutHint } : {}), collectStdout: true },
       );
     } catch (err) {
       const message = (err as Error).message ?? String(err);
@@ -448,13 +480,14 @@ async function installViaLocalClone(opts: {
  * path (installViaLocalClone) is reserved for the debug/ref flow, where a specific
  * branch/version must be pinned (see installHermesFromRef).
  */
-function installCanonical(run: CommandRunner, replaceExisting: boolean, progress?: InstallProgressReporter): Promise<void> {
-  progress?.(`installing plugin from remote ${HERMES_PLUGIN_SPEC}`);
+function installCanonical(run: CommandRunner, replaceExisting: boolean, timeoutMs: number, progress?: InstallProgressReporter): Promise<void> {
+  progress?.(`installing plugin from remote ${HERMES_PLUGIN_SPEC} (time limit ${timeoutMs / 1000}s)`);
   return installViaHost({
     run,
     spec: HERMES_PLUGIN_SPEC,
     replaceExisting,
-    timeoutMs: HERMES_REMOTE_INSTALL_TIMEOUT_MS,
+    timeoutMs,
+    timeoutHint: "If the network is slow, re-run with --install-timeout <larger seconds> or set CLAWCHAT_INSTALL_TIMEOUT_SECONDS.",
     progress,
   });
 }
@@ -585,6 +618,7 @@ export async function installHermesPlugin(options: InstallerOptions = {}): Promi
 }
 
 async function installHermesPluginCore(options: InstallerOptions = {}): Promise<InstallActionResult> {
+  const installTimeoutMs = resolveHermesInstallTimeoutMs(options.installTimeoutMs, process.env);
   applyBaseUrlOverrides(
     options,
     hermesBaseUrlWriter(resolveHermesProfileHome(options.profile, { homeDir: options.homeDir })),
@@ -596,7 +630,7 @@ async function installHermesPluginCore(options: InstallerOptions = {}): Promise<
 
   if (!installed) {
     progress?.(`plugin installing ${artifact.version}`);
-    await installCanonical(run, force, progress);
+    await installCanonical(run, force, installTimeoutMs, progress);
     return {
       kind: "plugin",
       target: "hermes",
@@ -608,7 +642,7 @@ async function installHermesPluginCore(options: InstallerOptions = {}): Promise<
 
   if (force) {
     progress?.(`plugin updating ${installed.version} -> ${artifact.version}`);
-    await installCanonical(run, true, progress);
+    await installCanonical(run, true, installTimeoutMs, progress);
     return {
       kind: "plugin",
       target: "hermes",
@@ -664,6 +698,7 @@ export async function updateHermesPlugin(options: InstallerOptions = {}): Promis
 }
 
 async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<InstallActionResult> {
+  const installTimeoutMs = resolveHermesInstallTimeoutMs(options.installTimeoutMs, process.env);
   applyBaseUrlOverrides(
     options,
     hermesBaseUrlWriter(resolveHermesProfileHome(options.profile, { homeDir: options.homeDir })),
@@ -678,7 +713,7 @@ async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<I
       throw new ClawchatError("PRECONDITION", `Hermes plugin ${HERMES_PLUGIN_NAME} is not installed. ${HERMES_INSTALL_COMMAND}`);
     }
     progress?.(`plugin installing ${artifact.version}`);
-    await installCanonical(run, true, progress);
+    await installCanonical(run, true, installTimeoutMs, progress);
     return {
       kind: "plugin",
       target: "hermes",
@@ -690,7 +725,7 @@ async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<I
 
   if (force) {
     progress?.(`plugin updating ${installed.version} -> ${artifact.version}`);
-    await installCanonical(run, true, progress);
+    await installCanonical(run, true, installTimeoutMs, progress);
     return {
       kind: "plugin",
       target: "hermes",

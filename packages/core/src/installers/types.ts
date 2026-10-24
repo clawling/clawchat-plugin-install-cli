@@ -71,6 +71,8 @@ export interface InstallerOptions {
    * the legacy ambient-HERMES_HOME behavior. Hermes-only; ignored for OpenClaw.
    */
   profile?: string;
+  /** Hermes only: cap the canonical remote `hermes plugins install` step (default 120_000 ms). */
+  installTimeoutMs?: number;
 }
 
 export function applyBaseUrlOverrides(options: InstallerOptions, defaultWriter: BaseUrlWriter): void {

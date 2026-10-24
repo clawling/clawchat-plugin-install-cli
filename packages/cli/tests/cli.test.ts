@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runClawchatCli } from "../src/cli";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function createIo(stdin = "") {
   let stdout = "";
@@ -31,6 +35,56 @@ describe("runClawchatCli help", () => {
 
     expect(code).toBe(0);
     expect(io.stderr).toBe("");
+  });
+});
+
+describe.each(["install", "update"] as const)("runClawchatCli %s install timeout", (command) => {
+  it("passes the flag as milliseconds, overriding the environment", async () => {
+    vi.stubEnv("CLAWCHAT_INSTALL_TIMEOUT_SECONDS", "invalid");
+    const io = createIo();
+    const action = vi.fn(async () => ({ kind: "plugin" as const, target: "hermes" as const, status: "installed" as const }));
+
+    const code = await runClawchatCli([command, "--target", "hermes", "--install-timeout", "240"], {
+      ...io.io,
+      installHermesPlugin: action,
+      updateHermesPlugin: action,
+    });
+
+    expect(code).toBe(0);
+    expect(io.stderr).toBe("");
+    expect(action).toHaveBeenCalledWith(expect.objectContaining({ installTimeoutMs: 240_000 }));
+  });
+
+  it.each(["invalid", "0", "-1", "1.5", "NaN", "Infinity", "3601"])("rejects invalid seconds %s before invoking the installer", async (seconds) => {
+    const io = createIo();
+    const action = vi.fn(async () => ({ kind: "plugin" as const, target: "hermes" as const, status: "installed" as const }));
+
+    const code = await runClawchatCli([command, "--target", "hermes", `--install-timeout=${seconds}`], {
+      ...io.io,
+      installHermesPlugin: action,
+      updateHermesPlugin: action,
+    });
+
+    expect(code).toBe(1);
+    expect(action).not.toHaveBeenCalled();
+    expect(io.stderr).toContain(seconds);
+    expect(io.stderr).toContain("--install-timeout");
+    expect(io.stderr).toContain("integer from 1 to 3600 seconds");
+  });
+
+  it("accepts the flag for OpenClaw without applying Hermes environment validation", async () => {
+    vi.stubEnv("CLAWCHAT_INSTALL_TIMEOUT_SECONDS", "invalid");
+    const io = createIo();
+    const action = vi.fn(async () => ({ kind: "plugin" as const, target: "openclaw" as const, status: "installed" as const }));
+
+    const code = await runClawchatCli([command, "--target", "openclaw", "--install-timeout", "240"], {
+      ...io.io,
+      installOpenClawPlugin: action,
+      updateOpenClawPlugin: action,
+    });
+
+    expect(code).toBe(0);
+    expect(action).toHaveBeenCalledOnce();
   });
 });
 

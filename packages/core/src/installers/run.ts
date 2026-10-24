@@ -5,6 +5,8 @@ import { ClawchatError } from "../errors";
 export interface CommandOptions {
   /** Hard wall-clock cap (ms). On expiry the child is killed and a TIMEOUT error is thrown. */
   timeoutMs?: number;
+  /** Advice appended to a TIMEOUT error. */
+  timeoutHint?: string;
   /**
    * Extra environment variables merged over `process.env` for this child only.
    * Values are NOT validated by `assertSafeCommand` and must be hardcoded
@@ -152,7 +154,8 @@ function spawnError(cmd: string, args: readonly string[], error: Error, options?
   if (code === "ETIMEDOUT") {
     return new ClawchatError(
       "TIMEOUT",
-      `${formatCommand(cmd, args)} timed out after ${options?.timeoutMs}ms`,
+      `${formatCommand(cmd, args)} did not finish within ${(options?.timeoutMs ?? 0) / 1000}s and was stopped (SIGKILL).` +
+        (options?.timeoutHint ? ` ${options.timeoutHint}` : ""),
     );
   }
   return new ClawchatError("SUBPROCESS", `${cmd} failed: ${error.message}`);

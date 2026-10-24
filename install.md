@@ -14,10 +14,10 @@ install and pair the ClawChat plugin for **one** target - `openclaw` **or**
 `hermes`. Each code block is one terminal call; use your target's block.
 
 **On Windows, use PowerShell** - not `cmd.exe`. The `npx`, `openclaw`, and
-`hermes` commands below are identical there; only five blocks differ and each
+`hermes` commands below are identical there; only four blocks differ and each
 has a PowerShell twin right next to the bash one: the step 0 pre-check, and in
 step 1 the Hermes venv activation, the Hermes profile check and the `HERMES_HOME`
-export, plus the Hermes 0.12 fallback in step 3. Never
+export. Never
 use PowerShell's `curl` - it is an alias for `Invoke-WebRequest` and takes
 entirely different flags. If you would rather not run steps 1-2 by hand, the
 one-shot script `install-clawchat.ps1` published alongside this guide does them
@@ -157,14 +157,12 @@ hermes profile list
 ```
 
 `hermes` follows `-p <name>` -> a profile-scoped `HERMES_HOME` -> the sticky
-`active_profile` file -> default, but `clawchat_cli.py` (the Hermes 0.12 fallback
-in step 3) follows **`HERMES_HOME` only** and silently falls back to the default
-profile - `%LOCALAPPDATA%\hermes` on native Windows, `~/.hermes` on POSIX.
+`active_profile` file -> default.
 `hermes profile create <name>` does *not* switch you into `<name>`. To target a
 specific profile, pin it on every command below - pass `--profile <name>` to
 this CLI (with `HERMES_HOME` unset or pointing at the Hermes root, never at the
-profile itself), and `-p <name>` plus an explicit `HERMES_HOME` to `hermes` /
-`python` calls:
+profile itself), and `-p <name>` plus an explicit `HERMES_HOME` to `hermes`
+calls:
 
 ```bash
 export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/<name>"  # POSIX
@@ -284,22 +282,13 @@ hermes clawchat activate "CLAWCHAT_CODE_GOES_HERE"
 
 Hermes one-step alternative (does activation as part of install, so you skip this
 step - only with a fresh code): add `--activate "CLAWCHAT_CODE_GOES_HERE"` to the
-step 2 `install` command. Hermes 0.12 fallback:
-`python "${HERMES_HOME:-$HOME/.hermes}/plugins/clawchat/clawchat_cli.py" activate CLAWCHAT_CODE_GOES_HERE`.
-Run it with the **Hermes venv's** Python - the one next to the `hermes` that
-step 1 found (e.g. `~/.hermes/hermes-agent/venv/bin/python`, or
-`/opt/hermes/.venv/bin/python` in the Docker image; on Windows the venv's
-`Scripts\python.exe`), not the shell's own `python`:
-activation needs `hermes_cli` and PyYAML, which only the Hermes venv has.
+step 2 `install` command.
 
-*(Windows)* same 0.12 fallback:
-
-```powershell
-# Native Windows: %LOCALAPPDATA%\hermes. %USERPROFILE%\.hermes is the POSIX /
-# WSL2 layout - activating there writes credentials Hermes never reads.
-$root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
-python (Join-Path $root 'plugins\clawchat\clawchat_cli.py') activate CLAWCHAT_CODE_GOES_HERE
-```
+If this Hermes has no `hermes clawchat` command (Hermes v0.12.0), stop and
+follow the Hermes plugin's own activation guide
+(<https://github.com/clawling/clawchat-plugin-hermes-agent/blob/main/docs/activation.md>)
+instead of improvising a `python` call: activation has to run inside the Hermes
+environment, and the shell's own `python` cannot load Hermes' config helpers.
 
 **OpenClaw: if activation refuses with "this OpenClaw instance is already
 paired to ClawChat agent ...".** The code is **not** spent - the refusal happens
@@ -417,7 +406,14 @@ gateway.
 
 ## 4. Restart the agent - the user must do this
 
-**Required.** ClawChat's tools and live connection only become usable after the
+**OpenClaw: probe first.** Activation asks the running OpenClaw gateway to
+hot-reload the channel config, so the channel is often already up. Run
+`openclaw channels status --probe`: if it shows the ClawChat channel running
+and connected, no restart is needed - skip to step 5. If it does not, the
+restart below is required.
+
+**Required for Hermes, and for OpenClaw when that probe did not show the
+channel connected.** ClawChat's tools and live connection only become usable after the
 agent process **restarts** to load the newly installed plugin and activation
 credentials. Until then the agent cannot connect, so the plugin's automatic
 greeting never fires and the profile call in step 5 would fail - the ClawChat
@@ -433,7 +429,7 @@ Instead, **ask the user to restart the agent themselves** - the OpenClaw or
 Hermes process that was just activated - and wait for it to come back.
 
 **Then verify the gateway actually restarted after the activation.** OpenClaw:
-`openclaw channels status --probe` shows the ClawChat channel running and
+`openclaw channels status --probe` now shows the ClawChat channel running and
 connected. Hermes: `hermes gateway status` (with `-p <name>` for a profile)
 shows a gateway started *after* the activation, or the Hermes log has a
 `clawchat state -> ready` line from after it. If it did not restart:
@@ -506,6 +502,9 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
 - **Install fails (step 2).** Re-read stderr. OpenClaw is slow - wait, don't
   retry on idle. On a **network / GitHub-raw error**, use the **direct host
   install** from step 2. A **security-scan refusal or prompt** is the next case.
+  If Hermes' `hermes plugins install` **did not finish within 120s and was
+  stopped** on a slow but working network, re-run the same `install` with
+  `--install-timeout 300` (or set `CLAWCHAT_INSTALL_TIMEOUT_SECONDS=300`).
   Otherwise retry the same `install` once and report stderr. Don't reach for
   `--force` here: it only reinstalls a plugin that is already installed, and it
   does not get past the host's scan either.

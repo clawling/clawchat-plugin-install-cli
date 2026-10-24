@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "../../src/config";
 import { ClawchatError } from "../../src/errors";
-import { installHermesPlugin, isHermesScanRefusal, updateHermesPlugin } from "../../src/installers/hermes";
+import { installHermesPlugin, isHermesScanRefusal, resolveHermesInstallTimeoutMs, updateHermesPlugin } from "../../src/installers/hermes";
 
 const HERMES_CLONE_URL = "https://github.com/clawling/clawchat-plugin-hermes-agent.git";
 
@@ -30,6 +30,7 @@ const PROXY_ENV_VARS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"
 
 beforeEach(() => {
   for (const name of PROXY_ENV_VARS) vi.stubEnv(name, undefined as unknown as string);
+  vi.stubEnv("CLAWCHAT_INSTALL_TIMEOUT_SECONDS", undefined as unknown as string);
   fetchMock = vi.fn(async () => new Response(pluginYaml()));
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -105,6 +106,82 @@ function expectRemoteInstall(run: MockLike) {
   expect(install!).toContain("--enable");
   expect(install!).not.toContain("--force");
 }
+
+describe("Hermes install timeout resolution", () => {
+  it("defaults to exactly 120_000 milliseconds", () => {
+    expect(resolveHermesInstallTimeoutMs(undefined, {})).toBe(120_000);
+  });
+
+  it("uses the environment when no explicit option is supplied", () => {
+    expect(resolveHermesInstallTimeoutMs(undefined, { CLAWCHAT_INSTALL_TIMEOUT_SECONDS: "240" })).toBe(240_000);
+  });
+
+  it("prefers the explicit option even when the environment is invalid", () => {
+    expect(resolveHermesInstallTimeoutMs(180_000, { CLAWCHAT_INSTALL_TIMEOUT_SECONDS: "invalid" })).toBe(180_000);
+  });
+
+  it.each([1, 3_600_000])("accepts the millisecond boundary %s", (optionMs) => {
+    expect(resolveHermesInstallTimeoutMs(optionMs, {})).toBe(optionMs);
+  });
+
+  it.each(["1", "3600"])("accepts the seconds boundary %s", (seconds) => {
+    expect(resolveHermesInstallTimeoutMs(undefined, { CLAWCHAT_INSTALL_TIMEOUT_SECONDS: seconds })).toBe(Number(seconds) * 1000);
+  });
+
+  it.each([0, -1, 1.5, NaN, Infinity, -Infinity, 3_600_001])("rejects invalid explicit milliseconds %s", (optionMs) => {
+    expect(() => resolveHermesInstallTimeoutMs(optionMs, { CLAWCHAT_INSTALL_TIMEOUT_SECONDS: "120" })).toThrowError(
+      new ClawchatError("VALIDATION", `Invalid installTimeoutMs ${String(optionMs)}: expected an integer from 1 to 3600000 milliseconds.`),
+    );
+  });
+
+  it.each(["", " ", "0", "-1", "1.5", "NaN", "Infinity", "-Infinity", "3601", "invalid", "120seconds"])(
+    "rejects invalid environment seconds %j instead of falling back",
+    (seconds) => {
+      expect(() => resolveHermesInstallTimeoutMs(undefined, { CLAWCHAT_INSTALL_TIMEOUT_SECONDS: seconds })).toThrowError(
+        new ClawchatError("VALIDATION", `Invalid Hermes install timeout ${JSON.stringify(seconds)}: --install-timeout / CLAWCHAT_INSTALL_TIMEOUT_SECONDS must be an integer from 1 to 3600 seconds.`),
+      );
+    },
+  );
+});
+
+describe.each([
+  ["install", installHermesPlugin],
+  ["update", updateHermesPlugin],
+] as const)("Hermes %s timeout", (_action, install) => {
+  it.each([
+    { optionMs: undefined, envSeconds: undefined, expectedMs: 120_000 },
+    { optionMs: undefined, envSeconds: "240", expectedMs: 240_000 },
+    { optionMs: 180_000, envSeconds: "240", expectedMs: 180_000 },
+  ])("uses $expectedMs ms for the canonical remote install", async ({ optionMs, envSeconds, expectedMs }) => {
+    vi.stubEnv("CLAWCHAT_INSTALL_TIMEOUT_SECONDS", envSeconds as string);
+    const progress = vi.fn();
+    const run = vi.fn(async () => {
+      expect(progress).toHaveBeenLastCalledWith(`installing plugin from remote ${HERMES_PLUGIN_SPEC} (time limit ${expectedMs / 1000}s)`);
+    });
+
+    await install({ run, capture: createCapture(null), force: true, installTimeoutMs: optionMs, onProgress: progress });
+
+    expect(run).toHaveBeenCalledWith("hermes", ["plugins", "install", HERMES_PLUGIN_SPEC, "--enable"], {
+      timeoutMs: expectedMs,
+      timeoutHint: "If the network is slow, re-run with --install-timeout <larger seconds> or set CLAWCHAT_INSTALL_TIMEOUT_SECONDS.",
+      collectStdout: true,
+    });
+  });
+
+  it("rejects invalid configuration before writing settings or contacting the host", async () => {
+    vi.stubEnv("CLAWCHAT_INSTALL_TIMEOUT_SECONDS", "invalid");
+    const run = vi.fn(async () => undefined);
+    const capture = createCapture(null);
+    const writeBaseUrls = vi.fn();
+
+    await expect(install({ run, capture, writeBaseUrls })).rejects.toMatchObject({ code: "VALIDATION" });
+
+    expect(writeBaseUrls).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+});
 
 describe("Hermes installer", () => {
   it("installs canonically from the remote spec when plugin is missing", async () => {

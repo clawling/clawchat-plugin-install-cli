@@ -51,8 +51,8 @@ The CLI exposes exactly two commands, both defined in
 
 | Command | Flags |
 |---------|-------|
-| `clawchat install` | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--activate <code>`, `--profile <name>` |
-| `clawchat update`  | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--profile <name>` |
+| `clawchat install` | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--activate <code>`, `--profile <name>`, `--install-timeout <seconds>` |
+| `clawchat update`  | `--target <openclaw\|hermes>`, `--force`, `--apibaseurl <url>`, `--wsbaseurl <url>`, `--mediabaseurl <url>`, `--profile <name>`, `--install-timeout <seconds>` |
 
 Both commands require `--target`. The allowed values are defined in
 `packages/core/src/config.ts` (`TARGETS = ["openclaw", "hermes"]`); any other
@@ -81,6 +81,14 @@ Flag semantics:
   (`resolveHermesProfileHome` in
   `packages/core/src/installers/hermes-profile.ts`). Registered on both commands.
   Omit it — or pass `default` — to target the Hermes root itself.
+- `--install-timeout <seconds>` — **Hermes only**, both commands. Wall-clock cap
+  on the canonical remote `hermes plugins install` step (including `--force`
+  reinstalls); other steps keep their own budgets. Resolved by
+  `resolveHermesInstallTimeoutMs` in `packages/core/src/installers/hermes.ts`:
+  the flag, then `CLAWCHAT_INSTALL_TIMEOUT_SECONDS`, then the default 120 s.
+  Integers from 1 to 3600 only; anything else is a `VALIDATION` error, never a
+  silent default. On expiry the child is killed (SIGKILL) and the `TIMEOUT`
+  error names the limit and how to raise it.
 - The optional `host@ref` suffix on `--target` (e.g. `openclaw@dev`,
   `hermes@<giturl#branch>`) is parsed by `parseTarget`; `ref` selects the npm
   dist-tag/version or the git ref to install. Works on both commands.

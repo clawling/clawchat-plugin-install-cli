@@ -101,12 +101,12 @@ describe("runCommand", () => {
     spawnSyncMock.mockReturnValue({
       error: timeoutError,
       status: null,
-      signal: "SIGTERM",
+      signal: "SIGKILL",
     } as unknown as ReturnType<typeof spawnSync>);
 
     await expect(runCommand("git", ["clone", "https://example.com/x.git"], { timeoutMs: 1234 })).rejects.toMatchObject({
       code: "TIMEOUT",
-      message: expect.stringContaining("timed out after 1234ms"),
+      message: "git clone https://example.com/x.git did not finish within 1.234s and was stopped (SIGKILL).",
     });
 
     expect(spawnSyncMock).toHaveBeenCalledWith(
@@ -114,6 +114,22 @@ describe("runCommand", () => {
       ["clone", "https://example.com/x.git"],
       expect.objectContaining({ timeout: 1234, killSignal: "SIGKILL" }),
     );
+  });
+
+  it.each([runCommand, captureCommand])("appends the timeout hint and preserves the TIMEOUT code (%s)", async (run) => {
+    spawnSyncMock.mockReturnValue({
+      error: Object.assign(new Error("ETIMEDOUT"), { code: "ETIMEDOUT" }),
+      status: null,
+      signal: "SIGKILL",
+    } as unknown as ReturnType<typeof spawnSync>);
+
+    await expect(run("hermes", ["plugins", "install", "example/plugin"], {
+      timeoutMs: 120_000,
+      timeoutHint: "Try --install-timeout 240 on a slow network.",
+    })).rejects.toMatchObject({
+      code: "TIMEOUT",
+      message: "hermes plugins install example/plugin did not finish within 120s and was stopped (SIGKILL). Try --install-timeout 240 on a slow network.",
+    });
   });
 
   it("merges the env option over process.env for the child only", async () => {
