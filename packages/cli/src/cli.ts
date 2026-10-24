@@ -4,6 +4,7 @@ import {
   installOpenClawPlugin,
   normalizeHttpUrl,
   normalizeWsUrl,
+  parseHermesInstallTimeoutSeconds,
   parseTarget,
   updateHermesPlugin,
   updateOpenClawPlugin,
@@ -22,6 +23,7 @@ type PluginAction = (options?: {
   mediaBaseUrl?: string;
   activateCode?: string;
   profile?: string;
+  installTimeoutMs?: number;
 }) => Promise<InstallActionResult>;
 
 interface CliDeps extends CliIo {
@@ -99,6 +101,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
     .option("--mediabaseurl <url>", "Media base url (host:port or full url)")
     .option("--activate <code>", "Hermes only: run `hermes clawchat activate <code>` right after install (single-use code)")
     .option("--profile <name>", "Hermes only: target a specific Hermes profile (default: the active/default profile)")
+    .option("--install-timeout <seconds>", "Hermes only: seconds to allow `hermes plugins install` before stopping it (default 120; env CLAWCHAT_INSTALL_TIMEOUT_SECONDS)")
     .action(
       async (options: {
         target?: string;
@@ -108,6 +111,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
         mediabaseurl?: string;
         activate?: string;
         profile?: string;
+        installTimeout?: string | number;
       }) => {
         commandRan = true;
         const { host, ref } = parseTarget(options.target);
@@ -118,6 +122,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
           ...buildBaseUrlOptions(ref, options),
           ...(options.activate ? { activateCode: options.activate } : {}),
           ...(options.profile ? { profile: options.profile } : {}),
+          ...(options.installTimeout !== undefined ? { installTimeoutMs: parseHermesInstallTimeoutSeconds(options.installTimeout) * 1000 } : {}),
         };
         const pluginResult = await pluginActions.install[host](actionOptions);
         io.writeStdout(formatSummary("install", host, pluginResult));
@@ -132,6 +137,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
     .option("--wsbaseurl <url>", "WebSocket base url (host:port or full url)")
     .option("--mediabaseurl <url>", "Media base url (host:port or full url)")
     .option("--profile <name>", "Hermes only: target a specific Hermes profile (default: the active/default profile)")
+    .option("--install-timeout <seconds>", "Hermes only: seconds to allow `hermes plugins install` before stopping it (default 120; env CLAWCHAT_INSTALL_TIMEOUT_SECONDS)")
     .action(
       async (options: {
         target?: string;
@@ -140,6 +146,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
         wsbaseurl?: string;
         mediabaseurl?: string;
         profile?: string;
+        installTimeout?: string | number;
       }) => {
         commandRan = true;
         const { host, ref } = parseTarget(options.target);
@@ -149,6 +156,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
           onProgress,
           ...buildBaseUrlOptions(ref, options),
           ...(options.profile ? { profile: options.profile } : {}),
+          ...(options.installTimeout !== undefined ? { installTimeoutMs: parseHermesInstallTimeoutSeconds(options.installTimeout) * 1000 } : {}),
         };
         const pluginResult = await pluginActions.update[host](actionOptions);
         io.writeStdout(formatSummary("update", host, pluginResult));

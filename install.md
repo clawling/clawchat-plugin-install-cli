@@ -501,6 +501,9 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
 - **Install fails (step 2).** Re-read stderr. OpenClaw is slow - wait, don't
   retry on idle. On a **network / GitHub-raw error**, use the **direct host
   install** from step 2. A **security-scan refusal or prompt** is the next case.
+  If Hermes' `hermes plugins install` **did not finish within 120s and was
+  stopped** on a slow but working network, re-run the same `install` with
+  `--install-timeout 300` (or set `CLAWCHAT_INSTALL_TIMEOUT_SECONDS=300`).
   Otherwise retry the same `install` once and report stderr. Don't reach for
   `--force` here: it only reinstalls a plugin that is already installed, and it
   does not get past the host's scan either.

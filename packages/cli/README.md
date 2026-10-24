@@ -16,6 +16,8 @@ For OpenClaw, `install` delegates to `openclaw plugins install @clawling/clawcha
 
 Both commands accept `--force` to reinstall the plugin even when the host reports it as current.
 
+For Hermes, both `install` and `update` accept `--install-timeout <seconds>` for the canonical remote `hermes plugins install` step (including `--force` reinstalls). The flag overrides `CLAWCHAT_INSTALL_TIMEOUT_SECONDS`; both accept integers from 1 to 3600 seconds, with a default of 120 seconds (120_000 ms). Invalid values fail validation. The progress line shows the limit; on timeout the command is stopped with SIGKILL and the error explains how to raise it. Other Hermes steps keep their existing budgets, and OpenClaw ignores this setting.
+
 `install` also accepts `--activate <code>` (Hermes only): after a successful install the CLI runs `hermes clawchat activate <code>` once, so installing and pairing is a single command. The code is single-use and is never retried; the result line ends with `+ activated`.
 
 For Hermes, `--profile <name>` targets a specific Hermes profile: the CLI passes `-p <name>` to the delegated `hermes` calls and writes base URLs to that profile's `$HERMES_HOME/.env`. It resolves to `<HERMES_HOME-or-platform-default>/profiles/<name>`, so pass `--profile` **or** point `HERMES_HOME` at the profile directory — never both. On a multi-profile host, confirm the active profile before installing or activating: a mis-targeted run pairs a different agent with no error, and connect codes are single-use.
