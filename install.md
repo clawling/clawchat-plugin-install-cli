@@ -406,7 +406,14 @@ gateway.
 
 ## 4. Restart the agent - the user must do this
 
-**Required.** ClawChat's tools and live connection only become usable after the
+**OpenClaw: probe first.** Activation asks the running OpenClaw gateway to
+hot-reload the channel config, so the channel is often already up. Run
+`openclaw channels status --probe`: if it shows the ClawChat channel running
+and connected, no restart is needed - skip to step 5. If it does not, the
+restart below is required.
+
+**Required for Hermes, and for OpenClaw when that probe did not show the
+channel connected.** ClawChat's tools and live connection only become usable after the
 agent process **restarts** to load the newly installed plugin and activation
 credentials. Until then the agent cannot connect, so the plugin's automatic
 greeting never fires and the profile call in step 5 would fail - the ClawChat
@@ -418,13 +425,7 @@ result. In many environments the running agent also **cannot restart itself**
 (the restart needs the user's approval). Do **not** block or loop trying to
 self-restart.
 
-**OpenClaw: probe first.** Activation asks the running OpenClaw gateway to
-hot-reload the channel config, so the channel is often already up. Run
-`openclaw channels status --probe`: if it shows the ClawChat channel running
-and connected, no restart is needed - skip to step 5. Only if it does not, ask
-the user to restart.
-
-Otherwise, **ask the user to restart the agent themselves** - the OpenClaw or
+Instead, **ask the user to restart the agent themselves** - the OpenClaw or
 Hermes process that was just activated - and wait for it to come back.
 
 **Then verify the gateway actually restarted after the activation.** OpenClaw:

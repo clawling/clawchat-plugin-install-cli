@@ -74,6 +74,36 @@ describe("published runtime guides", () => {
     expect(step4).toContain("not the plugin's greeting");
   });
 
+  it("install.md step 4 probes OpenClaw before asking the user to restart", () => {
+    const step4 = install.split("## 4. Restart the agent")[1]?.split("\n## 5.")[0] ?? "";
+    const probe = step4.indexOf("**OpenClaw: probe first.**");
+    const required = step4.indexOf("**Required for Hermes, and for OpenClaw when that probe did not show the\nchannel connected.**");
+    const askUser = step4.indexOf("**ask the user to restart the agent themselves**");
+    expect(probe).toBeGreaterThanOrEqual(0);
+    expect(required).toBeGreaterThan(probe);
+    expect(askUser).toBeGreaterThan(required);
+    const probeBlock = step4.slice(probe, required);
+    expect(probeBlock).toContain("openclaw channels status --probe");
+    expect(probeBlock).toMatch(/running\s+and\s+connected,\s+no\s+restart\s+is\s+needed\s+-\s+skip\s+to\s+step\s+5/);
+    expect(probeBlock).toMatch(/If\s+it\s+does\s+not,\s+the\s+restart\s+below\s+is\s+required/);
+    expect(step4).not.toMatch(/^\*\*Required\.\*\*/m);
+  });
+
+  it("install.md sends a Hermes without `hermes clawchat` to the activation guide, not a shell python", () => {
+    const step3 = install.split("## 3. Activate")[1]?.split("\n## 4.")[0] ?? "";
+    expect(step3).toContain("https://github.com/clawling/clawchat-plugin-hermes-agent/blob/main/docs/activation.md");
+    expect(step3).toMatch(/no\s+`hermes clawchat`\s+command\s+\(Hermes\s+v0\.12\.0\)/);
+    expect(install).not.toContain("clawchat_cli.py");
+    expect(install).not.toContain("PyYAML");
+    expect(install).not.toMatch(/0\.12 fallback/);
+  });
+
+  it("install.md documents the Hermes install timeout flag the CLI accepts", () => {
+    const troubleshooting = install.split("## Troubleshooting")[1] ?? "";
+    expect(troubleshooting).toContain("--install-timeout 300");
+    expect(troubleshooting).toContain("CLAWCHAT_INSTALL_TIMEOUT_SECONDS=300");
+  });
+
   it("install.md tells a QClaw user how the plugin gets onto plugins.load.paths", () => {
     const qclaw = install.split("- **OpenClaw inside QClaw")[1]?.split("\n- **")[0] ?? "";
     expect(qclaw).toContain("plugin not found");

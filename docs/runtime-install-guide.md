@@ -61,10 +61,11 @@ success signal.
    OpenClaw asks the operator instead of refusing; an agent or CI driving the
    install gets the refusal, so the guide tells the agent to state the intent
    up front.
-4. **Restart the agent — the user must do this** — the plugin's tools and live
-   connection only exist after the host process restarts. OpenClaw probes
-   first (`openclaw channels status --probe`) because activation hot-reloads
-   the channel, and asks for a restart only when the channel is not up. The Hermes "restart
+4. **Restart the agent — the user must do this** — OpenClaw probes first
+   (`openclaw channels status --probe`): activation hot-reloads the channel, so
+   when the probe shows it running and connected the guide skips the restart.
+   Otherwise (always for Hermes) the plugin's tools and live connection only
+   exist after the host process restarts. The Hermes "restart
    scheduled" line is not proof (the restart runs detached, unchecked), so the
    step ends by verifying the gateway came back after activation, with branches
    for a multiplexed gateway, a profile with no gateway service, a second
