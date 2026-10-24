@@ -31,7 +31,7 @@ once under `shared/`.
 > fallback. That snapshot must be kept in sync with this directory — this tree
 > wins on any divergence. Bundled snapshots now include **every** skill for that
 > target plus `manifest.json`; each plugin repo has a consistency test that fails
-> CI on drift.
+> on drift (run by that repo's test suite; there is no CI).
 
 ## `manifest.json` (generated — do not hand-edit)
 
@@ -44,7 +44,7 @@ Regenerate / verify:
 
 ```bash
 pnpm skills:manifest    # rewrite skills/manifest.json from the SKILL.md tree
-pnpm skills:check       # CI: fail if the manifest is stale
+pnpm skills:check       # fail if the manifest is stale (run manually; not part of pnpm test)
 ```
 
 ## Releasing a skill change
@@ -61,20 +61,27 @@ pnpm skills:check       # CI: fail if the manifest is stale
    the same tag).
 3. `pnpm skills:sync` to copy the tree + manifest into the sibling plugin
    repos (flags `--hermes/--openclaw` override the default sibling paths),
-   then commit the synced files in each plugin repo.
-4. Tag the repo `skills-vX.Y.Z` (decoupled from the CLI's npm release). **Both
-   adapters read a pinned tag, not `main`**, so the tag is what agents fetch.
-5. Move the pin in each consumer and release it — a new tag reaches nobody
-   until this happens:
+   then commit the synced files in each plugin repo (through that repo's PR
+   flow).
+4. Merge the change into `main` via PR, then tag the resulting `main` commit
+   `skills-vX.Y.Z` (decoupled from the CLI's npm release) and push the tag.
+   **Both adapters read a pinned tag, not `main`**, so the tag is what agents
+   fetch — never tag a commit that is not on `main`.
+5. Move `DEFAULT_SKILLS_REF` to the same tag in all three consumers on their
+   main branches via PR. Ship only the artifacts whose pinned ref changed:
    - `clawchat-plugin-hermes-agent`: `clawchat_gateway/skill_update.py`
      `DEFAULT_SKILLS_REF`, then bump `plugin.yaml` / `__version__`.
    - `clawchat-plugin-openclaw`: `src/skill-update.ts` `DEFAULT_SKILLS_REF`,
      then release to npm.
-   - this repo: `packages/core/src/config.ts` `DEFAULT_SKILLS_REF` (library
-     default; the published CLI bundle does not include the skills subsystem).
+   - this repo: `packages/core/src/config.ts` `DEFAULT_SKILLS_REF` on `main`
+     (library default; the published CLI bundle does not include the skills
+     subsystem). This alone needs no CLI npm release.
 
-   Both adapters share the constant with their `liveware-sample` module, so the
-   `livewares/` tree is pinned to the same tag — verify it exists there too.
+   Release both adapter plugins with their changed pins. Record which plugin
+   versions and which CLI commit name which `skills-v*` tag in the skills tag's
+   GitHub Release notes; edit those notes as later releases ship, never move the
+   tag. Both adapters share the constant with their `liveware-sample` module, so
+   the `livewares/` tree is pinned to the same tag — verify it exists there too.
 
 The same procedure is summarised, in release order, under "Release a skills /
 livewares change" in [`../docs/release.md`](../docs/release.md).

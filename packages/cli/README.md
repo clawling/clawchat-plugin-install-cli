@@ -5,14 +5,14 @@ CLI for installing and updating ClawChat plugins in supported agents.
 ## Install
 
 ```bash
-npx -y @clawling/clawchat-plugin-install-cli install --target openclaw
+npx -y @clawling/clawchat-plugin-install-cli@latest install --target openclaw
 ```
 
 ```bash
-npx -y @clawling/clawchat-plugin-install-cli install --target hermes
+npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
-For OpenClaw, `install` delegates to `openclaw plugins install @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`. ClawChat is a third-party (non-catalog) plugin: on older OpenClaw the flag bypasses the install-time safety scan that would block it, and on newer OpenClaw it is a deprecated no-op (installs allowed by default; operator gating via `security.installPolicy`) — safe on both. For Hermes, `install` first fetches the remote `plugin.yaml`, validates that `hermes --version` satisfies the declared requirement, and only then installs or updates the plugin. ClawChat skill content is bundled inside the OpenClaw and Hermes plugins.
+For OpenClaw, `install` delegates to `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`. `--force` is unconditional on install; the CLI also appends `--accept-capabilities` when the host's install help advertises it. ClawChat is a third-party (non-catalog) plugin: on older OpenClaw the unsafe-install flag bypasses the install-time safety scan that would block it, and on newer OpenClaw it is a deprecated no-op (installs allowed by default; operator gating via `security.installPolicy`) — safe on both. For Hermes, `install` first fetches the remote `plugin.yaml`, validates that `hermes --version` satisfies the declared requirement, and only then installs or updates the plugin. ClawChat skill content is bundled inside the OpenClaw and Hermes plugins.
 
 Both commands accept `--force` to reinstall the plugin even when the host reports it as current.
 
@@ -30,6 +30,6 @@ npx -y @clawling/clawchat-plugin-install-cli@latest update --target openclaw
 npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes
 ```
 
-For OpenClaw, `update` delegates to `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`. For Hermes, `update` requires an installed plugin and delegates to `hermes plugins update clawchat`, even when the installed `plugin.yaml` version already matches the remote version. `--force` lifts that requirement: `update --target hermes --force` on a host with no ClawChat plugin installs it instead of failing.
+For OpenClaw, `update` delegates to `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`, appending `--accept-capabilities` when supported by the host. For Hermes, `update` requires an installed plugin and delegates to `hermes plugins update clawchat`, even when the installed `plugin.yaml` version already matches the remote version, followed by `hermes plugins enable clawchat` unless the host reports that its scan disabled the plugin (`SCAN_BLOCKED`). `--force` lifts that requirement: `update --target hermes --force` on a host with no ClawChat plugin installs it instead of failing.
 
-Use `--force` as an explicit repair/reinstall path. For Hermes, `--force` runs `hermes plugins install clawling/clawchat-plugin-hermes-agent --force --enable`. For Hermes update failures caused by dirty local plugin files or Git fast-forward conflicts, repair explicitly with `npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes --force`.
+Use `--force` as an explicit repair/reinstall path. For Hermes, the first attempt is `hermes plugins install clawling/clawchat-plugin-hermes-agent --enable`, without the host's `--force`. Only after the scan passes and the host reports `already exists` does the CLI retry with `--force --enable` to replace the existing install. Scan refusals stop with `SCAN_BLOCKED`; the CLI's `--force` does not override them. For Hermes update failures caused by dirty local plugin files or Git fast-forward conflicts, repair explicitly with `npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes --force`.

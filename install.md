@@ -1,8 +1,8 @@
 # Install ClawChat Plugin
 
 > Runtime guide for end-users and AI agents at install time. This file is the
-> source of truth; the connection wiki (https://agent-connection.clawling.com/start.md)
-> serves a versioned mirror of it, and a copy is published to R2 by
+> source of truth; the connection wiki (entry: https://agent-connection.clawling.com/start.md)
+> inlines a versioned mirror into its official install pages, and a copy is published to R2 by
 > `scripts/upload-install-md-to-r2.sh` (see `docs/runtime-install-guide.md`).
 >
 > **Something here was wrong, missing, or cost you time?** File a field report the
@@ -138,7 +138,7 @@ installing or activating. Every ClawChat identity is keyed on the active
 and burns the single-use code:
 
 ```bash
-root="${HERMES_HOME:-$HOME/.hermes}"
+root="${HERMES_HOME:-$HOME/.hermes}"; case "$root" in */profiles/*) root="${root%/profiles/*}" ;; esac
 echo "HERMES_HOME=${HERMES_HOME:-<unset>}"
 cat "$root/active_profile" 2>/dev/null || echo "active_profile=default"
 hermes profile list
@@ -149,6 +149,7 @@ hermes profile list
 
 ```powershell
 $root = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
+if ($root -match '[\\/]profiles[\\/][^\\/]+$') { $root = Split-Path (Split-Path $root -Parent) -Parent }
 "HERMES_HOME=$(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { '<unset>' })"
 $active = Join-Path $root 'active_profile'
 if (Test-Path $active) { Get-Content $active } else { 'active_profile=default' }
