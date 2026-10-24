@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
-    "test": "pnpm -r test && node --test scripts/sync-skills.test.mjs scripts/build-livewares-manifest.test.mjs scripts/skill-frontmatter.test.mjs",
+    "test": "pnpm -r test && node --test scripts/sync-skills.test.mjs scripts/build-livewares-manifest.test.mjs scripts/skill-frontmatter.test.mjs scripts/release-guard.test.mjs",
     "typecheck": "pnpm -r typecheck",
     "skills:manifest": "node scripts/build-skills-manifest.mjs",
     "skills:check": "node scripts/build-skills-manifest.mjs --check",
@@ -19,7 +19,8 @@
     "test:scripts": "node --test scripts/sync-skills.test.mjs",
     "livewares:manifest": "node scripts/build-livewares-manifest.mjs",
     "livewares:check": "node scripts/build-livewares-manifest.mjs --check",
-    "release:dry": "pnpm --filter @clawling/clawchat-plugin-install-cli release:dry"
+    "release:dry": "pnpm --filter @clawling/clawchat-plugin-install-cli release:dry",
+    "release:promote": "node scripts/release-guard.mjs promote"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

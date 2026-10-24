@@ -27,15 +27,16 @@ Run these from the repo root unless noted.
 |---------|--------------|
 | `pnpm build` | `pnpm -r build` — `tsdown` produces `dist/index.cjs` and `dist/index.d.cts` for each package |
 | `pnpm typecheck` | `pnpm -r typecheck` — `tsc --noEmit` with the shared strict settings in `tsconfig.base.json` |
-| `pnpm test` | `pnpm -r test` — Vitest in each package, then `node --test` for `scripts/sync-skills.test.mjs`, `scripts/build-livewares-manifest.test.mjs`, and `scripts/skill-frontmatter.test.mjs` |
+| `pnpm test` | `pnpm -r test` — Vitest in each package, then `node --test` for `scripts/sync-skills.test.mjs`, `scripts/build-livewares-manifest.test.mjs`, `scripts/skill-frontmatter.test.mjs`, and `scripts/release-guard.test.mjs` |
 | `pnpm clean` | Remove `dist/` from each package |
 | `pnpm skills:manifest` | `node scripts/build-skills-manifest.mjs` — regenerate `skills/manifest.json` from the `SKILL.md` tree after editing a skill |
 | `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` — manual pre-release check that fails when the committed manifest is stale |
 | `pnpm skills:sync` | `node scripts/sync-skills.mjs` — copy the skills tree + manifest into the sibling plugin repos (`--hermes` / `--openclaw` override the default sibling paths) |
 | `pnpm livewares:manifest` | `node scripts/build-livewares-manifest.mjs` — regenerate `livewares/manifest.json` after editing the Liveware Sample app |
 | `pnpm livewares:check` | `node scripts/build-livewares-manifest.mjs --check` — manual pre-release check that fails when that manifest is stale |
-| `pnpm test:scripts` | `node --test scripts/sync-skills.test.mjs` — only the sync script's tests; the other two script suites require `pnpm test` |
+| `pnpm test:scripts` | `node --test scripts/sync-skills.test.mjs` — only the sync script's tests; the other script suites require `pnpm test` |
 | `pnpm release:dry` | `pnpm --filter @clawling/clawchat-plugin-install-cli release:dry` — typecheck + test + build + `npm pack --dry-run` |
+| `pnpm release:promote <X.Y.Z>` | Verify the annotated, pushed `cli-vX.Y.Z` tag is on remote `main`, then promote that final version to npm `latest`; `--dry-run` only prints the npm command |
 
 The `skills:*` and `livewares:*` scripts maintain the two runtime hosting
 subsystems — the `skills/` markdown tree and the `livewares/` Liveware Sample app
