@@ -20,12 +20,13 @@ delivery pipeline ships to its consumers.
    pages. The wiki does **not** follow this repository automatically: its build
    never touches the network, so a wiki maintainer runs the wiki's separate
    pull step against this repository's public `main`, reviews and commits the
-   refreshed mirror, then builds and deploys the wiki. A `git push` to `main`
-   is a prerequisite for that, not the publication itself — until the wiki is
+   refreshed mirror, then builds and deploys the wiki. Merging the change
+   into `main` (via PR) is a prerequisite for that, not the publication itself — until the wiki is
    re-pulled and redeployed it keeps serving the previous copy. The mirror is
    never hand-edited on the wiki side (its build rejects a hand edit).
 2. **R2** — [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh)
-   copies the local file to the key `clawchat/install.md`, alongside
+   copies the file from a clean checkout of a release tag on `main` to the key
+   `clawchat/install.md`, alongside
    `clawchat/install-clawchat.sh`, `clawchat/install-clawchat.ps1` and
    `clawchat/agent-protocol.md` (four objects, always published together). This
    copy serves older app builds that still point at it directly. The release

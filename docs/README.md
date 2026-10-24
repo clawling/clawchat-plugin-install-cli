@@ -21,12 +21,12 @@ what you are trying to do.
 
 - [`agent-protocol.md`](agent-protocol.md) — the **agent half of the ClawChat
   wire**: activation, the two device ids, the Protocol v2 handshake as an agent,
-  the inbound filter chain and self-echo guard, group semantics, media, and ten
+  the inbound filter chain and self-echo guard, group semantics, media, and 13
   reimplementation gotchas ordered by how much time each one costs. Read this to
   implement a connector for an agent system nobody has written a plugin for.
   Published to R2 alongside `install.md` by
   [`../scripts/upload-install-md-to-r2.sh`](../scripts/upload-install-md-to-r2.sh).
-- [`../examples/cloud-agent/`](../examples/cloud-agent/) — a runnable ~300-line,
+- [`../examples/cloud-agent/`](../examples/cloud-agent/) — a runnable ~650-line,
   zero-dependency implementation of that document, in a container. It is the
   spec's regression nail: if a claim in `agent-protocol.md` drifts, this stops
   working. Its `check` mode costs nothing and consumes no connect code.

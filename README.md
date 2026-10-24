@@ -200,8 +200,15 @@ rather than from a checkout.
     test, local plugin testing.
   - [`docs/release.md`](docs/release.md) — how to publish the CLI, refresh the
     R2-hosted `install.md` and installer scripts, and cut a skills tag.
+  - [`docs/dev-release.md`](docs/dev-release.md) — pre-release builds on the
+    `dev` channel.
+  - [`docs/agent-protocol.md`](docs/agent-protocol.md) — agent wire protocol;
+    an exported copy to fix at the source and re-export, not edit here.
   - [`docs/runtime-install-guide.md`](docs/runtime-install-guide.md) —
     what `install.md` is for and how it is delivered.
+- [`skills/README.md`](skills/README.md) — skill authoring and release workflow.
+- [`examples/cloud-agent/README.md`](examples/cloud-agent/README.md) — runnable
+  agent protocol example and its implementation limits.
 - [`packages/core/README.md`](packages/core/README.md) —
   workspace-private core library.
 - [`AGENTS.md`](AGENTS.md) — coding conventions for contributors and

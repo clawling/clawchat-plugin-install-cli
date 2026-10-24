@@ -383,9 +383,10 @@ keep their own copy of this constant and all three move together), and
 | npm script | Command | Purpose |
 |------------|---------|---------|
 | `pnpm skills:manifest` | `node scripts/build-skills-manifest.mjs` | rewrite `skills/manifest.json` from the `SKILL.md` tree |
-| `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` | CI guard: fail if the committed manifest is stale |
+| `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` | manual pre-release check: fail if the committed manifest is stale |
 | `pnpm skills:sync` | `node scripts/sync-skills.mjs` | copy the tree + manifest into the sibling plugin repos (`--hermes` / `--openclaw` override the default sibling paths) |
-| `pnpm test:scripts` | `node --test scripts/sync-skills.test.mjs` | node:test coverage for the sync script (also part of the root `pnpm test`) |
+| `pnpm test:scripts` | `node --test scripts/sync-skills.test.mjs` | only the sync script's tests; does not cover the other two script suites |
+| `pnpm test` | `pnpm -r test && node --test scripts/sync-skills.test.mjs scripts/build-livewares-manifest.test.mjs scripts/skill-frontmatter.test.mjs` | per-package Vitest suites plus all three script suites; excludes `skills:check` and `livewares:check` |
 
 See [`../skills/README.md`](../skills/README.md) for the release/versioning workflow.
 
@@ -443,7 +444,7 @@ the agent to operate this app; the two subsystems ship together.
 | npm script | Command | Purpose |
 |------------|---------|---------|
 | `pnpm livewares:manifest` | `node scripts/build-livewares-manifest.mjs` | rewrite `livewares/manifest.json` from the `livewares/` tree |
-| `pnpm livewares:check` | `node scripts/build-livewares-manifest.mjs --check` | CI guard: fail if the committed manifest is stale |
+| `pnpm livewares:check` | `node scripts/build-livewares-manifest.mjs --check` | manual pre-release check: fail if the committed manifest is stale |
 
 ## Library API (currently unused by the CLI)
 
