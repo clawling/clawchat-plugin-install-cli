@@ -24,6 +24,8 @@ anything not covered here, follow the documentation map below.
 Before changing a feature, read the relevant `docs/` page. After changing
 behavior, update the matching `docs/` page in the same change set.
 
+**Docs size & structure.** Keep each `.md` under 40 KB (hard cap 60 KB); a change that leaves a file above 40 KB splits it in the same PR or says why in the PR. Docs describe current behavior only; version history goes to git history and the GitHub release notes, or to a one-line-per-item `Upgrade notes` list at the end. Write each rule in full in one place and link to it elsewhere. When splitting or trimming, keep every heading, anchor and `§` number that something links to (leave a same-named short section that links on). `packages/cli/tests/install-md.test.ts` reads `install.md`, the header of `docs/agent-protocol.md` and `skills/*/SKILL.md` — update them together.
+
 ## Project shape
 
 - pnpm-workspaces monorepo. Two packages: `packages/cli` (published as
