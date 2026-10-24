@@ -159,9 +159,10 @@ cut a clean final version:
    `install.md`) from a clean checkout of the tag. A dev build may come from any
    branch; a `latest` build only ever comes from a tag on `main`.
 
-(You *can* alternatively move the tag with
-`npm dist-tag add @clawling/clawchat-plugin-install-cli@0.2.0 latest`, but
-publishing the clean `0.2.0` per `release.md` is the convention here.)
+If the final `0.2.0` is already published, use `pnpm release:promote 0.2.0`
+(optionally check with `--dry-run` first). This only works for a final `X.Y.Z`
+whose annotated `cli-vX.Y.Z` tag is pushed and on `origin/main`; dev versions
+are never promoted. Never run a raw `npm dist-tag add … latest` command.
 
 ---
 

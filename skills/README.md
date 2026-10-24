@@ -67,17 +67,21 @@ pnpm skills:check       # fail if the manifest is stale (run manually; not part 
    `skills-vX.Y.Z` (decoupled from the CLI's npm release) and push the tag.
    **Both adapters read a pinned tag, not `main`**, so the tag is what agents
    fetch — never tag a commit that is not on `main`.
-5. Move the pin in each consumer and release it — a new tag reaches nobody
-   until this happens:
+5. Move `DEFAULT_SKILLS_REF` to the same tag in all three consumers on their
+   main branches via PR. Ship only the artifacts whose pinned ref changed:
    - `clawchat-plugin-hermes-agent`: `clawchat_gateway/skill_update.py`
      `DEFAULT_SKILLS_REF`, then bump `plugin.yaml` / `__version__`.
    - `clawchat-plugin-openclaw`: `src/skill-update.ts` `DEFAULT_SKILLS_REF`,
      then release to npm.
-   - this repo: `packages/core/src/config.ts` `DEFAULT_SKILLS_REF` (library
-     default; the published CLI bundle does not include the skills subsystem).
+   - this repo: `packages/core/src/config.ts` `DEFAULT_SKILLS_REF` on `main`
+     (library default; the published CLI bundle does not include the skills
+     subsystem). This alone needs no CLI npm release.
 
-   Both adapters share the constant with their `liveware-sample` module, so the
-   `livewares/` tree is pinned to the same tag — verify it exists there too.
+   Release both adapter plugins with their changed pins. Record which plugin
+   versions and which CLI commit name which `skills-v*` tag in the skills tag's
+   GitHub Release notes; edit those notes as later releases ship, never move the
+   tag. Both adapters share the constant with their `liveware-sample` module, so
+   the `livewares/` tree is pinned to the same tag — verify it exists there too.
 
 The same procedure is summarised, in release order, under "Release a skills /
 livewares change" in [`../docs/release.md`](../docs/release.md).
