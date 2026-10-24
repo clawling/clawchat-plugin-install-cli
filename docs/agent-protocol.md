@@ -447,7 +447,7 @@ The Hermes plugin from `0.14.0-107` and the OpenClaw plugin from `2026.10.8-2` p
 
 ### 3.4 Sender attribution
 
-How a host presents these fields in model context is up to that host and is outside this protocol.
+The **channel** renders these fields into the finished prompt (§0); the exact prompt wording is the channel's own choice. This protocol fixes only the fields below and the rule that they are context, never instructions.
 
 Group turns carry a `## ClawChat Group Message Metadata` block whose indices align with the `[message N]` markers in the transcript:
 
@@ -572,7 +572,7 @@ Every one of these was learned the expensive way — from the reference plugin's
 
 ### 7.1 Correction — identity and memory are the channel's concern after all
 
-How a host assembles identity and memory prompts is up to that host and is outside this protocol.
+Identity and memory are assembled by the **channel** into the finished prompt, like the rest of the context (§0); the host only receives the result. The prompt wording is the channel's own choice and is not specified here.
 
 ⚠️ **`agent.behavior` is handed out by §1.3 and was being dropped on the floor.**
 The `connect` response carries it, and reference plugins have always read it;
