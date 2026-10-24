@@ -1,6 +1,6 @@
 ---
 name: clawchat-liveware
-version: 1.2.3
+version: 1.2.4
 description: Use when the user wants to expose this agent's local web service to the public internet via the liveware CLI and make it appear as an app in their ClawChat chat with this agent. Covers logging in to liveware with the ClawChat account, creating a liveware app, binding a tunnel to a local port, registering the public URL to ClawChat, restricting who may open each app, and fully unregistering and deleting an app.
 ---
 
@@ -11,9 +11,21 @@ ClawChat so it shows as an app tile in the owner's chat with this agent.
 
 ## Prerequisites — check first, stop if unmet
 
-1. Run `command -v liveware`. If it prints nothing (liveware is not installed), tell the
-   user this environment does not support liveware app hosting and STOP. Do not attempt
-   any further step or invent a URL.
+1. Resolve the CLI from PATH first with `command -v liveware` (PowerShell:
+   `Get-Command liveware -CommandType Application -ErrorAction SilentlyContinue`).
+   If absent, check the plugin's downloaded executable at
+   `<stateDir>/clawchat/liveware/liveware` (`liveware.exe` on native Windows).
+   Resolve `<stateDir>` from the current instance's first non-empty setting:
+   `OPENCLAW_STATE_DIR`, then the parent directory of `OPENCLAW_CONFIG_PATH`,
+   then `$OPENCLAW_HOME/.openclaw`, else `~/.openclaw` under the OS home.
+   Expand a leading `~` in the state/config overrides against the effective home
+   (`OPENCLAW_HOME`, else the OS home). The binary cache is shared by all accounts;
+   do not look under `clawchat/accounts/<id>` for it.
+   Save the found executable's absolute path as `LIVEWARE_BIN`. Only if neither
+   PATH nor the downloaded copy provides an executable, tell the user this
+   environment does not support liveware app hosting and STOP. Do not attempt
+   any further step or invent a URL. Use `"$LIVEWARE_BIN"` for every CLI command
+   below; in PowerShell invoke it as `& $LIVEWARE_BIN` instead.
 2. Authentication is handled by the ClawChat plugin, not by you. You log in by calling the
    `clawchat_liveware_login` tool (step 1 below). Never read, print, or pass the ClawChat
    access token yourself — the plugin holds it in its own credential store and never
@@ -21,7 +33,7 @@ ClawChat so it shows as an app tile in the owner's chat with this agent.
 
 ## Procedure
 
-1. **Login** (idempotent) — call the tool; do NOT run `liveware login` yourself:
+1. **Login** (idempotent) — call the tool; do NOT run `"$LIVEWARE_BIN" login` yourself:
    `clawchat_liveware_login()`
    The plugin resolves the ClawChat access token from its own credential store and runs
    the liveware login internally. If it returns an error (liveware missing, ClawChat not
@@ -34,9 +46,9 @@ ClawChat so it shows as an app tile in the owner's chat with this agent.
    this check exists to stop. Never paste user-supplied text into a shell command. The
    bind target is then exactly `http://127.0.0.1:<port>`.
 3. **List existing apps** to avoid duplicates and to recover ids:
-   `liveware app list`
+   `"$LIVEWARE_BIN" app list`
 4. **Create the app with its access policy** (skip if reusing an existing one):
-   `liveware app create "<app name>" --policy <public|private|allowlist>`
+   `"$LIVEWARE_BIN" app create "<app name>" --policy <public|private|allowlist>`
    - For `allowlist`, include the complete initial viewer list with repeatable
      `--allow-user <user id>` flags or one `--allow-users <user1,user2>` flag.
    - Access policy belongs to this exact app; it does not change any other app. If the
@@ -44,14 +56,14 @@ ClawChat so it shows as an app tile in the owner's chat with this agent.
    - This prints/returns the new **app id**. Capture it.
    - If liveware rejects `--policy` / `--allow-user(s)` as an unknown flag, this CLI
      predates per-app access policies. Retry once as plain
-     `liveware app create "<app name>"`, tell the user the app will be reachable by anyone
+     `"$LIVEWARE_BIN" app create "<app name>"`, tell the user the app will be reachable by anyone
      with the link, and continue. Do not abandon the flow over the missing flag.
    - If liveware reports an app-limit / quota error, relay that error to the user verbatim
      and STOP. Do not delete other apps to make room.
 5. **Bind the tunnel** to the local service. Use only the numeric `<port>` validated in
    step 2, and pass the bind target as a single argument — do not wrap the command in extra
    shell that interpolates unvalidated user input:
-   `liveware tunnel bind <app id> http://127.0.0.1:<port>`
+   `"$LIVEWARE_BIN" tunnel bind <app id> http://127.0.0.1:<port>`
    - Capture the **public URL** liveware returns.
 6. **Verify the bind and relay connection** through the public URL:
    `curl --fail --silent --show-error '<public URL>/liveware-status'`
@@ -64,7 +76,7 @@ ClawChat so it shows as an app tile in the owner's chat with this agent.
      `relayConnected` means that instance has connected to the relay; `live` means both
      conditions are ready.
    - If the deadline expires, report the last response and run the read-only
-     `liveware status` and `liveware app list` commands to distinguish an incomplete bind
+     `"$LIVEWARE_BIN" status` and `"$LIVEWARE_BIN" app list` commands to distinguish an incomplete bind
      from a disconnected agent. STOP without creating another app or repeating the bind.
      Treat an app-id mismatch as the wrong URL or app, not as a transient state.
    - If instead the endpoint is simply absent — a 404, or a response that is not the JSON
@@ -100,16 +112,16 @@ ClawChat so it shows as an app tile in the owner's chat with this agent.
 For a full removal:
 
 1. Treat the user's initial removal request only as permission to inspect. Run
-   `clawchat_list_apps()` and `liveware app list`, resolve one exact app id, then run
-   `liveware app inspect <exact app id>`. Perform no mutation in this step.
+   `clawchat_list_apps()` and `"$LIVEWARE_BIN" app list`, resolve one exact app id, then run
+   `"$LIVEWARE_BIN" app inspect <exact app id>`. Perform no mutation in this step.
 2. Show the user the exact app id, app name, current access policy, and that confirmation
    will remove both its ClawChat tile and Liveware public route. Keep the public URL from
    the inspection for later verification, but omit it from the confirmation prompt. Ask
    for an explicit second confirmation after showing the other details. The initial
    removal request is not this confirmation; end the turn without unregistering or
    deleting anything.
-3. After the user confirms, re-run `clawchat_list_apps()`, `liveware app list`, and
-   `liveware app inspect <exact app id>`. Continue only if the id, name, URL, and access
+3. After the user confirms, re-run `clawchat_list_apps()`, `"$LIVEWARE_BIN" app list`, and
+   `"$LIVEWARE_BIN" app inspect <exact app id>`. Continue only if the id, name, URL, and access
    policy still match the inspected snapshot, and the displayed fields match what the
    user confirmed. If any field changed or the target is ambiguous, show the updated id,
    name, and access policy and request confirmation again without displaying the URL.
@@ -118,22 +130,22 @@ For a full removal:
    Stop if this fails; do not delete the Liveware app while its ClawChat registration is
    unresolved.
 5. Remove the public route, tunnel binding, and access policy:
-   `liveware app delete <exact app id>`
+   `"$LIVEWARE_BIN" app delete <exact app id>`
    `app delete` performs the Liveware-side unbind, so a separate `tunnel unbind` is not
    required.
 6. Verify the exact app id is absent from both `clawchat_list_apps()` and
-   `liveware app list`. Poll the former public URL's `/liveware-status` for up to 60
+   `"$LIVEWARE_BIN" app list`. Poll the former public URL's `/liveware-status` for up to 60
    seconds; completion requires it to stop reporting that app as `live: true` (a not-found
    response or `bound: false`, `relayConnected: false`, and `live: false` is expected).
 7. Report full removal only when both inventories and the public status check pass. If the
    Liveware deletion fails after ClawChat unregisters, report a partial removal and the
    still-accessible app id; do not hide the failure or retry with a different command.
 
-Older-CLI fallbacks for the flow above: if `liveware app inspect` is rejected as an unknown
-subcommand, use the matching row from `liveware app list` as the snapshot instead — the
+Older-CLI fallbacks for the flow above: if `"$LIVEWARE_BIN" app inspect` is rejected as an unknown
+subcommand, use the matching row from `"$LIVEWARE_BIN" app list` as the snapshot instead — the
 second confirmation in step 2 is still mandatory. If `/liveware-status` is absent (a 404 or
 a non-JSON response), skip that poll in step 6 and verify from the two inventories alone.
-Neither fallback applies to `liveware app delete`: if that is unavailable, stop after step 4
+Neither fallback applies to `"$LIVEWARE_BIN" app delete`: if that is unavailable, stop after step 4
 and report the partial removal exactly as step 7 requires.
 
 ## Identifying the viewing user (server-side)
@@ -168,19 +180,19 @@ store or change viewer permissions.
 
 To change one app:
 
-1. Run `liveware app inspect <exact app id>` and confirm its name, owner, and current
+1. Run `"$LIVEWARE_BIN" app inspect <exact app id>` and confirm its name, owner, and current
    access policy match the user's intended target.
 2. Confirm the complete desired policy with the owner. Widening access can disclose the
    app; narrowing access can remove existing viewers.
 3. Run exactly one of:
-   - `liveware app access <exact app id> --policy public`
-   - `liveware app access <exact app id> --policy private`
-   - `liveware app access <exact app id> --policy allowlist --allow-user <user id>`
-   - `liveware app access <exact app id> --policy allowlist --allow-users <user1,user2>`
+   - `"$LIVEWARE_BIN" app access <exact app id> --policy public`
+   - `"$LIVEWARE_BIN" app access <exact app id> --policy private`
+   - `"$LIVEWARE_BIN" app access <exact app id> --policy allowlist --allow-user <user id>`
+   - `"$LIVEWARE_BIN" app access <exact app id> --policy allowlist --allow-users <user1,user2>`
 4. For `allowlist`, provide every non-owner user who should retain access. The command
    replaces that app's complete allowlist; it is not an incremental add. The owner remains
    allowed automatically.
-5. Re-run `liveware app inspect <exact app id>` and require the reported policy and full
+5. Re-run `"$LIVEWARE_BIN" app inspect <exact app id>` and require the reported policy and full
    allowlist to match the requested state. Then probe `<public URL>/liveware-status` and
    require the same healthy result defined in procedure step 6. Report both access and
    tunnel state.
