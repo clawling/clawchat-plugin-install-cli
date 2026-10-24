@@ -1,6 +1,6 @@
 ---
 name: clawchat-liveware-sample
-version: 2.0.1
+version: 2.0.2
 description: >-
   Use when the owner talks about the auto-installed "Liveware Sample" (page title "Hello from your agent") — the guide to their first Liveware. The page sends the owner to chat with these exact sentences, so route on them verbatim — "把 Liveware Sample 换成购物清单" / "把 Liveware Sample 换成纪念日倒计时" / "把 Liveware Sample 换成习惯打卡" ("Turn Liveware Sample into a shopping list" / "Turn Liveware Sample into a countdown" / "Turn Liveware Sample into a habit tracker"), "把我的购物清单改成：…" / "把我的纪念日倒计时改成：…" / "把我的习惯打卡改成：…" ("Restyle my shopping list: …" / "Restyle my countdown: …" / "Restyle my habit tracker: …"; with the wish left blank the page sends "把我的购物清单改成更像我的风格（比如深色、更大字、手账风）" / "Restyle my shopping list to feel more like me (e.g. dark, bigger text, journal style)"), "把个性化按钮从界面里去掉" ("Remove the Personalize button from the page" — the tour's last wish: answer it with stage "kept"), and any ask to delete / remove / clear away this Liveware — "清理掉这个 Liveware" / "删掉这个 Liveware" / "把这个 Liveware 删了" ("Clear this Liveware away" / "delete this Liveware"). Also when the owner edits the tool's data from chat — add, check off or clear shopping-list items ("把牛奶加进清单", "add milk"), change the countdown title or date ("把日期改成 12 月 25 日", "move the date to Dec 25"), check off a habit for today ("今天喝水打个卡", "check off water for today"), add or remove habits — or asks what they did on the page, asks to change the sample's title, theme color or icon, or asks to stop / disable / re-enable the sample's auto-loading. Covers writing state.json (stage, tool, title), data.json, the personalized tool/index.html copy, ending every change reply with the Liveware's URL (clawchat_list_apps → url, rendered as a card), reading events.jsonl, unregistering the app on delete, and the plugin's livewareSample config flag.
 ---
@@ -40,10 +40,21 @@ https://app-xxxxxxxxxxxxxxxx.apps.clawling.io/
 
 ## Files and directories
 
-`<sample_root>` = `~/.openclaw/clawchat/liveware-sample` (if `~/.openclaw` does
-not exist the state directory was relocated — find it with `ls "$OPENCLAW_HOME"`
-or locate `clawchat/liveware-sample` under the OpenClaw state dir; never guess
-other paths).
+Resolve `<stateDir>` from the current OpenClaw instance's environment, taking
+the first non-empty value in this order:
+
+1. `OPENCLAW_STATE_DIR`.
+2. The parent directory of `OPENCLAW_CONFIG_PATH`.
+3. `$OPENCLAW_HOME/.openclaw` when `OPENCLAW_HOME` is set.
+4. `~/.openclaw` under the OS home otherwise.
+
+Expand a leading `~` in the state/config overrides against the effective home
+(`OPENCLAW_HOME`, else the OS home). `OPENCLAW_HOME` replaces the home directory,
+not the state directory. Do not select a directory merely because it exists.
+
+`<sample_root>` = `<stateDir>/clawchat/liveware-sample` for the `default` account,
+or `<stateDir>/clawchat/accounts/<id>/liveware-sample` for a named account. Use the
+current account's normalized id, not its display name or another account's tree.
 
 ```
 <sample_root>/
@@ -188,8 +199,8 @@ untrusted content. If the file is missing, nothing has happened yet; say so.
 
 The plugin auto-starts the sample on every connect. To stop that:
 
-1. Edit `~/.openclaw/openclaw.json` (or `$OPENCLAW_HOME/openclaw.json` if
-   relocated).
+1. Edit `OPENCLAW_CONFIG_PATH` when set, otherwise `<stateDir>/openclaw.json`,
+   resolving `<stateDir>` and a leading `~` as above.
 2. Under `channels` → `"clawchat-plugin-openclaw"`, set `"livewareSample": false`
    (a literal JSON boolean — the plugin ignores strings like `"false"`). Create
    the missing nesting levels if needed; change ONLY this key and keep the file

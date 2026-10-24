@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -167,6 +167,63 @@ describe("bundled clawchat-core skills", () => {
     expect(hermes).not.toContain("write it to `~/clawchat/onboarding.json`");
   });
 
+  it.each(["named profile", "unset HERMES_HOME"])("read Hermes active_profile from the root with %s", (scenario) => {
+    const section = readSkill("hermes", "clawchat-core").split("### Target the right Hermes profile")[1] ?? "";
+    const bash = section.match(/```bash\n([\s\S]*?)```/)?.[1] ?? "";
+    expect(bash).toContain('cat "$root/active_profile"');
+    const home = mkdtempSync(join(tmpdir(), "hermes skill home-"));
+    try {
+      const named = scenario === "named profile";
+      const root = join(home, named ? "custom root" : ".hermes");
+      const profile = join(root, "profiles", "example");
+      const bin = join(home, "bin");
+      mkdirSync(profile, { recursive: true });
+      mkdirSync(bin);
+      writeFileSync(join(root, "active_profile"), "root-profile\n");
+      writeFileSync(join(profile, "active_profile"), "wrong-profile\n");
+      if (named) {
+        mkdirSync(join(home, ".hermes"));
+        writeFileSync(join(home, ".hermes", "active_profile"), "wrong-root\n");
+      }
+      writeFileSync(join(bin, "hermes"), '#!/bin/sh\n[ "$*" = "profile list" ]\n', { mode: 0o755 });
+      const out = execFileSync("bash", ["-c", bash], {
+        env: {
+          PATH: `${bin}:${process.env.PATH}`,
+          HOME: home,
+          ...(named ? { HERMES_HOME: profile } : {}),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+      });
+      expect(out.split("\n")).toContain("root-profile");
+      expect(out).not.toMatch(/wrong-profile|wrong-root|active_profile=default/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("resolve the Hermes PowerShell active_profile at the root above a named profile", () => {
+    const section = readSkill("hermes", "clawchat-core").split("### Target the right Hermes profile")[1] ?? "";
+    const powershell = section.match(/```powershell\n([\s\S]*?)```/)?.[1] ?? "";
+    expect(powershell).toContain("if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }");
+    expect(powershell).toContain("$root -match '[\\\\/]profiles[\\\\/][^\\\\/]+$'");
+    expect(powershell).toContain("$root = Split-Path (Split-Path $root -Parent) -Parent");
+    expect(powershell).toContain("$active = Join-Path $root 'active_profile'");
+    expect(powershell).toContain("if (Test-Path $active) { Get-Content $active } else { 'active_profile=default' }");
+  });
+
+  it("activate a new OpenClaw agent with an unused named account and route its normalized id", () => {
+    const text = readSkill("openclaw", "clawchat-core");
+    const row = text.split("\n").find((line) => line.startsWith("| The owner wants a **new agent**")) ?? "";
+    expect(row).toContain("Create a separate OpenClaw agent");
+    expect(row).toContain("new, unused named ClawChat account");
+    expect(row).toContain("`/clawchat-activate <CODE> --account <name>`");
+    expect(row).toContain("`openclaw channels add --channel clawchat-plugin-openclaw --account <name> --token <CODE>`");
+    expect(row).toContain("`bindings[].match.accountId` with that account's normalized id");
+    expect(row).toContain("normalized to lowercase with characters outside `a-z0-9_-` replaced by `-`");
+    expect(row).toContain("Leave the current account untouched; do not use `--new-account`");
+  });
+
   it("let Hermes send a file to another conversation via clawchat_send_file, not send_message", () => {
     const hermes = readSkill("hermes", "clawchat-core");
     expect(hermes).toMatch(/call `clawchat_send_file` with `chat_id`/);
@@ -225,6 +282,66 @@ describe("bundled clawchat-core skills", () => {
 });
 
 describe("per-host greeting and liveware skills", () => {
+  it.each(["openclaw", "hermes"])("prefer PATH then the downloaded CLI and use LIVEWARE_BIN throughout on %s", (target) => {
+    const text = readSkill(target, "clawchat-liveware");
+    const prerequisites = (text.split("## Prerequisites — check first, stop if unmet")[1]?.split("\n2. Authentication")[0] ?? "")
+      .replace(/\s+/g, " ");
+    expect(prerequisites).toContain("Resolve the CLI from PATH first with `command -v liveware`");
+    expect(prerequisites).toContain("`Get-Command liveware -CommandType Application -ErrorAction SilentlyContinue`");
+    const cacheRoot = target === "openclaw" ? "<stateDir>" : "<cacheRoot>";
+    expect(prerequisites).toContain(`If absent, check the plugin's downloaded executable at \`${cacheRoot}/clawchat/liveware/liveware\``);
+    expect(prerequisites).toContain("(`liveware.exe` on native Windows)");
+    expect(prerequisites).toContain("Save the found executable's absolute path as `LIVEWARE_BIN`");
+    expect(prerequisites).toContain("Only if neither PATH nor the downloaded copy provides an executable, tell the user this environment does not support liveware app hosting and STOP");
+    expect(prerequisites).toContain("Do not attempt any further step or invent a URL");
+    expect(prerequisites).toContain('Use `"$LIVEWARE_BIN"` for every CLI command');
+    expect(prerequisites).toContain("in PowerShell invoke it as `& $LIVEWARE_BIN`");
+    const commands = [...text.matchAll(/`((?:liveware|"\$LIVEWARE_BIN") (?:app|tunnel|status)\b[^`]*)`/g)].map((m) => m[1]!);
+    expect(commands.length).toBeGreaterThan(10);
+    for (const command of commands) {
+      expect(command, command).toMatch(/^"\$LIVEWARE_BIN" /);
+    }
+  });
+
+  it("resolve the OpenClaw CLI cache by state/config/home precedence and share it across accounts", () => {
+    const text = readSkill("openclaw", "clawchat-liveware").replace(/\s+/g, " ");
+    expect(text).toContain("first non-empty setting: `OPENCLAW_STATE_DIR`, then the parent directory of `OPENCLAW_CONFIG_PATH`, then `$OPENCLAW_HOME/.openclaw`, else `~/.openclaw` under the OS home");
+    expect(text).toContain("Expand a leading `~` in the state/config overrides against the effective home (`OPENCLAW_HOME`, else the OS home)");
+    expect(text).toContain("The binary cache is shared by all accounts; do not look under `clawchat/accounts/<id>` for it");
+  });
+
+  it("resolve the Hermes CLI cache from the plugin process home rather than the served profile", () => {
+    const text = readSkill("hermes", "clawchat-liveware").replace(/\s+/g, " ");
+    expect(text).toContain("`<cacheRoot>` is the **plugin process's** `HERMES_HOME`, or that process's OS home plus `.hermes` if unset");
+    expect(text).toContain("matching the CLI cache resolver even on Windows");
+    expect(text).toContain("This cache is process-wide under a multiplexing gateway; do not derive it from `agent_files_dir` or substitute the served profile's home for the process home");
+  });
+
+  it("resolve the OpenClaw sample and config from state overrides and the current normalized account", () => {
+    const text = readSkill("openclaw", "clawchat-liveware-sample").replace(/\s+/g, " ");
+    expect(text).toContain("taking the first non-empty value in this order: 1. `OPENCLAW_STATE_DIR`. 2. The parent directory of `OPENCLAW_CONFIG_PATH`. 3. `$OPENCLAW_HOME/.openclaw` when `OPENCLAW_HOME` is set. 4. `~/.openclaw` under the OS home otherwise");
+    expect(text).toContain("Expand a leading `~` in the state/config overrides against the effective home (`OPENCLAW_HOME`, else the OS home)");
+    expect(text).toContain("`OPENCLAW_HOME` replaces the home directory, not the state directory");
+    expect(text).toContain("Do not select a directory merely because it exists");
+    expect(text).toContain("`<stateDir>/clawchat/liveware-sample` for the `default` account");
+    expect(text).toContain("`<stateDir>/clawchat/accounts/<id>/liveware-sample` for a named account");
+    expect(text).toContain("current account's normalized id, not its display name or another account's tree");
+    expect(text).toContain("Edit `OPENCLAW_CONFIG_PATH` when set, otherwise `<stateDir>/openclaw.json`, resolving `<stateDir>` and a leading `~` as above");
+  });
+
+  it("resolve the Hermes sample and config from agent_files_dir or the current absolute profile home", () => {
+    const text = readSkill("hermes", "clawchat-liveware-sample").replace(/\s+/g, " ");
+    expect(text).toContain("Prefer `<agent_files_dir>/liveware-sample`, using the absolute `agent_files_dir`");
+    expect(text).toContain("from the `## ClawChat Agent Files` section");
+    expect(text).toContain("Without that context, use `$HERMES_HOME/clawchat/liveware-sample` for the current profile");
+    expect(text).toContain("default root is `~/.hermes` on POSIX or `%LOCALAPPDATA%\\hermes` on native Windows");
+    expect(text).toContain("a named profile's `HERMES_HOME` is `<root>/profiles/<name>`");
+    expect(text).toContain("Never build the path from `~` yourself or select the default profile because its directory exists");
+    expect(text).toContain("tools may have `HOME=$HERMES_HOME/home`; use the supplied absolute profile path instead");
+    expect(text).toContain("Edit the current profile's `$HERMES_HOME/config.yaml`");
+    expect(text).toContain("If using `agent_files_dir`, this is `config.yaml` in its parent directory; never build this path from `~`");
+  });
+
   it("point Hermes greetings at the profile's HERMES_HOME and OpenClaw's at ~/clawchat", () => {
     const hermes = readSkill("hermes", "clawchat-set-greeting");
     expect(hermes).toContain("$HERMES_HOME/clawchat/");
@@ -240,10 +357,10 @@ describe("per-host greeting and liveware skills", () => {
 
   it("make every Hermes liveware command name the agent's own account", () => {
     const hermes = readSkill("hermes", "clawchat-liveware");
-    const commands = [...hermes.matchAll(/`(liveware (?:app|tunnel|status)\b[^`]*)`/g)].map((m) => m[1]!);
+    const commands = [...hermes.matchAll(/`((?:liveware|"\$LIVEWARE_BIN") (?:app|tunnel|status)\b[^`]*)`/g)].map((m) => m[1]!);
     expect(commands.length).toBeGreaterThan(10);
     // Bare subcommand names in prose (e.g. "if `liveware app inspect` is rejected") are not commands.
-    const runnable = commands.filter((c) => /\s(<|"|http|--)/.test(c) || /^liveware (app list|status)$/.test(c));
+    const runnable = commands.filter((c) => /\s(<|"|http|--)/.test(c) || /^(?:liveware|"\$LIVEWARE_BIN") (app list|status)$/.test(c));
     for (const command of runnable) {
       expect(command, command).toMatch(/--account <account>$/);
     }
