@@ -158,6 +158,33 @@ describe("bundled clawchat-core skills", () => {
     }
   });
 
+  it("teach widget/v1 the same way on both hosts: one tool, explicit request, full snapshots, taps and resend", () => {
+    const widgetSection = (text: string) =>
+      text.split("## Home-screen widgets (widget/v1)")[1]?.split(/\n## /)[0] ?? "";
+    const [hermes, openclaw] = SKILLS.map(widgetSection);
+    expect(hermes).not.toBe("");
+    expect(hermes).toBe(openclaw);
+    for (const text of SKILLS) {
+      expect(text).toMatch(/^description: .*updating the owner's home-screen widgets/m);
+    }
+    expect(hermes).toContain("You write it with `clawchat_widget_send`");
+    expect(hermes).toContain("Send one only after your partner asked for a widget");
+    expect(hermes).toContain("Every message is the full snapshot, never a diff. The latest one per `id` wins.");
+    expect(hermes).toContain("Do not refresh on a timer");
+    expect(hermes).toContain("It only ever goes to your private chat with your partner.");
+    for (const line of [
+      '[widget todo] checked "Pay rent" (t1)',
+      '[widget todo] turned on "Focus" (f1)',
+      '[widget todo] pressed "Refresh" (b1)',
+      "[widget todo] capture: buy milk",
+      "[widget todo] resend",
+    ]) {
+      expect(hermes).toContain(line);
+    }
+    expect(hermes).toMatch(/apply each in order, they are not duplicates\. Then send one new full snapshot\./);
+    expect(hermes).toContain("`resend` means a device lost the widget: send the latest snapshot again.");
+  });
+
   it("let moment images be an http(s) URL or an absolute local path, with no phantom upload tool", () => {
     for (const text of SKILLS) {
       expect(text).toMatch(/`images` (entry )?(of `clawchat_create_moment` )?is an http\(s\) URL or an absolute local file path/);
