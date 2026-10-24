@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { checkReleaseTag } from "./release-guard.mjs";
+import { checkReleaseTag, npmInvocation } from "./release-guard.mjs";
 
 const GUARD = fileURLToPath(new URL("./release-guard.mjs", import.meta.url));
 const VERSION = "1.2.3";
@@ -255,3 +255,10 @@ for (const version of ["1.2.3-dev.1", "1.2.3+build", "v1.2.3", "01.2.3", "1.2"])
     assert.doesNotMatch(result.stdout, /Would run:/);
   });
 }
+
+test("npm promotion runs npm directly on POSIX and through the npm.cmd shim on Windows", () => {
+  const args = ["dist-tag", "add", "@clawling/clawchat-plugin-install-cli@1.2.3", "latest"];
+  assert.deepEqual(npmInvocation(args, "linux"), { command: "npm", args, shell: false });
+  assert.deepEqual(npmInvocation(args, "win32"), { command: "npm.cmd", args, shell: true });
+  assert.throws(() => npmInvocation(["dist-tag", "add", "pkg@1.2.3&calc", "latest"], "win32"), /cmd\.exe/);
+});

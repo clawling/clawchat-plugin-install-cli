@@ -6,6 +6,18 @@ import { fileURLToPath } from "node:url";
 const PACKAGE_NAME = "@clawling/clawchat-plugin-install-cli";
 const FINAL_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
+// Windows ships npm as an npm.cmd shim, which Node only launches through a
+// shell. Every argument here is a constant or a version checked against
+// FINAL_VERSION; the allowlist below keeps cmd.exe metacharacters out anyway.
+const SHELL_SAFE_ARG = /^[A-Za-z0-9@._/-]+$/;
+
+export function npmInvocation(args, platform = process.platform) {
+  if (platform !== "win32") return { command: "npm", args, shell: false };
+  const unsafe = args.find((arg) => !SHELL_SAFE_ARG.test(arg));
+  if (unsafe !== undefined) throw new Error(`Refusing to pass ${JSON.stringify(unsafe)} through cmd.exe`);
+  return { command: "npm.cmd", args, shell: true };
+}
+
 function git(cwd, args) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8", shell: false });
   if (result.error || result.status !== 0) {
@@ -131,7 +143,8 @@ function main(args) {
       console.log(`Would run: npm ${npmArgs.join(" ")}`);
       return 0;
     }
-    const result = spawnSync("npm", npmArgs, { stdio: "inherit", shell: false });
+    const npm = npmInvocation(npmArgs);
+    const result = spawnSync(npm.command, npm.args, { stdio: "inherit", shell: npm.shell });
     if (result.error) console.error(`Promotion failed: ${result.error.message}`);
     return result.status ?? 1;
   }
