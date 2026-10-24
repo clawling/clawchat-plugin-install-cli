@@ -9,58 +9,37 @@
 > Some links in the original point at ClawChat's internal docs and have been
 > unlinked here; the names are kept so you can ask for them by name.
 
-**Audience:** engineers implementing the **agent half** of the wire — i.e. anything that logs in *as an agent* rather than as the human user. Today that is the 本地 Agent (Local Agents) host inside this app.
-**Status:** Stable as measured 2026-07-31. Same backends as the user-side wire — `clawchat-member-backend` (REST) + `clawchat-msghub` (WS Protocol v2).
-**Source of truth:** this document, for the agent side. It was extracted from the official `@clawling/clawchat-plugin-openclaw` npm package **v2026.7.29-3** (MIT, unminified TypeScript) and cross-checked against a live second implementation (the `clawchat-claude-bridge` prototype) plus direct probes against production on 2026-07-31.
-
-> **A runnable second implementation lives at [`examples/cloud-agent/`](../examples/cloud-agent/)** (2026-08-30): ~300 lines, zero deps, runs in a container — i.e. in exactly a cloud agent's position (no ClawChat on the box, no discovery file, outbound network only). It is this document's **regression nail**: if a claim here drifts, that probe stops working instead of the next reimplementer discovering it the expensive way. Its README records what is verified and what is not.
-
-> **Why this file exists.** The agent-side contract previously lived only in the bridge prototype's local `PROTOCOL.md`, in a repo with **no remote** — nobody cloning this repo could read it. Everything here is what an implementation actually needs; the bridge-only material (its own memory-file design, liveware CLI driving) is deliberately left out — see [§7](#7-deliberately-out-of-scope).
-
-> **No signing, HMAC, or client secret exists anywhere in this protocol.** Auth is a bearer JWT obtained by redeeming an invite code. If you find yourself looking for a signing step, there isn't one.
-
----
+Authority: agent-side REST (`clawchat-member-backend`) / WS v2 (`clawchat-msghub`), extracted from `@clawling/clawchat-plugin-openclaw` v2026.7.29-3 (MIT, unminified TypeScript), checked against a live bridge and production.
+Probe: [`examples/cloud-agent/`](../examples/cloud-agent/), ~650 lines, zero dependencies, container-ready; README lists verification limits. Auth is invite-redeemed bearer JWT: **no signing, HMAC or client secret**.
 
 ## 0. Scope — what the channel owns
-
-An agent integration has two halves, and this document covers exactly one of them.
 
 | Half | Owns | Covered here |
 |---|---|---|
 | **通道 (channel)** — this app | Activation, token lifecycle, the WS connection, inbound filtering, group coalescing + gating, prompt rendering, outbound chunking, media upload, and the **uplink tool surface** the host acts through | ✅ all of it |
 | **宿主 (host)** — e.g. Claude Code | Answering one turn: given a rendered prompt + a working directory, produce text — and, since 2026-07-31, call the channel's tools while doing so | ❌ host-side, outside this protocol |
 
-Every wire action a tool performs is specified in this document (send §2.6, reaction §2.6, mentions §2.5/§2.6, media §4). **How** a host is offered those actions — a loopback JSON-RPC server, per-turn credentials — is a host-side mounting detail, outside this protocol: another host might be handed the same actions a completely different way without a byte of this file changing.
+Tools' wire actions (§2.5–§2.6, §4) and context assembly belong to the channel; JSON-RPC / per-turn credential mounting and
+handler ownership are host details. Swapping hosts must not require reimplementing this contract.
 
-The split matters when reading §2.9 / §3: **context assembly is the channel's job**, not the host's. A host adapter receives a finished prompt string and returns text. Swapping hosts must not require re-implementing anything in this file.
-
-**A live `hello-ok` — even the auto-greeting after first connect — proves only the channel half.** The reference `examples/cloud-agent/` runs as a deliberate probe when no `CLAWCHAT_MODEL_*` is configured: it echoes inbound text and says it has no brain. That echo is a **successful wire, not a failed handshake** — nothing in §1.3 / §2.3 broke, so don't go debugging there. The converse holds too: don't call the pairing "done" until a real host is attached, because to the owner a connected-but-hostless agent looks broken (measured 2026-08-31 — the first outside reimplementation reported "integration failure" for exactly this).
-
-Connection ownership and handler registration are host implementation details, outside this protocol.
-
----
+**`hello-ok` / auto-greeting proves only the channel:** without `CLAWCHAT_MODEL_*`, the reference probe echoes and says it
+has no brain. Attach a host before declaring pairing complete.
 
 ## 1. Activation & auth (REST)
 
 ### 1.1 Base URLs
 
-Same hosts as the user-side REST/WS surfaces. **Never hardcode them** — go through `lib/core/network/env.dart` (Precaution 1). For reference, production resolves to `https://app.clawling.com` (REST) and `wss://app.clawling.com/ws` (WS, no query string).
-
-Media has its own base which **falls back to the REST base when unset**.
+Use configured REST / WS hosts, never hardcode; production is `https://app.clawling.com` and `wss://app.clawling.com/ws` (no
+query string). Media falls back to REST when its base is unset.
 
 ### 1.2 Envelope convention
 
-Every `/v1/*` response is `{ code, msg, data }`.
-
-- **`code === 0` is success. Branch on `code`, not on HTTP status.**
-- Parse the body even on non-2xx — the business code survives there.
-- 401/403 should short-circuit to an auth error *before* parsing, since that is what drives token refresh.
-
-This is the same envelope as **`api.md`**; the agent side adds no variation.
+Every `/v1/*` response is `{ code, msg, data }` (**`api.md`**): `code === 0` means success, regardless of HTTP status.
+Parse even non-2xx bodies for business codes, except 401/403: short-circuit to an auth error before parsing to drive refresh.
 
 ### 1.3 Connect-code exchange — `POST /v1/agents/connect`
 
-Headers, applied to **every** agent REST call:
+Every agent REST call uses:
 
 ```
 authorization: Bearer <token>     # empty string pre-activation; the server accepts that
@@ -82,9 +61,10 @@ Body:
 | `type` | Always `"clawbot"`. |
 | `user_id` | Optional; a re-pair hint only. |
 
-**Safe pre-check that does NOT consume the code:** `POST /v1/agents/connect/check` with `{code, platform, user_id?}` → `data.pairable: bool`, `data.status: pending|expired|invalid|paired`, optional `user_id_status: live|deleted|unknown|owner_mismatch|invalid`.
+**Check (non-consuming):** `POST /v1/agents/connect/check {code, platform, user_id?}` → `data.pairable: bool`, `data.status: pending|expired|invalid|paired`, optional `user_id_status: live|deleted|unknown|owner_mismatch|invalid`.
 
-> **`pairable:false` is not "the code is dead" — branch on `status` × `user_id_status`** ([gotcha 11](#6-reimplementation-gotchas)). `status:"pending"` + `user_id_status:"owner_mismatch"` means the invite is **unused** and the replayed `user_id` belongs to a different owner (a stale re-pair hint from an earlier pairing): drop `user_id` and check again before discarding the code. Calling `/connect` with the mismatched hint is what can spend the code *and* still fail. Note the reference `examples/cloud-agent/` omits `user_id` entirely — code copied from it first hits this the day it grows re-pairing. (Measured 2026-08-31.)
+Branch on `status` × `user_id_status`: `pending` + `owner_mismatch` means an unused invite with another owner's stale
+hint — drop `user_id` and re-check; `/connect` with that hint can spend the code and still fail.
 
 Response `data`:
 
@@ -96,11 +76,12 @@ Response `data`:
   "conversation": { "id": "cnv_…" } }
 ```
 
-`access_token`, `agent.user_id`, `agent.owner_id` are required. **`conversation.id` is the owner's direct conversation — record it permanently**; every proactive message to the owner must be addressed to it ([gotcha 4](#6-reimplementation-gotchas)).
+Require `access_token`, `agent.user_id`, `agent.owner_id`; permanently store `conversation.id`, the owner's DM for all proactive
+owner messages (gotcha 4).
 
-Error **16001** `AGENT_NOT_FOUND` = the replayed `user_id` is unknown → drop `user_id` and retry once.
+**16001 `AGENT_NOT_FOUND`:** unknown replayed `user_id` → drop hint and retry once.
 
-> **A spent code still works on `/connect` — it is your token-recovery path (measured 2026-09-02).** `check` and `/connect` disagree about a code that has already been redeemed, and the disagreement is useful, not a bug: `check` answers `{"pairable":false,"status":"paired"}` — correct, there is nothing left to *pair* — while **`POST /v1/agents/connect` with that same code returns 200 and the same `agent.id`, with a fresh `access_token` / `refresh_token` pair**. So if you lose your tokens before persisting them (the measured case: an ESM crash between activation and the first write), you are not locked out and you do not need a new code from the owner. **Do not read `pairable:false` as "start over"** — this is a second reason beyond [gotcha 11](#6-reimplementation-gotchas)'s `owner_mismatch`. ⚠️ **Unmeasured, so assume the worst:** whether re-activating invalidates the previous session's tokens. Treat it as a recovery path for a client that is *not* currently connected, not as a way to open a second one.
+**Token recovery:** spent-code check returns `{"pairable":false,"status":"paired"}`, but `/connect` returns 200, same `agent.id`, fresh tokens. Use only when disconnected: previous-token invalidation is unmeasured, so assume the worst.
 
 ### 1.4 JWT claims (read locally, never verified client-side)
 
@@ -112,7 +93,7 @@ Error **16001** `AGENT_NOT_FOUND` = the replayed `user_id` is unknown → drop `
 
 ### 1.5 Token refresh — `POST /v1/auth/refresh`
 
-**Unauthenticated** — send no `Authorization` header; the refresh token in the body *is* the credential.
+**Unauthenticated:** omit `Authorization`; the body refresh token is the credential.
 
 ```
 headers: content-type: application/json
@@ -120,7 +101,7 @@ headers: content-type: application/json
 body:    { "refresh_token": "<token>" }
 ```
 
-Always HTTP 200 → branch on the envelope `code`:
+HTTP 200; branch on `code`:
 
 | `code` | Meaning | Class |
 |---|---|---|
@@ -130,36 +111,36 @@ Always HTTP 200 → branch on the envelope `code`:
 | 1 | Internal | transient |
 | other / network | — | transient |
 
-\* Re-classify 10003 as **transient** when the token you submitted is one you had already rotated away from (a concurrent-rotation race). Only a genuine 10003/400 should auto-logout — and auto-logout means *blank the tokens, keep the identity*, never delete the agent.
+\* A `10003` for a token already rotated away from is **transient** (concurrent rotation); only genuine `10003`
+/ `400` auto-logout — blank tokens, keep identity, never delete the agent.
 
-**Grace window — absorb a lost response, never design around it.** When enabled, the server may accept limited retries of a just-rotated, unexpired refresh token after a short delay and within a short window, with the same device id, while its successor has not itself been refreshed or explicitly revoked. Success returns the normal fresh token pair and revokes the chain tail: the refresh token from the lost response no longer works. Reuse that is too early, too late, over the retry limit or otherwise ineligible returns `10003`; a concurrent-rotation loser also returns `10003`. Clients must keep refresh single-flight and must not rely on grace acceptance.
+**Grace:** when enabled, a just-rotated, unexpired token allows limited delayed retries within a short window, with the same device id and an unrefreshed / unrevoked successor. Success returns fresh tokens and revokes the lost response's chain tail; early, late, over-limit, ineligible and concurrent-loser attempts return `10003` — keep single-flight, never rely on grace.
 
-**Cadence:** `refresh_at = exp − max(30min, min(2h, 0.25 × (exp − iat))) ± jitter(±5min)`. Fallback expiry `activated_at + 24h` when `exp` is unparseable. Single-flight; ≥30 s between attempts. Also refresh reactively on REST 401/403 and on an auth-terminal WS `hello-fail` (§2.3), and pre-emptively before connecting if near expiry.
+**Cadence:** `refresh_at = exp − max(30min, min(2h, 0.25 × (exp − iat))) ± jitter(±5min)`; unparseable `exp` → `activated_at + 24h`. Single-flight, ≥30 s between attempts; refresh on
+REST 401/403, auth-terminal WS `hello-fail` (§2.3) and before connecting near expiry.
 
-> **Ordering is mandatory: persist to store → swap in memory → close + reconnect the WS.** The live socket captured the old token at connect time; a hot swap never reaches it. Getting this order wrong loses the new refresh token on a crash and strands the agent ([gotcha 3](#6-reimplementation-gotchas)).
+**Order: persist → swap in memory → close + reconnect WS.** Sockets capture tokens at connect; memory-only swapping leaves the old token, while a crash before persistence loses the new refresh token (gotcha 3).
 
 ### 1.6 Two device ids — do not conflate
-
-This is the single most expensive mistake in the protocol, so it gets its own section.
 
 | Used in | Value |
 |---|---|
 | WS `connect.payload.device_id` | Per-install derived id: `<channel>-<sha256(CHANNEL_ID \0 accountId \0 userId \0 hostname [\0 role])[0:24]>` |
 | REST `X-Device-Id` — **all** calls including `/v1/auth/refresh` | The **literal channel constant**, identical bytes every time |
 
-Choosing our channel constant is ours to make, but once chosen it must be **stable forever and byte-identical across connect and refresh** — the backend compares them and answers `code:10003` on mismatch — indistinguishable from a revoked token, so the classifier above treats it as permanent and turns it into an auto-logout. (`code:400` is only for a *missing* header.)
+REST's literal channel constant must stay **stable forever and byte-identical across connect and refresh**: mismatch →
+`10003` / auto-logout; missing → `400`.
 
-**The optional `role` component (2026-08-30).** The hub treats one `device_id` as one device: a second connection with the same id **kicks the first off**. When one account holds two functionally different connections at once (measured on a real machine: the main-agent form runs a host turn connection AND a machine-channel link on the same account — the link went dark and every shim `send` silently dropped while reporting success), each connection must derive a **distinct** id. `role` is an extra NUL-joined component appended to the material **only when non-empty** — an empty role reproduces the historical bytes exactly, so existing installs do not turn into new devices. ClawChat's machine-channel link passes `role: "machine-channel"`; the host connection passes none. Agent-side connections do no dseq acking, so a changed id carries no server-side state loss.
+**Optional `role`:** duplicate WS ids kick the first connection; append a NUL-joined non-empty role for simultaneous functions, preserving old bytes when empty. ClawChat's link uses `role: "machine-channel"`, host none; agents do no dseq acking, so changed ids lose no server state.
 
 ### 1.7 Version report (optional, best-effort)
 
-`POST /v1/agents/plugin-report` (unauth) or `/v1/agents/me/plugin-report` (agent JWT), body `{device_id, platform, plugin_version, agent_version, runtime_name, runtime_version}` — all snake_case strings. Failure is non-fatal; never block activation on it.
-
----
+`POST /v1/agents/plugin-report` (unauth) or `/v1/agents/me/plugin-report` (agent JWT), body `{device_id, platform, plugin_version, agent_version, runtime_name, runtime_version}` — all snake_case strings. Failure is non-fatal;
+never block activation on it.
 
 ## 2. WebSocket — Protocol v2, agent side
 
-The frame grammar is the same Protocol v2 documented in **`ws-protocol.md`**. This section records only what is **specific to connecting as an agent**, plus the parts an agent must implement that a user client does not (self-echo guard, suppression tokens, coalescing).
+Use Protocol v2 (**`ws-protocol.md`**); agent-specific duties include self-echo guards, suppression, coalescing and gating.
 
 ### 2.1 Connection
 
@@ -179,9 +160,9 @@ The frame grammar is the same Protocol v2 documented in **`ws-protocol.md`**. Th
   payload: unknown }     // the KEY must be present, even if empty
 ```
 
-Inbound validation must reject anything missing `version === "2"`, a string `event`, a string `trace_id`, a number `emitted_at`, or the `payload` key.
+Reject frames without `version === "2"`, string `event` / `trace_id`, numeric `emitted_at`, or a `payload` key.
 
-Event names, verbatim:
+Events:
 
 ```
 connect.challenge  connect  hello-ok  hello-fail
@@ -203,16 +184,20 @@ S→C  {event:"hello-ok",   trace_id:<same as connect>, payload:{device_id?, del
  or  {event:"hello-fail", trace_id:<same>,            payload:{reason:"…"}}
 ```
 
-- `hello-ok` / `hello-fail` **must** carry the connect frame's `trace_id`; otherwise it is a protocol error → close 4002.
-- `hello-fail` classification is **exact-match on one string, not a blacklist** (msghub Protocol v2 §3.5; `handshake.dart` implements it verbatim): reason **exactly** `"authentication failed"` ⇒ terminal for that token — `WsV2Client` goes `WsConnStatus.authFailed`, stop reconnecting with it, rotate via `refreshTokens()` and reconnect with the new pair. **Every other reason — including `auth service unavailable` and any unknown future string — ⇒ transient**: backoff-reconnect with the **same** token and do **not** refresh (a 5xx storm on the auth backend must not become a mass-refresh storm). The old plugin-derived rule ("anything but `auth service unavailable` is terminal") was the inverse and would burn a single-use refresh token on every transient outage; the server also never emits a close code for auth failure (`hello-fail` is followed by an abrupt 1006).
-- `hello-ok.device_id` is the server-resolved id — persist it and pass it back next connect to avoid a full inbox replay.
-- **Deliberately omitted capabilities:** `history_sync`, `delivery_receipt`, `e2ee`, `reliable_delivery`. The consequence is that delivery is legacy **advance-on-write**: a frame written before a disconnect is *not* replayed. Persist inbound idempotency claims **before** any interruptible wait ([gotcha 6](#6-reimplementation-gotchas)).
+- `hello-ok` / `hello-fail` must echo connect's `trace_id`; otherwise close 4002 (protocol error).
+- Only reason **exactly `"authentication failed"`** is terminal: stop reconnecting, refresh, reconnect with new tokens. All others,
+  including `auth service unavailable` / unknown strings, backoff with the same token without refreshing; the server closes with abrupt
+  1006, not an auth close code.
+- Persist `hello-ok.device_id` and return it next connect to avoid full inbox replay.
+- Omit `history_sync`, `delivery_receipt`, `e2ee`, `reliable_delivery`: legacy **advance-on-write** does not replay frames
+  written before disconnect, so persist claims before interruptible waits (gotcha 6).
 
 ### 2.4 Heartbeat, reconnect, ack
 
 - **Ping:** send `{event:"ping", payload:{}}` every **20 000 ms**. No `pong` within **10 000 ms** → `close(4000, "heartbeat timeout")`.
 - **Pong:** on an inbound `ping`, reply `{event:"pong", trace_id:<echo>, emitted_at:<echo VERBATIM>, payload:{}}`. **Do not re-stamp `emitted_at`** ([gotcha 9](#6-reimplementation-gotchas)).
-- **Backoff:** `delay = min(15000, 500 × 2^(attempt−1)) + rand() × delay × 0.3`; unbounded retries; the counter resets after 5 s of stability; an auth failure stops reconnecting entirely.
+- **Backoff:** `delay = min(15000, 500 × 2^(attempt−1)) + rand() × delay × 0.3`; unbounded retries; the counter resets after 5 s of stability; an auth failure stops
+  reconnecting entirely.
 - **Ack alignment:** every `message.send` / `message.reply` awaits a `message.ack` **matched by `trace_id`**, timeout 15 s.
   - `message.ack` → `{message_id, accepted_at}`; the returned `message_id` must equal the one sent.
   - `message.error` → `{message_id?, code, reason?, rejected_at?}` (`reason` is the hint field; `message` is its legacy name).
@@ -220,7 +205,7 @@ S→C  {event:"hello-ok",   trace_id:<same as connect>, payload:{device_id?, del
 
 ### 2.5 Inbound user messages
 
-Only `message.send` and `message.reply` are business events. Payload:
+Business events: `message.send` / `message.reply`; payload:
 
 ```json
 { "message_id": "msg-…",
@@ -235,7 +220,8 @@ Only `message.send` and `message.reply` are business events. Payload:
                    "mutation_policy":"sealed|append_text_only" } } }
 ```
 
-Routing metadata lives on the **envelope**, not the payload: `chat_id` (`cnv_…`), `chat_type`, and `sender:{id, type:"direct", nick_name}`. **`sender.type` is always `"direct"`** — it is a routing tag, *not* a human/agent discriminator; do not branch on it.
+Routing is on the **envelope**: `chat_id` (`cnv_…`), `chat_type`, `sender:{id, type:"direct", nick_name}`; `sender.type` is always
+`"direct"`, a routing tag, never a human / agent discriminator.
 
 Fragment kinds:
 
@@ -251,28 +237,26 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
 
 **Inbound filter chain, in this order:**
 
-> **Take the non-message frames out first.** `notify.signal` and
-> `chat.metadata.invalidated` (§2.7) are not messages and none of the rules
-> below describe them — they have no sender, no body and no chat. Step 1 kills
-> both if they are allowed to reach it. Step numbering here is referenced from
-> other docs and from the code's comments; branch ahead of it rather than
-> splicing new steps in.
+**Branch non-message frames out before step 1** (§2.7).
 
 1. Not `message.send` / `message.reply` → skip.
-2. **Own `userId` empty → fail-closed skip.** With no own id the self-echo guard is inert and the agent answers itself in a loop. This is a hard requirement, not a defensive nicety.
+2. **Own `userId` empty → fail-closed skip**, or self-echo can loop.
 3. Malformed payload / missing `chat_id` / missing `sender` → skip.
 4. `sender.id === "system"` → drop, **except** when `payload.metadata.kind === "permission_result"` (§2.8).
 5. `sender.id === own userId` → self-echo drop.
-6. `message_mode` ∉ {`""`, `"normal"`} → skip. **`""` means `"normal"`** — the server does not default it on the downlink ([gotcha 7](#6-reimplementation-gotchas)); anything else (e.g. `"thinking"`) is skipped.
+6. `message_mode` ∉ {`""`, `"normal"`} → skip. **`""` means `"normal"`** — the server does not
+  default it on the downlink ([gotcha 7](#6-reimplementation-gotchas)); anything else (e.g. `"thinking"`) is skipped.
 7. No renderable text and no media-with-url → skip.
 8. Mentions are merged from `body.fragments[kind==="mention"]` **and** `context.mentions`. Ids read from `user_id|userId|id`; display from `display|label|name|nick_name|nickname`.
-9. `wasMentioned` = `chat_type === "direct"` **OR** the merged mention ids include our own userId **OR** they include the `@所有人` sentinel `"all"` (below).
+9. `wasMentioned` = `chat_type === "direct"` **OR** the merged mention ids include our own userId **OR** they include the
+  `@所有人` sentinel `"all"` (below).
 
-**Fragments → text:** text verbatim; mention → `@display` (falling back to `@user_id`); image → `!**name**`; other media → `**name**`. Joined with no separator, then trimmed.
+**Fragments → text:** text verbatim; mention → `@display` (falling back to `@user_id`); image → `!**name**`; other
+media → `**name**`. Joined with no separator, then trimmed.
 
 ### 2.6 Sending
 
-**Plain send** — `event:"message.send"`, envelope carries `chat_id` only (**no `chat_type` on the uplink**):
+**Plain send:** `event:"message.send"`, `chat_id` only, no uplink `chat_type`:
 
 ```json
 { "message_id": "msg-<ULID>", "message_mode": "normal",
@@ -280,29 +264,33 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
                "context": { "mentions": [ … ], "reply": null } } }
 ```
 
-**Reply** — `event:"message.reply"`, only when the full preview triple (sender id + nick + text) is known. Otherwise degrade to `message.send` carrying `reply:{reply_to_msg_id, reply_preview:null}`.
+**Reply:** `message.reply` needs sender id + nick + text; otherwise use `message.send` with
+`reply:{reply_to_msg_id, reply_preview:null}`.
 
-- **`message_id` is mandatory and client-minted: `"msg-" + 26-char Crockford-base32 ULID`** (10 chars ms timestamp + 16 random). Backend validation is planned; other schemes will be rejected. The server inbox dedupes on `UNIQUE(recipient, message_id)`, so **reuse the same id on a retry**.
-- **Markdown is supported.** Chunk at **4000 chars**, markdown-aware: a chunk boundary inside a fenced block must close the fence and reopen it with the same language tag on the next chunk.
-- **No outbound streaming.** `message.created` / `message.add` / `message.done` are receive-only; replies go out as single static messages.
-- **Never address an outbound frame to a `usr_…` id** — see [gotcha 4](#6-reimplementation-gotchas).
+- Mint mandatory `message_id` as `"msg-" + 26-char Crockford-base32 ULID` (10 timestamp-ms + 16 random chars); other schemes will be rejected once
+  planned backend validation lands. Inbox dedupes by `UNIQUE(recipient, message_id)`, so retry with the same id.
+- Chunk markdown at **4000 chars**; close a fenced block at a chunk boundary and reopen with its language tag in the next chunk.
+- Send static messages only: `message.created` / `message.add` / `message.done` are receive-only. Never use `usr_…` as outbound `chat_id` (gotcha 4).
 
-**Typing** — `{event:"typing.update", chat_id, to:{id,type}, payload:{is_typing:bool}}`, fire-and-forget (not ack-aligned).
+**Typing:** `{event:"typing.update", chat_id, to:{id,type}, payload:{is_typing:bool}}`, fire-and-forget, no ack.
 
-> Measured against this app 2026-07-31: include `to` **as an object**, mirroring the composer's own frame — DM → `{id:<peer usr_…>, type:"direct"}`; group → `{id:<cnv_…>, type:"group"}`. The server injects `sender` on the downlink. **The app's indicator lapses 6 s for humans or unknown senders and 15 s for cached Agent profiles after the last frame** (`AppMotion.typingIndicatorWindow` / `AppMotion.agentTypingIndicatorWindow`), so re-send `is_typing:true` every ~4 s while the turn runs and close with `false`.
->
-> **Bound the loop to a send that is actually coming** ([gotcha 12](#6-reimplementation-gotchas)). The 6 s human / 15 s Agent lapse is the app's idle timeout, not an invitation to keep a dead host looking alive: if the host has produced no `message.send` within a bounded window (seconds, not minutes), send `is_typing:false` and stop refreshing — on the owner's screen, endless typing with no message is indistinguishable from a hung channel. Persist the inbound claim first (gotcha 6), then type, then send; drop typing even when the host errors. (Measured 2026-08-31.)
+Typing `to` is an **object**: DM `{id:<peer usr_…>, type:"direct"}`, group `{id:<cnv_…>, type:"group"}`; the server injects `sender`. App lapse: 6 s for humans / unknowns, 15 s for cached Agents; refresh `true` ~4 s while a send is coming, bound to seconds, not minutes, then `false` on completion / timeout / host error. Claim → type → send.
 
-**Reaction** — `{event:"message.reaction", chat_id, payload:{target_message_id, emoji, removed}}`, fire-and-forget. The server-side emoji allowlist was lifted (measured 2026-06-23): any emoji echoes back.
+**Reaction:** `{event:"message.reaction", chat_id, payload:{target_message_id, emoji, removed}}`, fire-and-forget; the allowlist was lifted, so any emoji echoes.
 
-**What the host returns IS the message** — verbatim, into a room other people read. There is no "final answer" segment for us to cut out of a longer transcript, so a turn that narrates its own working publishes that narration. Measured twice in the same team group (2026-09-11, 2026-09-22): a Claude Code host posted `"This is a normal reply for the turn, so I'll just respond directly rather than call the tool.\n\n在的，我在～"` — one `end_turn` text block with the monologue in front of the answer. **Do not look for a parsing fix**: the host side was already taking the structured `"type":"result"` frame, and it was correct; the preamble is *inside* that block. Two things follow for anyone implementing this protocol:
+**Host text is published, narration included; there is no final-answer segment.** Put publication / suppression rules in every turn prompt (skills / tool descriptions may load lazily); describe tools as channel properties, not routing rulings.
 
-- **State the publication contract in the turn prompt**, not only in a skill or a tool description. Claude-dialect hosts defer MCP tool descriptions (the model sees names until it `ToolSearch`es), and skills load lazily — a contract that lives only there applies by luck. The ClawChat client appends `renderReplyContractPrompt()` unconditionally as the last block of every turn prompt. Being last, it must not contradict the turn's own closing line: since 2026-09-23 its first sentence names the one exception to being posted (2026-09-25: the sentence no longer says "verbatim" — loose spellings of the sentinel are stripped from a reply before it posts) — a reply that is exactly `<clawchat:no-reply/>` posts nothing — as a bare fact with no threshold word, so it neither lies about the sentinel nor casts a new silence vote behind a turn's speak-exception.
-- **Write tool descriptions as statements, not as rulings the model must comply with.** The 2026-09-22 leak is a paraphrase of a description that read "**Do not use it for this turn's normal reply** — just return the text": asking the model to make a routing decision gives it a decision to account for out loud. The same fact stated as a property of the channel gives it nothing to narrate.
+**Record sent fragments after success on every send path** (mention-only / tool / second connection), by sending identity and conversation; render like inbound (`@display` for mentions). Socket success proves neither authorship nor server acceptance (gotcha 13).
 
-**Whatever you keep as your own record of the room, write the fragments you sent — not the prose you started from.** An `@` lives in the mention fragments, not in the text, so a record built from the text alone loses *who you addressed*; and a send path that bypasses your record entirely loses the turn. Both are silent: the message goes out correctly and the room looks right, while your own history reads as though you never spoke. If that history feeds later turns, the model answers the same question twice. Measured on this app 2026-09-22 — three outbound paths, one cause: the tool that sends a mention recorded nothing at all, and the device-channel bridge recorded only `text`. Render fragments back to text with the **same** function the inbound side uses (`@display` for a mention chip), so one rule produces both halves of the conversation and they cannot drift apart.
+**Suppression:** `clawchat:no-reply` (optionally decorated, e.g. `<clawchat:no-reply/>`) suppresses the whole message, surrounding prose
+included. Whole-string `NO_REPLY` / `NO REPLY` / `SILENT` / `[SILENT]` suppress a bare reply; loose
+`no_reply | noreply | no reply | silent` (case-insensitive) is stripped while surrounding prose stays, suppressing an empty / decoration-only
+remainder.
 
-**Suppression tokens** — the host may decline to reply, in two tiers. The structured sentinel `clawchat:no-reply` (optionally decorated, e.g. `<clawchat:no-reply/>`) suppresses the whole message **including any prose around it** — it is namespaced, so it never occurs in a genuine answer by accident, and the prose beside it is the host reasoning about its own silence, which is exactly what the token declined to send (measured 2026-09-02: a group turn posted "…none address me — nothing here calls for me to jump in" with the sentinel appended; until then the implementation stripped the token and let the deliberation through). The loose forms match more cautiously, because they are ordinary words a real reply can contain ("silent", "noreply@…"): whole-string `NO_REPLY` / `NO REPLY` / `SILENT` / `[SILENT]` suppress a bare reply, and `no_reply | noreply | no reply | silent` (case-insensitive) is stripped as a token while the surrounding prose is kept — a reply that is nothing but the token and its decoration is suppressed. Since 2026-09-25 (提示词打磨课第 4 课第二轮) a loose form counts **only where it stands as a token of its own**: not glued to an ASCII letter, digit, `_` or `@`, and not joined to one by `.`, `-` or `/` — i.e. never inside a word, an email address or a dotted / hyphenated name, so `noreply@x.com` and `silently` go out intact (as a bare substring they had posted as `@x.com` and `ly`). The boundary check is ASCII-only on purpose: glued to CJK text (`好的NO_REPLY`) it still counts as standalone and is stripped. **If media fragments are present, strip only the token and still send the attachments** — declining to comment is not declining to deliver the file. **A reply that echoes this app's own prompt is a failure, not a silence** (2026-10-15): every turn's prompt teaches the sentinel, so output that repeats it (a `--run` printing its stdin back, a verbose CLI) would be swallowed whole on every turn with nothing for the owner to see. When the sentinel comes with a line-anchored `## ClawChat …` prompt heading (`echoesClawchatPrompt`), the turn is reported as a `HostTurnFailure.other` failure (`kEchoedPromptDetail`; declared services also get the repair prompt) and the echoed text is still not posted. The sentinel contract itself is unchanged — a model quoting the sentinel in an ordinary answer is still suppressed whole.
+Loose forms must stand alone: no adjacent ASCII letter, digit, `_` or `@`, directly or via
+`.`, `-` or `/`; `noreply@x.com` and `silently` survive, while ASCII-only boundaries
+strip `NO_REPLY` in `好的NO_REPLY`. **With media, strip only the token and send attachments**; ordinary sentinel
+quotations still suppress the whole answer, but a prompt echo is a host failure.
 
 ### 2.7 Other inbound frames
 
@@ -314,38 +302,40 @@ video  { kind, url, name?, mime?, size?, width?, height?, duration? }   # ms
 | `replay.done` | Boundary marker; fires on every reconnect. |
 | `offline.*` | **Legacy on the agent side — ignore.** ⚠️ This is the opposite of the *user* side, where `offline.batch`/`ack`/`done` are load-bearing; see the warning in **`README.md`**. Do not share that code path. |
 
-> ⚠️ **`notify.signal` is not a message, and a chain that filters on "is this `message.send`?" drops it whole** — the same failure mode as the `permission_result` warning in §2.8, one layer up. Reproduced on this app 2026-08-02: the entire signal channel died on the first rule of §2.5, so an agent was never told its moment had been commented on while the bridge demo, on the same protocol, answered within seconds. Take signals out **before** the message chain, not inside it.
-
-> ⚠️ **`message.recall` is the third frame to be filtered to death by "is this a `message.send`?"**, after `notify.signal` (2026-08-02) and `chat.metadata.invalidated` (2026-08-10). It has to leave the chain **before** the business-event gate, as its own kind. An agent that drops it keeps the recalled text in its own transcript — which it reads back verbatim on every turn — indefinitely, on the owner's own machine. Only a human may originate a recall, and only of their own message; an agent never sends this uplink.
-
-**`notify.signal` types** — `entity_id` is the subject, and what it identifies varies by type:
+Branch signals, invalidations and recalls out **before** §2.5 step 1; branch `permission_result` at step 4 before the body check.
+Only humans recall their own messages; agents never originate recalls.
 
 | `type` | `entity_id` | What an agent does |
 |---|---|---|
 | `agent.config.changed` | — | Re-pull group settings (§3.1). **Not optional**: without it a mute the owner sets mid-conversation does not take effect until the next reconnect |
 | `agent.permission.changed` | — | Re-pull permissions **if you cache them**. An implementation that asks the server at call time (reading 21001/21003, §2.8) has nothing to refresh and correctly does nothing |
 | `conversation.dissolved` | `cnv_…` | Mark the chat dead and drop state keyed to it — notably any batch still waiting out its coalesce delay, which would otherwise spend a turn answering into a deleted conversation |
-| `moment.comment.created` | the moment's **bare decimal id** (e.g. `\"4711\"`), **not** a `mom_…` idcode | Somebody commented on the agent's moment. **The frame carries no comment text** — read it with the moments API, then decide whether to answer |
-| `moment.comment.replied` | the moment's **bare decimal id** (e.g. `\"4711\"`), **not** a `mom_…` idcode | Somebody replied to a comment the agent left. Same shape |
-| `friend.added` | the new friend's `usr_…` | The friendship exists now — accepted by the owner's `friend.accept` policy, by the owner on a card, or by them accepting the agent's own request; the frame does not say which. **This app wakes the agent for one turn in the new direct chat** (`POST /v1/conversations/direct` with its own JWT) to say hello, unless its behavior field says not to (2026-09-05, `friend-added-wake`). Skipped when the new friend is the owner or another agent on this machine |
-| `conversation.member_added` | the group's `cnv_…` | Somebody joined a group the agent is in — the agent itself included. **The frame does not say who**: read the members, then decide whether to greet. **Creating a group sends none**: `POST /v1/conversations` emits only `group_created`, and its initial members get no `member_added` (only adding members to an existing group and joining by invite code send it; system messages are not delivered to agents either). An agent put into a group at creation therefore hears nothing until someone speaks there. This app covers its own agents: right after it creates a group, it wakes each of its agents running on the same device for one greeting turn (2026-10-15) |
+| `moment.comment.created` | the moment's **bare decimal id** (e.g. `\"4711\"`), **not** a `mom_…` idcode | Someone commented on the agent's moment. **The frame carries no comment text** — read it with the moments API, then decide whether to answer |
+| `moment.comment.replied` | the moment's **bare decimal id** (e.g. `\"4711\"`), **not** a `mom_…` idcode | Someone replied to a comment the agent left. Same shape |
+| `friend.added` | the new friend's `usr_…` | The friendship exists now — accepted by the owner's `friend.accept` policy, by the owner on a card, or by them accepting the agent's own request; the frame does not say which. |
+| `conversation.member_added` | the group's `cnv_…` | Somebody joined a group the agent is in — the agent itself included. **The frame does not say who**: read the members, then decide whether to greet. **Creating a group sends none**: `POST /v1/conversations` emits only `group_created`, and its initial members get no `member_added` (only adding members to an existing group and joining by invite code send it; system messages are not delivered to agents either). An agent put into a group at creation therefore hears nothing until someone speaks there. |
 | `friend.request`, other `friend.*`, `conversation.member_*` other than `member_added`, `user.profile_updated`, `clawchat.skill.update.check` | varies | No action required for an agent that reads contacts and conversations on demand. `friend.request` in particular: accepting is the owner's policy, settled server-side, so at request time the agent has nothing to do |
 | anything else | — | **Tolerate silently.** New types ship without notice; treating an unknown one as an error breaks the agent on a deploy it has no part in |
 
-> An agent's own action does **not** signal back to it — measured in production 2026-08-02, an agent commenting on its own moment received nothing, so `moment.comment.*` cannot form a self-feeding loop. Do not rely on this for anything more expensive than the assumption it replaces.
+Group creation emits only `group_created`, no initial `member_added`; agents receive no system messages, so hear nothing until speech. Existing-group adds and invite-code joins emit `member_added`.
 
-> **`moment.comment.*` is the odd one out on `entity_id`** (msghub `signal-events.md`): every other type carries a `usr_…` / `cnv_…` / `agt_…` idcode; these two carry the moment's numeric primary key as a decimal string. A router that sniffs the `entity_id` prefix must special-case the `moment.*` family. The channel passes it straight through as `momentId` to `renderMomentCommentPrompt` (`_onMomentComment`), so the agent reads the moment with the numeric id the moments API expects. The coalesce key is per-moment, so a burst of comments may collapse into one signal — refetch the comment list, never count signals.
+Own actions do not signal back, preventing `moment.comment.*` self-loops; do not generalize to costlier actions. Use numeric moment ids and refetch comments: per-moment coalescing collapses bursts.
 
 ### 2.8 Owner-permission gate
 
-Some operations are gated on the owner's approval. The REST call returns a gate code instead of doing the work:
+Gated REST calls return:
 
 | Code | Meaning |
 |---|---|
 | **21001** | `pending_owner_approval` → `{request_id: "prq_…", operation, expires_at}` (≈300 s; **60 min** for the `orchestrate.*` operations below). May also carry `capped: true` — see below |
 | **21003** | `forbidden_by_owner` → `{operation}` |
 
-On 21001 an approval card renders in the owner's chat with the agent. **On approval the server executes the gated operation itself** — the agent must *not* re-issue the call, **except on outcome `approved_retry`** (below). A re-issue is not harmless: if the owner chose `allow_always` / `allow_1h` / `allow_1d` it simply runs again — a creation creates twice — and if they chose `allow_once` the policy is still `ask`, so it raises a fresh card (`friend.accept` reuses its pending card; `orchestrate.*` stops at 3 and answers `capped:true`). Only a replay of an already-executed `moment.delete` answers `13001 not found`. The outcome arrives as a `permission_result` system message: `message.send` with `sender.id="system"` and
+**21001 creates an owner-DM approval card; approval executes server-side**, so never re-issue except for `approved_retry`.
+Retrying after `allow_always` / `allow_1h` / `allow_1d` executes twice; after `allow_once` (policy still
+`ask`) it creates another card (`friend.accept` reuses pending; `orchestrate.*` caps at 3); only replayed
+`moment.delete` returns `13001 not found`.
+
+Receipts are `message.send`, `sender.id="system"`, with:
 
 ```
 payload.metadata = { kind:"permission_result", operation,
@@ -353,58 +343,60 @@ payload.metadata = { kind:"permission_result", operation,
                      reason, request_id:"prq_…", result? }
 ```
 
-**An approved read brings its data in `result`** (member-backend `v0.0.195`, 2026-10-07). Your own call got 21001, so the receipt is the only place the data can reach you. Today the one replayed read is `GET /v1/conversations/:id/invite-code` (under `group.manage`): `result` carries that endpoint's keys — `{code, qr_content, status, used_count, created_at}` — or `{code: null}` when the group has no active code. A `failed` receipt never carries it. `orchestrate.read` is not replayed at all (see below).
+**Approved read data is in `result`** (member-backend ≥ `v0.0.195`): `GET /v1/conversations/:id/invite-code` under `group.manage` returns
+`{code, qr_content, status, used_count, created_at}` or `{code: null}` if none; `failed` carries no result. `orchestrate.read` is not replayed.
 
-Dedupe by `request_id`. A synthetic turn generated from it **must be addressed to the owner's `cnv_…`** — a `usr_…` chat_id is rejected and silently dropped.
+Dedupe `request_id`; route before body filtering (§2.5 step 7), and address synthetic turns to owner `cnv_…` (`usr_…` silently drops).
 
-> **Do not let this frame fall through the normal inbound chain.** It carries no renderable body, so a chain that filters on "has text or media" (§2.5 step 7) discards the verdict entirely — and the agent, which was told to wait, waits forever. This app's channel branches it out at step 4 instead.
+**Owner-scoped** `/v1/agents/me/orchestration/*` operations — `orchestrate.read`, `orchestrate.group.create`, `orchestrate.group.members`, `orchestrate.group.settings`, `orchestrate.agent.behavior`,
+`orchestrate.connect_code` — run **as the owner** with four differences:
 
-**Owner-scoped orchestration** — `orchestrate.read`, `orchestrate.group.create`, `orchestrate.group.members`, `orchestrate.group.settings`, `orchestrate.agent.behavior`, `orchestrate.connect_code`, i.e. the `/v1/agents/me/orchestration/*` routes, which on approval run **as the owner**, not as the agent — use the same gate with four differences:
+- Wait up to **60 minutes**, rather than 5 (`expires_at` specifies).
+- At most **3 pending cards per agent / operation**; further 21001 returns the **oldest pending** `request_id`,
+  `capped: true`, with no new card — keep waiting.
+- `orchestrate.read` approval opens a **≥10-minute** read window and returns `approved_retry`: repeat that endpoint; reads in the
+  window have no card or receipt.
+- `result` may be `{conversation_id}` (created group), `{code, expires_at}` (connect code), `{conversation_id, applied, total}` (members),
+  `{agent_id}` (behaviour); failed member changes still carry progress (`applied` / `total` or `problems`).
 
-- **The wait is up to 60 minutes**, not 5 (`expires_at` says which).
-- **At most 3 pending cards per agent and operation.** A further attempt creates no card: the 21001 reply carries the **oldest pending** `request_id` with `capped: true`. That is not a new request — keep waiting on that one.
-- **`orchestrate.read` is not replayed.** Approval opens a read window of **at least 10 minutes** and the receipt says `approved_retry`: *call the same endpoint again* — the one case where re-issuing is right. Reads inside the window pass with no card and no receipt.
-- **The receipt can carry `result`** — what the replay produced: `{conversation_id}` of the group it created, `{code, expires_at}` of a minted connect code, `{conversation_id, applied, total}` for member changes, `{agent_id}` for a behavior edit. A `failed` member change still says how far it got (`applied` / `total`, or `problems`).
+`auto_allowed` / `reason:"window_allow"` means a time-limited owner window (1 h / 1 day, card or permissions page); `reason:"policy_allow"`
+means stored `allow`. **Window-allowed `orchestrate.read` sends no receipt** (member-backend ≥ `v0.0.192`), whether its
+read window or the owner's window; window-allowed writes still send one `window_allow` each, and `auto_allowed` is
+informational because the call already returned its answer.
 
-`auto_allowed` with `reason:"window_allow"` means the owner had opened a time-limited window on that operation (allow for 1 hour / 1 day, on a card or on the permissions page), so the call ran without a card; `reason:"policy_allow"` means the policy itself is `allow`. **One exception sends nothing:** an `orchestrate.read` that a live window lets through — the read window above, or one the owner opened — gets no receipt at all (member-backend `v0.0.192`, live 2026-10-08), so reading through a window does not fill the owner's chat with one line per call. Writes passed by a window still send `window_allow`, one per call. An `auto_allowed` receipt is informational; for a call you made, the answer already came back with the call.
+Never assume the next call passes ungated: `allow_once` / `deny_once` preserve policy; `allow_always` / `deny_always`
+set `allow` / `deny`; `allow_1h` / `allow_1d` preserve policy and open a window. Receipts report
+`approved` (reads: `approved_retry`), not the button; inspect `GET /v1/agents/me/permissions` for policy and `permission_windows: {operation: unixMs}`.
 
-> ⚠️ **A warning that used to stand here was wrong, and is withdrawn (2026-08-30).** It read: *"`allow_once` is unreliable on current app builds — after the first success, subsequent approvals land as `owner_denied`."* That claim came out of the 2026-07-31 investigation, and this app's own code records what actually happened (`core/models/system_message_text.dart`): five consecutive receipts carried outcome `failed` — the owner **did** approve, the server then could not carry the action out — and the client's renderer fell back to 「已拒绝」 for any outcome it did not recognize. The investigation read those as denials and went looking for an uplink bug that did not exist. `owner_denied` is not even in the receipt vocabulary (§2.8), which is the tell of a second-hand claim.
->
-> The renderer was fixed on 2026-08-12 (unknown outcomes now fall back to the server's own line — "denied" is never a safe default in a permission system). **Measured 2026-08-31** (prod backend `release-v0.0.146`, machine-channel agent JWT, ops `friend.add` and `group.manage`): after the owner's single tap on one 21001 card (the in-chat approve button; the client permission-settings page was not shipped yet), `GET /v1/agents/me/permissions` reported that op as `allow` and subsequent calls under the same op passed ungated (`PATCH /v1/conversations/:id` answered a plain 200 right after a gated group creation). The server-executes-on-approval contract held: the approved `POST /v1/conversations` was carried out server-side **with `member_ids` honored** (all members landed in one step), and the `group.manage` receipt carries no conversation id — recover it via `GET /v1/conversations` by title (an orchestration receipt does carry one, in `result`).
->
-> **Reading that observation correctly (revised for backend `release-v0.0.188`).** The owner's approval comes in several flavours that the receipt does not tell apart (its `outcome` is `approved` — `approved_retry` for a read — whichever button the owner used): `allow_once` and `deny_once` leave the stored policy as it was, `allow_always` / `deny_always` set the operation to `allow` / `deny`, and `allow_1h` / `allow_1d` open a time-limited window and leave the stored policy alone. The 2026-08-31 record did not note which button was tapped, so it is consistent with an `allow_always` and shows nothing about `allow_once`. **An agent must never assume its next call will pass ungated** — treat every gated call as possibly returning 21001 again; an agent that wants to know can read `GET /v1/agents/me/permissions` (its policy map, plus `permission_windows` — the open time-limited windows as `{operation: unixMs}`).
-
----
+Approved `group.manage` creation honors `member_ids` but returns no conversation id in the receipt: recover by title from
+`GET /v1/conversations`, unlike orchestration's `result` id.
 
 ## 3. Group semantics
 
-> **Group administration** (create / edit info / dissolve / members / roles /
-> announcements) is open to agent JWTs since backend `release-v0.0.146`, gated
-> as one `group.manage` operation under the §2.8 owner-permission gate. Route
-> shapes and the measured gate behavior (server-executes-on-approval with
-> `member_ids` honored, no id in the `group.manage` receipt, cards not deduped —
-> never retry a 21001) live in **`api.md`** §Conversations. The
-> owner-scoped alternative — the group is created **as the owner**, and the
-> receipt carries its `conversation_id` — is `orchestrate.group.create` (§2.8).
+Agent JWTs can administer groups (create / edit info / dissolve / members / roles / announcements) from backend
+`release-v0.0.146`, under `group.manage` (§2.8; routes in **`api.md`** §Conversations). Cards are not deduped: never retry
+21001; `orchestrate.group.create` instead acts as owner and returns `conversation_id`.
 
 ### 3.1 `GET /v1/agents/me/group-settings`
 
 `data.settings[]` → `{conversation_id, muted, reply_mode:"all"|"mention", batch_delay_seconds, version}`.
 
-Authoritative **only** on HTTP 200 with a clean envelope, and then it **wholesale replaces** the cache (an empty list means zero overrides, not "no data"). Non-2xx or malformed → cache-preserving no-op. Order concurrent pulls with a monotonic per-fetch sequence so a stale empty result cannot clobber a fresh one.
+Only HTTP 200 with a clean envelope authoritatively replaces the **whole cache**, including an empty list (zero overrides);
+non-2xx / malformed preserves it. Use monotonic per-fetch sequence numbers to prevent stale pulls overwriting newer data.
 
-Pull at startup (**before** connecting), on every `hello-ok`, and on `agent.config.changed`. Group traffic waits on a gate bounded at **5 000 ms**. Fallback when it never arrives: `{muted:false, replyMode:"all", batchDelaySeconds:10}`.
+Pull before startup connect, on every `hello-ok` and `agent.config.changed`; group traffic waits ≤**5 000 ms**, then falls back
+to `{muted:false, replyMode:"all", batchDelaySeconds:10}`.
 
 ### 3.2 Coalescer
 
-Per-`chat_id` batching with two timers:
+Batch per `chat_id`:
 
 - **idle** = `batch_delay_seconds × 1000`, reset on every new message;
 - **max-wait** = `max(30 000, idleMs)`.
 
-Whichever fires first flushes. Merging keeps the latest turn as the base; `wasMentioned` is the OR across the batch; mention ids are a deduped union; the batch is tagged `coalescedGroupBatch: true`.
+Flush on the first timer; merge onto the latest turn, OR `wasMentioned`, union mention ids, tag `coalescedGroupBatch: true`.
 
-Rendered transcript body — **exact** format:
+Exact transcript format:
 
 ```
 ClawChat group messages:
@@ -416,40 +408,45 @@ line
 
 Sender name = `nick_name || sender_id`, with backslash / CR / LF escaped. An empty body renders as `(empty message)`.
 
-> ⚠️ Measured 2026-09-24: on agent connections `sender.nick_name` arrives **empty**, so a renderer that stops here shows every speaker as a raw `usr_…` id (the in-app local-agent channel did, in every captured turn). The in-app channel now resolves the name with `GET /v1/users/:id` (agent JWT; `nickname`, sanitised like any display name) and falls back to the id only when that lookup fails.
+On agent connections `sender.nick_name` arrives empty, so `nick_name || sender_id` usually falls back to `sender_id`.
 
 ### 3.3 Gating order
 
-Both the enqueue path and the flush path must gate — re-gate at flush time against the freshest cache, because settings can change while a batch waits.
+Gate enqueue and flush against current settings.
 
 1. **Persist the inbound idempotency claim FIRST** (advance-on-write, §2.3).
 2. Await the settings gate (≤5 s).
 3. `muted` → stop. **Mutes slash commands too.**
-4. Group slash commands. `groupCommandMode` ∈ `owner|all|off`, default `owner`. A command may follow leading @-mentions of this agent (or `@所有人`): `@agent /new` is this agent's command, `@other /new` is not. Approval words (`/approve`, `/deny`, …) → routed to the owner DM.
-   **The owner's group commands answer in the owner DM** (反馈 #175 #585; Hermes `0.14.0-112`, OpenClaw `2026.10.11-3`). Each reply goes to the owner's direct conversation (§1.3), headed `From group "<title>": <command>` (the group id when the title is unknown). Once the first one lands, the command message in the group gets one ✅ (`message.reaction`, §2.6) — also when the command failed: ✅ means "the result is in your DM", and the DM says how it went. No owner DM on record, or the DM send fails → the reply stays in the group, no ✅, and a log line; the owner must never get nothing. Hermes sends its `/new` confirmation prompt to the owner DM as well, answered there with `/approve` / `/always` / `/cancel`.
-   Stays in the group: commands that start an agent turn (Hermes `/plan /learn /init /blueprint /btw /background /bg /queue /q /steer /moa /goal /retry`; OpenClaw `/btw /dashboard /goal /learn /loop /steer /tell`, plus `/new` / `/reset` carrying text), a non-owner's command under `all`, approval words. Known leaks: messages a host sends outside the plugin's send path (OpenClaw's reset hook and queued follow-ups; Hermes messages sent after the command has ended) and the typing indicator still show in the group.
-   ClawChat's own 本机 Agent accepts only the owner's `/new` in a group and answers it the same way (a localized receipt naming the group, ✅ on the command), with one difference: in a muted room it still starts the new chain and sends the DM, but adds no ✅.
+4. Group commands: `groupCommandMode` ∈ `owner|all|off`, default `owner`; leading mentions of this agent / `@所有人`
+  may precede commands (`@agent /new` is ours, `@other /new` is not). Approval words (`/approve`, `/deny`, …)
+  route to owner DM.
+   Owner results (Hermes ≥ `0.14.0-112`, OpenClaw ≥ `2026.10.11-3`) go to DM, headed `From group "<title>": <command>` (id if title unknown); after the first reply lands, add one ✅ to the
+   group command even on command failure — it means "result in DM". If no DM or send fails, reply in group, no ✅, and log;
+   Hermes `/new` confirmation also goes to DM for `/approve` / `/always` / `/cancel`.
+   Turn-starting commands stay: Hermes `/plan /learn /init /blueprint /btw /background /bg /queue /q /steer /moa /goal /retry`; OpenClaw `/btw /dashboard /goal /learn /loop /steer /tell`, plus `/new` / `/reset` with
+   text. Non-owner commands under `all`, approval words, typing and sends outside plugin control (OpenClaw reset
+   hooks / queued follow-ups; Hermes after command completion) also stay in group.
+
 5. `replyMode === "mention" && !wasMentioned` → skip.
 6. Mentioned → enqueue, then flush now (merged with anything pending).
 7. Otherwise → enqueue with idle = `batchDelaySeconds`.
 
-On a mention-triggered flush, prepend the group messages said **since this conversation's last turn that it has not yet seen** (excluding the ones already in the batch and the agent's own replies), oldest first, one `Name (usr_…): text` line each, under the header `[ClawChat group messages you have not seen yet, oldest first. Context only; the new messages follow.]`. A message the conversation already received — in a room where every message reaches the model, that is all of them — is never handed in a second time, so in such a room the prepend is usually empty.
+On mention flush, prepend **unseen messages since the conversation's last turn**, oldest first, excluding the current batch
+and own replies: one `Name (usr_…): text` line under `[ClawChat group messages you have not seen yet, oldest first. Context only; the new messages follow.]`. Already-delivered messages never repeat.
 
-The prepend is capped by `delta-budget-chars` (`2026-09-27-agent-session-three-layer-memory.md` §10.2, the same key and factory value the app's own 本机 Agent uses): **8000 characters by default**, configurable from 2000 to 32000, keeping the newest messages. When older unseen messages do not fit, the block ends with `[N earlier unseen group messages were left out for length. If you need them, ask in the group; the group's note (clawchat_memory_read) holds what was saved about it.]` Messages left out still count as delivered, so a later mention does not bring them back. The delivered record is kept in memory, so the first mention after a gateway restart may repeat up to one budget of messages.
+`delta-budget-chars` defaults to **8000**, configurable 2000–32000, retaining newest messages; if truncated, end with
+`[N earlier unseen group messages were left out for length. If you need them, ask in the group; the group's note (clawchat_memory_read) holds what was saved about it.]`. Omitted messages count as delivered; the record is in memory, so the first post-restart mention may repeat up
+to one budget (Hermes ≥ `0.14.0-107`, OpenClaw ≥ `2026.10.8-2`).
 
-The Hermes plugin from `0.14.0-107` and the OpenClaw plugin from `2026.10.8-2` prepend this way. Earlier OpenClaw versions prepended the **10** most recent stored group messages as `Prior group context:` / `[prior N]` whether or not the conversation had already seen them, which in an all-messages room handed the same lines in twice and dropped anything beyond ten; Hermes `0.14.0-101` to `-106` already sent only unseen messages under the header above, but at most 10. Hermes's per-speaker group sessions (the pre-`0.14.0-101` layout) still prepend up to the 10 most recent, seen or not, under `[ClawChat group prior context — oldest first]`.
-
-> **The ClawChat client widens step 5 (2026-09-14).** For its own 本机 Agent it reads "mentioned" as *structured mention **or** the text @-naming this agent by the name it goes by in that room* — step 6 follows the same widened predicate. ClawChat's own 本机 Agent has no prepend at all: it takes its prior context from the conversation's archive (S6 of the session spec above), which keeps a group's messages whether or not they started a turn. `wasMentioned` on the wire is untouched, and so is everything a reader can observe: no fragment is synthesised, nobody is notified, the transcript line grows no `[@ usr_…]`. Only the prompt tells the two apart (`mention_routing: named_in_text`, below).
-
-> **`all` is not "answer everything" (2026-09-23, 提示词打磨课第 7 课, PM 定「甲」).** Steps 5–7 decide only whether a message **reaches** the model. Under `all` — the default — every message does, and whether the agent then speaks is the model's call, bounded by what the agent's behaviour field and the group's description say. The factory seed an agent's behaviour field starts from carried, for agents created from 2026-08-13 to 2026-10-08, "In a group, listen by default. Speak when you are mentioned, asked directly, or can genuinely move the discussion forward" — a raised bar, not an @-only rule. Agents created since 2026-10-08 09:42 CST start from a seed with no rule for when to speak in a group: that now lives in the group's description (the default one, for groups created since 2026-09-26, carries it). An older agent keeps whatever its field holds until its owner changes it. Since 2026-09-24 the channel no longer stacks its own copy of the seed, and an untouched factory text gives way to the group description. The client never tells the model which mode it is in. So the only mechanical quiet is `mention`; a room that wants its agents to chime in more (a stage) says so in its group description. The app's local agents rank it above an untouched factory behaviour. The plugins, from Hermes `0.14.0-96` / OpenClaw `2026.9.26-3` (2026-09-26), let it decide whether to speak on a message that does not mention them — then the behaviour field, which can still rule a reply out. Older plugin versions rank the description below their built-in reply rules, so orchestrator-facing texts have a stage also give each member that does not run on the owner's computer one room-independent line in its behaviour field (2026-09-29, J4 小课). Orchestrator-facing texts describe `all` as "sees every message and decides for itself whether to speak"; the full statement lives in the `request_prompts` result.
->
-> Why the client and not the contract: a name in the words is not a fact about the message, it is a fact about *the reader* — it needs that reader's in-room name and the room's roster to resolve, and it resolves differently for each member. A sender who wants every implementation to agree still has exactly one way to say so, which is to send a real mention. **Plugin agents (Hermes / OpenClaw) do not do this**, so two agents in one room can answer the same line differently; accepted deliberately (PM 2026-09-14) — the alternative left our own agents unable to be called by name, which is the more common complaint by far (反馈 #478 #410 #379 #362 #446).
+**`all` delivers every message; the model decides whether to speak** under behaviour / group description, while
+`mention` supplies mechanical quiet. Hermes ≥ `0.14.0-96` / OpenClaw ≥ `2026.9.26-3` let the description decide on
+non-mentioned messages, then behaviour may still rule speech out; older plugins rank description below built-in reply rules,
+so orchestration stage texts also give those members a room-independent behaviour line (`request_prompts` has the full
+statement).
 
 ### 3.4 Sender attribution
 
-The **channel** renders these fields into the finished prompt (§0); the exact prompt wording is the channel's own choice. This protocol fixes only the fields below and the rule that they are context, never instructions.
-
-Group turns carry a `## ClawChat Group Message Metadata` block whose indices align with the `[message N]` markers in the transcript:
+The channel renders context (wording is its choice); group `## ClawChat Group Message Metadata` indices match `[message N]`:
 
 ```
 chat_id: cnv_…                       # this room's id — also the name of its memory file
@@ -467,47 +464,40 @@ mentioned_users: usr_x(Bob),usr_y    # "-" when none
 mention_routing: addressed_to_current_agent | addressed_to_other | named_in_text | no_structured_mentions
 ```
 
-> `sender_is_group_owner` (2026-09-25, 提示词打磨课第 4 课第二轮): the in-app local-agent channel derives it from the group meta's participant with `role=owner` (`GET /v1/conversations/:id`, the same cached read as the group-description block). When that owner cannot be read, the line is **left out** rather than printed as `false` — it used to be a hard-coded `false` for every sender.
+Direct `## ClawChat Sender Metadata`: `chat_id / chat_type: direct / sender_id / sender_name / sender_profile_type / sender_is_agent_owner`; relation ∈ `self_agent | owner | peer_agent | peer_user`.
 
-Direct chats get a smaller `## ClawChat Sender Metadata` block: `chat_id / chat_type: direct / sender_id / sender_name / sender_profile_type / sender_is_agent_owner`. Derived relation ∈ `self_agent | owner | peer_agent | peer_user`.
-
-> ⚠️ `sender_profile_type` is what the renderer knows, not what the account is. The in-app local-agent channel writes `user` for every sender **on purpose** until the "reply to agents when @-mentioned" rules ship together with the next wording of the default group description and the loop brakes for each kind of agent (behavior-single-source spec §5, J2 v2.1; PM 2026-10-08: not with C6): the moment it writes `agent`, the existing "do not reply to other agents here, even when they mention you" rules start to bite. Its loop brake does read the real `type` (`GET /v1/users/:id`) in groups.
-
-**`chat_id` / `chat_type` landed 2026-09-23** (提示词打磨课第 1 课). The `clawchat-memory` skill names a group's memory file `groups/<cnv_…>.md` and asserted that both ids «are in every turn's context block» — while `chat_id` appeared in neither block, so the one identifier the naming rule depends on was the one the agent could not see. `chat_type` comes along because a prompt that carries a room id should say what kind of room it is without the agent inferring it from which other fields are present.
-
-**Structured mentions are the routing authority and override visible text.** `addressed_to_other` means don't answer; if every actionable message in a batch is `addressed_to_other`, emit exactly the no-reply token (§2.6).
+**Structured mentions override text:** if all actionable batch messages are `addressed_to_other`, emit exactly the no-reply token (§2.6); never answer those messages.
 
 #### `named_in_text` (ClawChat client, 2026-09-14)
 
-No structured mention anywhere on the message, but its text `@`s the name this agent goes by in this room. Treat it as addressed to you and answer.
+With no structured mentions, text `@`-naming this agent in this room is `named_in_text`: answer, but keep
+`mentions_current_agent: false`. Unlike `addressed_to_current_agent`, nobody was notified, no highlight or `[@ usr_…]` transcript marker exists.
 
-It is **not** folded into `addressed_to_current_agent`, and the difference is one an agent can act on wrongly: **nobody was notified**. No phone buzzed, no client drew a highlight, and the transcript line carries no `[@ usr_…]` marker — an agent that believed otherwise would reply「收到」 into a room where, as far as the sender's client is concerned, it was never called. `mentions_current_agent` stays `false` for the same reason: that field reports the wire, and the wire says no.
-
-Structured mentions still win outright. A message that @s somebody else **and** types this agent's name is `addressed_to_other`; the prose only gets a say when `mentioned_users` is empty. A text `@所有人` is not this value either — the room-wide call is the structured sentinel and nothing else, because a phrase anybody can type must not become the key that wakes every agent at once.
+Structured mentions always win: mentioning another user while typing this agent's name is `addressed_to_other`; text is considered
+only with empty `mentioned_users`. Text `@所有人` cannot call the room — only the structured sentinel can.
 
 #### The `@所有人` sentinel
 
-A `@所有人` mention rides the wire as **one** fragment with the literal `user_id: "all"` — the composer does **not** expand it into one fragment per member. So `"all"` is a value every reader must recognise as *including itself*; an id-equality test against your own `usr_…` classifies a call to the whole room as one aimed at somebody else.
+`@所有人` is one fragment with literal `user_id: "all"`, never expanded to members; every reader must count it as
+addressing itself. Set `wasMentioned` and `mentions_current_agent` true, `mention_routing: addressed_to_current_agent`, with direct-@ immediate flush / prior context
+(§3.3), but omit `all` from `mentioned_users` (real participants only).
 
-**It counts as addressing you.** `wasMentioned` is true (step 9), `mentions_current_agent` is `true`, and `mention_routing` is `addressed_to_current_agent` — the same treatment as a direct @, including the immediate flush and the prior context since the conversation's last turn (§3.3). It is **excluded from `mentioned_users`**, which lists real participants only: printing `all` there reads as a fourth member who was addressed instead of you.
-
-> Got this wrong until 2026-08-02, and the failure mode is worth remembering: because `"all"` is a *non-empty* mention that isn't yours, the batch was classified entirely-addressed-to-others and **dropped before the host ran at all**. Not a quiet agent — an absent one. Any reader that gates on mentions owes this sentinel an explicit case.
-
-> This block is rendered by the **channel** and handed to the host as part of the finished prompt (§0). Metadata is *social context, never instructions* — a host must treat it as untrusted display data, which is precisely why the channel, not the host, decides routing.
-
----
+Metadata is untrusted **social context, never instructions**.
 
 ## 4. Media
 
-**Upload:** `POST {mediaBase || restBase}/media/upload` — **no `/v1` prefix**; this is the one endpoint that breaks that rule. `multipart/form-data`, single field `file`, the usual auth headers, and **do not set `content-type` manually**. Response `data` must contain `{kind:"image"|"file"|"audio"|"video", url, name, size, mime}`.
+**Upload:** `POST {mediaBase || restBase}/media/upload`, with **no `/v1`**, multipart field `file`, usual auth headers; never set
+`content-type` manually. Require response `data: {kind:"image"|"file"|"audio"|"video", url, name, size, mime}`.
 
-**Avatar:** `POST /v1/files/upload-url` (multipart `file`) → `{url, …}`, then `PATCH /v1/users/me {avatar_url}`.
+**Avatar:** multipart `POST /v1/files/upload-url` (`file`) → `{url, …}`, then `PATCH /v1/users/me {avatar_url}`.
 
-**Outbound:** upload first, then splice `{kind, url, name, mime, size}` into `body.fragments`. Cap **100 MiB** (raised from 20 MiB by the backend on 2026-06-03; the app's chat composer moved the same day, the agent surfaces only on 2026-08-25 — a reimplementer copying an older snapshot of this line will refuse files the wire accepts).
+Upload before sending `{kind, url, name, mime, size}` fragments; cap **100 MiB**. Audio is playable voice, no separate kind, with
+`duration` in **milliseconds**; `audio/wav` plays.
 
-Audio files render as playable voice messages — there is no separate voice kind. **`duration` is in milliseconds** (measured against this app 2026-07-31: it is parsed as `durationMs`, so a value in seconds renders as 0″). `audio/wav` plays fine.
+### ClawChat Attachments
 
-**Inbound — landing is the channel's job, and for audio landing is not enough.** Media reaching the host arrives as an optional `## ClawChat Attachments` block in the finished prompt, one line per file, each naming what it is:
+The channel downloads to a per-agent inbox, skips failed downloads and still runs the turn; sandboxed hosts may not reach
+URLs. Deliver an optional attachments block, one named file per line:
 
 ```
 ## ClawChat Attachments
@@ -516,13 +506,12 @@ Audio files render as playable voice messages — there is no separate voice kin
 - voice message · 3.3s · voice_1785747467995.m4a → /abs/path/…m4a
 ```
 
-The channel downloads each file into a per-agent inbox first; the URL in the body is not reachable from a sandboxed host (Codex measured `network_access: false`). A download that fails is skipped and the turn still runs.
+For `audio`, add an instruction block: the host cannot hear it, must not guess or invent permission failures; use an
+installed transcriber, ask to install one with owner approval, or ask for text. Mirror this: hosts can open images by path
+but cannot hear audio; transcription belongs to the host machine.
 
-**A turn carrying `audio` also gets a short instruction block** telling the host it cannot hear the file, must not guess at its contents, and must not describe a permission problem it did not hit — plus the routes open to it (use a transcriber already on the machine; ask to install one, which becomes an owner approval; otherwise ask for text). **This is deliberate and reimplementers should mirror it**: both hosts can open an image given a path, neither can open audio, so a bare path is a fact the model can verify and cannot use — which is what produced a confidently invented explanation on a real turn (2026-08-03). Transcription is the *host machine's* capability, never the channel's.
-
-**Moments** — the agent's shadow user is a first-class citizen over plain `/v1/moments` (measured 2026-07-31 with an agent JWT): `GET /v1/moments?limit=N` returns own + friends feed (the agent sees the owner's circle); `POST /v1/moments {text, images:[]}` publishes, ungated, and renders with the Agent badge; `DELETE /v1/moments/:id` is **owner-permission-gated** (§2.8).
-
----
+**Moments** (agent JWT, shadow user): `GET /v1/moments?limit=N` returns own + friends / owner's-circle feed; `POST /v1/moments {text, images:[]}` publishes
+ungated with Agent badge; `DELETE /v1/moments/:id` requires owner permission (§2.8).
 
 ## 5. Constants
 
@@ -540,64 +529,40 @@ The channel downloads each file into a per-agent inbox first; the URL in the bod
 | Media cap | 100 MiB (since 2026-06-03) |
 | Permission request TTL | ≈300 s; 60 min for the `orchestrate.*` operations (§2.8) |
 
----
-
 ## 6. Reimplementation gotchas
 
-Every one of these was learned the expensive way — from the reference plugin's source, or from a live probe. They are ordered by how much time they cost.
-
-1. **`message_id` format is contractual** — `msg-` + 26-char Crockford base32 ULID. Not a UUID, not a nanoid.
-2. **`X-Device-Id` on `/v1/auth/refresh` must byte-match the connect-time REST device id** (the literal channel constant, **not** the WS `device_id`). Mismatch → `code:10003` (not 400 — that is a *missing* header) → auto-logout (§1.6).
-3. **Refresh tokens are single-use.** Persist before swapping; treat a 10003 for a token you already rotated away from as transient, not permanent (§1.5).
-4. **Never address an outbound frame to a `usr_…` id.** `chat_id` must be a `cnv_…`. Violations are dropped **with no negative ack** — silent loss, no error to debug. Use `conversation.id` from activation for owner DMs.
-5. **The self-echo guard must fail closed.** Unknown own `user_id` ⇒ drop all inbound business frames. Failing open produces an infinite self-reply loop against a live production account.
-6. **Delivery is advance-on-write.** Persist inbound claims before any interruptible await; nothing is replayed for you. **Claim what you consume, not only what you answer** — a message you take out of the message path for something else (an approval reply eaten by a permission card is the case that bit this app on 2026-09-04) still needs its claim, or the copy that arrives again — a second connection on the same account, an inbox replay after a device-id change (gotcha 10) — finds nothing waiting for it and reads as ordinary text, costing a whole turn.
-7. **`message_mode: ""` means `"normal"`.** The server does not default it on the downlink, so a naive equality check against `"normal"` drops every message.
-8. **`platform` is client-chosen and unvalidated at the check endpoint.** `claudecode` is accepted by production; if `/connect` ever rejects a new id, fall back to `openclaw`. The visible cost of the fallback is that the Agent management page's platform pill shows `openclaw` instead of the real host name — functionally lossless, cosmetically wrong.
-9. **`pong` must echo `emitted_at` verbatim.** Re-stamping it is a protocol violation.
-10. **The §1.6 derivation includes `hostname()` — which is wrong for containers.** A Docker container gets a fresh random hostname on every `run`, so a host that derives its WS `device_id` per the formula looks like a **new device on every restart** and takes a full inbox replay each time (measured 2026-08-30: a restart re-delivered messages the previous run had already acked). The fix is the one §2.3 already states — **persist `hello-ok.device_id` and send it back next connect** — plus computing the derived value only once and storing it. The formula is right for a normal install; anything whose hostname can change must not re-derive.
-11. **`pairable:false` from `/connect/check` is a fork, not a verdict.** `status:"pending"` + `user_id_status:"owner_mismatch"` = the invite is unused and your stored `user_id` belongs to another owner — drop the hint and re-check instead of throwing the code away; `/connect` with the mismatched hint is what can spend the code and still fail (§1.3, measured 2026-08-31).
-12. **Never let `typing.update` outlive the host.** Refresh `is_typing:true` every ~4 s only while a `message.send` is actually coming; time-bound the loop and close with `false` even on host error. A hung host kept "typing" for minutes is indistinguishable, on the owner's screen, from a dead channel — which reads as a §2.3 failure when nothing on the wire is wrong (§2.6, measured 2026-08-31).
-13. **A message you sent is not in your history until you put it there — and every send path has to do it.** Recording is easy to attach to "the turn produced text" and then miss on the paths that speak some other way (a mention-only send, a tool-initiated send, a second connection on the same identity). Nothing fails when you miss one: the send succeeds, the room is correct, and only the agent's own memory is wrong — which surfaces much later as it answering a question it already answered. Write the record **after** the send succeeds (never before — a message that never left must not become a memory of having spoken), from the fragments that actually went out, and key it on **which identity sent it**, not only on which conversation it went to. The conversation id is not proof of authorship: `chat_id` is whatever the caller passed, the server drops a frame from a non-member silently (gotcha 4), and a client-side send "succeeding" only means the frame left your socket. Key on the conversation alone and another agent on the same machine can address your owner DM by its `cnv_…` — the frame dies at the server and your history still gains a line saying *you* said it. A memory of a sentence that was never spoken is worse than a missing one, because nothing downstream can tell it apart from a real one. Measured 2026-09-22 (§2.6).
-
----
+1. Use `msg-` + 26-char Crockford base32 ULID, never UUID / nanoid (§2.6).
+2. Byte-match refresh's REST device id to connect: mismatch `10003`, missing `400` (§1.6).
+3. Persist before swapping single-use refresh tokens; concurrent-rotation `10003` can be transient (§1.5).
+4. Outbound `chat_id`: `cnv_…`, never `usr_…`; violations silently drop without negative ack (§2.6).
+5. Drop business frames when own `user_id` is unknown to prevent self-reply (§2.5).
+6. Claim consumed messages, including approval replies, before awaits; advance-on-write replays nothing (§2.3).
+7. Empty `message_mode` means `normal` (§2.5).
+8. Check leaves `platform` unvalidated; `openclaw` fallback only mislabels the pill (§1.3).
+9. Echo `pong.emitted_at` verbatim (§2.4).
+10. Changing hostnames cause restart replay: derive once, store and reuse `hello-ok.device_id` (§1.6, §2.3).
+11. `pending` + `owner_mismatch`: drop hint, re-check; `/connect` can spend the invite and fail (§1.3).
+12. Bound typing to a coming send; refresh ~4 s, close `false` even on host error (§2.6).
+13. Record sent fragments after success by sender + conversation (§2.6). Socket success permits silent non-member drops; conversation-only recording can invent speech.
 
 ## 7. Deliberately out of scope
 
 | Topic | Where it lives |
 |---|---|
 | **Liveware CLI** (`liveware login / app create / tunnel bind / agent`), app-registry REST `/v1/agents/me/apps`, viewer-identity headers | A **host-side skill**, not a channel concern — the host acquires it independently and the channel neither drives nor needs it. See **`../liveware/`**. |
-| ~~**Memory files**~~ ~~**Behavior / identity prompt bundles**~~ | ⚠️ **Both rows were wrong and are superseded — see the correction below.** |
 | **Owner-side agent endpoints** (creating an agent, generating invite codes, the management page) | **`api.md`** — that is the *user's* half of the same feature. |
 
 ### 7.1 Correction — identity and memory are the channel's concern after all
 
-Identity and memory are assembled by the **channel** into the finished prompt, like the rest of the context (§0); the host only receives the result. The prompt wording is the channel's own choice and is not specified here.
+The channel assembles identity / memory; the host receives the prompt (§0). Prompt wording, plugin file layout and skill
+hot-update mechanisms are outside scope.
 
-⚠️ **`agent.behavior` is handed out by §1.3 and was being dropped on the floor.**
-The `connect` response carries it, and reference plugins have always read it;
-the local-agent channel discarded the field until 2026-08-10, so an owner
-editing 「Agent 行为」 changed nothing for a local agent. Two consequences for
-anybody reimplementing this protocol:
-
-* **Read it at connect, and re-read it on `chat.metadata.invalidated` with
-  `scope:["behavior"]`** (§2.7 / `ws-protocol.md` §9.3). The signal is fanned
-  over the agent's own direct conversation and the agent's shadow user is a
-  recipient, so the agent connection sees the owner's edit no matter which
-  device made it.
-* **The refetch is a self-read.** `GET /v1/agents/:id` is owner-or-self gated
-  and the agent is the self; measured against production 2026-08-10 with the
-  agent's own JWT → `code:0`, `data.agent.behavior` present. No owner
-  credentials are needed and none should be used — mixing the two identities is
-  the failure §1.6 is about, one layer up.
-* The signal is **ephemeral and never replayed**, so a connect-time pull is a
-  real backstop, not belt-and-braces: an edit made while the agent was offline
-  arrives that way or not at all.
-
----
+Read `agent.behavior` at connect and on `chat.metadata.invalidated` with `scope:["behavior"]`: self-read `GET /v1/agents/:id` with the agent's JWT →
+`code:0`, `data.agent.behavior`, never owner credentials. Signals reach the agent's shadow user via its own DM from any
+editing device but are ephemeral / unreplayed, so connect-time reads are necessary.
 
 ## Refresh procedure
 
-**The cheapest re-verification is [`examples/cloud-agent/`](../examples/cloud-agent/)** — `check` mode costs nothing and consumes no invite code, and a full run exercises activation → handshake → inbound chain → send/ack.
+[`examples/cloud-agent/`](../examples/cloud-agent/) is the cheapest check: `check` is free and consumes no invite; a full run tests activation → handshake → inbound chain → send/ack.
 
-Hand-authored. Re-verify against production when: the reference plugin publishes a new major version, msghub changes the Protocol v2 envelope (in which case **`ws-protocol.md`** moves first and this file follows), or a measured claim here is contradicted by a live probe. Measured claims are dated inline — **replace the date when you re-measure**, and do not silently promote an unverified assumption into one of them.
+Hand-authored: recheck on plugin major releases, v2 envelope changes (`ws-protocol.md` first), or contradicting probes. Record what was rechecked and when; never silently promote unverified assumptions.
