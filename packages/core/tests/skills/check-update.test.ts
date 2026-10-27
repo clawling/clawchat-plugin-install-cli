@@ -42,13 +42,13 @@ function textResponse(body: string, ok = true): Response {
 describe("url builders", () => {
   it("pins the default ref to the current immutable skills tag", () => {
     expect(DEFAULT_SKILLS_REF).toMatch(/^skills-v\d+\.\d+\.\d+$/);
-    expect(DEFAULT_SKILLS_REF).toBe("skills-v1.18.1");
+    expect(DEFAULT_SKILLS_REF).toBe("skills-v1.19.0");
   });
 
   it("builds manifest and content urls with the default skills tag when ref is omitted", () => {
-    expect(manifestUrl()).toBe(`${BASE}/skills-v1.18.1/skills/manifest.json`);
+    expect(manifestUrl()).toBe(`${BASE}/skills-v1.19.0/skills/manifest.json`);
     expect(skillContentUrl("openclaw/clawchat-core/SKILL.md")).toBe(
-      `${BASE}/skills-v1.18.1/skills/openclaw/clawchat-core/SKILL.md`,
+      `${BASE}/skills-v1.19.0/skills/openclaw/clawchat-core/SKILL.md`,
     );
   });
 
