@@ -284,7 +284,11 @@ describe("bundled clawchat-core skills", () => {
     ]) {
       expect(hermes).toContain(line);
     }
-    expect(hermes).toMatch(/apply each in order, they are not duplicates\. Then send one new full snapshot\./);
+    expect(hermes).toContain(
+      "apply each in order, they are not duplicates. Then send one new full snapshot, except after `removed`: send nothing for that widget (see Removing one).",
+    );
+    expect(hermes).toContain('`capture`: opens your chat with "<title>: " already typed; what they add reaches you as an ordinary message.');
+    expect(hermes).not.toContain("quick-entry box");
     expect(hermes).toContain("`resend` means a device lost the widget: send the latest snapshot again.");
   });
 
