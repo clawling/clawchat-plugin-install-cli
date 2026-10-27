@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_SKILLS_REF } from "../../src/config";
 import { ClawchatError } from "../../src/errors";
 import {
   checkSkillUpdate,
@@ -39,6 +40,18 @@ function textResponse(body: string, ok = true): Response {
 }
 
 describe("url builders", () => {
+  it("pins the default ref to the current immutable skills tag", () => {
+    expect(DEFAULT_SKILLS_REF).toMatch(/^skills-v\d+\.\d+\.\d+$/);
+    expect(DEFAULT_SKILLS_REF).toBe("skills-v1.18.1");
+  });
+
+  it("builds manifest and content urls with the default skills tag when ref is omitted", () => {
+    expect(manifestUrl()).toBe(`${BASE}/skills-v1.18.1/skills/manifest.json`);
+    expect(skillContentUrl("openclaw/clawchat-core/SKILL.md")).toBe(
+      `${BASE}/skills-v1.18.1/skills/openclaw/clawchat-core/SKILL.md`,
+    );
+  });
+
   it("builds manifest and content urls for a ref", () => {
     expect(manifestUrl("skills-v1.2.0")).toBe(`${BASE}/skills-v1.2.0/skills/manifest.json`);
     expect(skillContentUrl("openclaw/clawchat-core/SKILL.md", "skills-v1.2.0")).toBe(
