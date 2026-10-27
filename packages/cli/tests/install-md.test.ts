@@ -245,7 +245,7 @@ describe("bundled clawchat-core skills", () => {
     }
   });
 
-  it("teach widget/v1 the same way on both hosts: one tool, explicit request, full snapshots, taps and resend", () => {
+  it("teach widget/v1 the same way on both hosts: one tool, explicit request, full snapshots, design, removal, taps and resend", () => {
     const widgetSection = (text: string) =>
       text.split("## Home-screen widgets (widget/v1)")[1]?.split(/\n## /)[0] ?? "";
     const [hermes, openclaw] = SKILLS.map(widgetSection);
@@ -256,15 +256,31 @@ describe("bundled clawchat-core skills", () => {
     }
     expect(hermes).toContain("You write it with `clawchat_widget_send`");
     expect(hermes).toContain("Send one only after your partner asked for a widget");
-    expect(hermes).toContain("Every message is the full snapshot, never a diff. The latest one per `id` wins.");
-    expect(hermes).toContain("Do not refresh on a timer");
-    expect(hermes).toContain("It only ever goes to your private chat with your partner.");
+    expect(hermes).toContain("Every message is the full snapshot, never a diff; the latest one per `id` wins.");
+    expect(hermes).toContain("It only ever goes to your private chat with them.");
+    // Behaviour sections come before the format reference, in this order, so a
+    // host that truncates long tool results still keeps them.
+    const headings = [...(hermes ?? "").matchAll(/^### (.+)$/gm)].map((m) => m[1]);
+    expect(headings).toEqual([
+      "When to send",
+      "When to update",
+      "Design",
+      "Layouts",
+      "Removing one",
+      "Document",
+      "Blocks",
+      "Actions: `{\"do\": …}`",
+      "Data that changes by itself",
+      "What comes back",
+    ]);
+    expect(hermes).toContain('send `{"v": 1, "id": "todo", "removed": true}` with its `id`');
     for (const line of [
       '[widget todo] checked "Pay rent" (t1)',
       '[widget todo] turned on "Focus" (f1)',
       '[widget todo] pressed "Refresh" (b1)',
       "[widget todo] capture: buy milk",
       "[widget todo] resend",
+      "[widget todo] removed",
     ]) {
       expect(hermes).toContain(line);
     }
