@@ -475,7 +475,8 @@ greeting never fires and the profile call in step 5 would fail - the ClawChat
 tools aren't registered yet.
 
 **Hermes:** a plugin reload does not start the ClawChat connection; only a
-gateway restart does. The restart activation schedules is unchecked (`Hermes
+gateway restart does - except a multiplexed profile on Hermes 0.21.6+: wait
+~30 s for its ready line, restart only if none (step 3). The restart activation schedules is unchecked (`Hermes
 restart scheduled` proves nothing). If no ready line yet, report
 `plugin_awaiting_restart` once (the CLI prints it after `plugin_activated`).
 
@@ -491,9 +492,9 @@ connected. Hermes: a `clawchat state -> ready` log line from *after*
 activation, then the plugin's greeting (step 5).
 If it did not restart:
 
-- **Hermes: "the default gateway is running as a profile multiplexer"** - one
-  default-profile gateway serves all profiles and refuses per-profile restarts.
-  Ask the owner before `hermes gateway restart` (no `-p`): it restarts all of them.
+- **Hermes: "the default gateway is running as a profile multiplexer"** - it
+  refuses per-profile restarts. Ask the owner before `hermes gateway restart`
+  (no `-p`): it restarts every profile.
 - **Hermes: the profile has no gateway service yet** - for a named profile,
   prefer the default profile's multiplexer (step 3); otherwise have the owner run
   `hermes -p <name> gateway install`, then `hermes -p <name> gateway start`.
@@ -508,11 +509,11 @@ If it did not restart:
   ask the owner to run `loginctl enable-linger "$USER"` for the systemd user
   service. WSL2 also needs `[boot]` `systemd=true` in `/etc/wsl.conf`, then
   `wsl --shutdown` from Windows; the owner decides because this restarts the VM.
-- **The restart waits for open sessions to finish** - ask the owner before
-  restarting the service directly; that ends those sessions.
+- **Restart still waiting for open sessions** - ask the owner before
+  restarting the service directly; that ends them.
 
-A restart notice from the host itself ("gateway restarted", "back online") is
-not the plugin's greeting. Once the gateway is verified up, continue to step 5.
+A host restart notice ("gateway restarted") is not the plugin's greeting.
+Once the gateway is verified up, continue to step 5.
 
 ## 5. Confirm the greeting arrived (the success signal)
 

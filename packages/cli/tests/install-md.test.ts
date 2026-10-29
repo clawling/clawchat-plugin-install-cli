@@ -117,6 +117,7 @@ describe("published runtime guides", () => {
   it("install.md step 4 hands Hermes restart to the owner and verifies readiness", () => {
     const step4 = install.split("## 4. Restart the agent")[1]?.split("\n## 5.")[0] ?? "";
     expect(step4).toContain("a plugin reload does not start the ClawChat connection");
+    expect(step4).toMatch(/except a multiplexed profile on Hermes 0\.21\.6\+: wait\s+~30 s for its ready line, restart only if none \(step 3\)/);
     expect(step4).toContain("end this reply");
     expect(step4).toContain("`hermes gateway restart` (`-p <name>` for a named profile");
     expect(step4).toContain("**external shell**, not in chat or your terminal tool");
