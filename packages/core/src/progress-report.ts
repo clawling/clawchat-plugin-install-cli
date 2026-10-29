@@ -1,9 +1,10 @@
 import { ClawchatError } from "./errors";
+import { classifyOpenClawRefusal } from "./installers/openclaw-host";
 
 export const PROGRESS_REPORT_PREFIX = "CLAWCHAT_REPORT: ";
 export const INSTALL_FAILURE_CATEGORIES = Object.freeze([
   "scan_blocked", "host_missing", "host_too_old", "npx_missing", "network",
-  "timeout", "already_exists", "host_error", "bad_input", "other",
+  "timeout", "already_exists", "host_error", "bad_input", "prerelease_refused", "legacy_config", "other",
 ] as const);
 export const ENABLE_FAILURE_CATEGORIES = Object.freeze([
   "deps_failed", "scan_disabled", "other",
@@ -34,14 +35,19 @@ export function classifyInstallFailure(err: unknown): string {
   if (!(err instanceof ClawchatError)) return "other";
   switch (err.code) {
     case "SCAN_BLOCKED": return "scan_blocked";
+    case "PRERELEASE_REFUSED": return "prerelease_refused";
+    case "LEGACY_CONFIG": return "legacy_config";
     case "PRECONDITION": return /too\s+old/i.test(err.message) ? "host_too_old" : "other";
     case "TIMEOUT": return "timeout";
     case "HTTP_ERROR":
     case "METADATA": return "network";
-    case "SUBPROCESS":
+    case "SUBPROCESS": {
+      const refusal = classifyOpenClawRefusal(err.message);
+      if (refusal) return refusal;
       if (/\bENOENT\b|\bnot\s+found\b/i.test(err.message)) return "host_missing";
       if (/\balready\s+exists\b/i.test(err.message)) return "already_exists";
       return "host_error";
+    }
     case "VALIDATION":
     case "INVALID_INPUT": return "bad_input";
     default: return "other";
