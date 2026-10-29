@@ -288,7 +288,8 @@ touched, the opposite of the OpenClaw order. The remaining steps are:
    **except** when a proxy env var (`HTTPS_PROXY`, `http_proxy`, `ALL_PROXY`, …)
    is set, which uses `curl -fsL --max-time 20 --retry 2 --retry-delay 2`
    (5s connect cap, 75s subprocess backstop). Any curl failure is treated as a
-   transport failure (curl's `--fail` exit does not distinguish 4xx from 5xx). undici ignores
+   transport failure except exit 22 (`--fail`: the server answered HTTP 400 or
+   above; curl cannot tell 4xx from 5xx), which stops like a fetch 4xx. undici ignores
    proxy vars;
    `NODE_USE_ENV_PROXY` needs Node 24+, so on a locked-down network `fetch`
    would lose egress entirely rather than merely skip the proxy.
@@ -299,7 +300,7 @@ touched, the opposite of the OpenClaw order. The remaining steps are:
 4. Parse `hermes plugins list` for an existing `clawchat` row.
 
 If metadata transport fails (`TIMEOUT` / `HTTP_ERROR` from fetch, or
-`SUBPROCESS` / `TIMEOUT` from curl), still run
+`SUBPROCESS` other than exit 22 / `TIMEOUT` from curl), still run
 `hermes --version` to confirm the host exists and `hermes plugins list`.
 Automatically fall back only where the normal branch would call
 `installCanonical`: a missing plugin on `install` / `update --force`, or an
@@ -309,7 +310,8 @@ that CLI version / host compatibility checks are skipped. The result has
 `version: undefined` and a fallback `detail`. The host still validates and scans;
 the scan gate below is unchanged. This availability fallback is enabled by
 default because GitHub raw can be unreachable while the host's git clone works.
-HTTP 4xx and malformed metadata never fall back. All other branches rethrow
+HTTP 4xx (on the curl path, any HTTP error) and malformed metadata never fall
+back. All other branches rethrow
 the original metadata transport error (WeakSet marker, same code/message),
 including installed plugins without `--force` and missing plugins on plain
 `update`; metadata is required for their normal update/skip decisions.

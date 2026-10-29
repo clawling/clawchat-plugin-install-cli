@@ -493,6 +493,18 @@ function installCanonical(run: CommandRunner, replaceExisting: boolean, timeoutM
   });
 }
 
+/**
+ * Whether a failed plugin.yaml read may fall back to the host install. Only
+ * transport failures qualify. curl's `--fail` exit 22 means the server answered
+ * with HTTP 400 or above and cannot tell 4xx from 5xx, so on the proxied path
+ * any HTTP error stops the install, like a 4xx does on the fetch path.
+ */
+function isMetadataTransportFailure(err: unknown): err is ClawchatError {
+  if (!(err instanceof ClawchatError)) return false;
+  if (err.code === "TIMEOUT" || err.code === "HTTP_ERROR") return true;
+  return err.code === "SUBPROCESS" && !/\bfailed with exit code 22\b/.test(err.message);
+}
+
 async function readHermesInstallerContext(options: InstallerOptions = {}, action: "install" | "update" = "install"): Promise<HermesInstallerContext> {
   const { run, capture } = hermesRunners(options);
   const force = options.force ?? false;
@@ -506,7 +518,7 @@ async function readHermesInstallerContext(options: InstallerOptions = {}, action
     artifact = parseHermesPluginYaml(pluginYaml);
     progress?.(`Downloaded Hermes plugin metadata ${artifact.version}`);
   } catch (err) {
-    if (!(err instanceof ClawchatError) || !["TIMEOUT", "HTTP_ERROR", "SUBPROCESS"].includes(err.code)) throw err;
+    if (!isMetadataTransportFailure(err)) throw err;
     metadataError = markMetadataFailure(err);
   }
 

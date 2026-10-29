@@ -1015,6 +1015,18 @@ describe("Hermes metadata fallback", () => {
     ]);
   });
 
+  it("does not fall back when curl reports an HTTP error (exit 22)", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
+    const baseCapture = createCapture(null);
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "curl") throw new ClawchatError("SUBPROCESS", `curl -fsL ${HERMES_PLUGIN_YAML_URL} failed with exit code 22`);
+      return baseCapture(cmd, args);
+    });
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture })).rejects.toMatchObject({ code: "SUBPROCESS" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it.each(["SUBPROCESS", "TIMEOUT"])("falls back on curl transport failure %s", async (code) => {
     vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
     const baseCapture = createCapture(null);
