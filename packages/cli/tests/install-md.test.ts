@@ -63,8 +63,30 @@ describe("published runtime guides", () => {
     expect(scanner).toMatch(/Unattended\s+install/);
     expect(scanner).toMatch(/rather\s+than\s+forcing/);
     const step2 = install.split("## 2. Install")[1]?.split("\n## 3.")[0] ?? "";
-    expect(step2).toMatch(/expected\s+for\s+this\s+plugin/);
+    // Current hosts scan this plugin as safe; older hosts can still require approval.
+    expect(step2).toMatch(/safe on Hermes v0\.21\.6\+/);
+    expect(step2).toMatch(/older\s+hosts may report \*caution\*/);
     expect(step2).toMatch(/don't\s+answer\s+the\s+prompt/);
+  });
+
+  it("install.md documents automatic metadata fallback and non-interactive dependency recovery", () => {
+    const step2 = install.split("## 2. Install")[1]?.split("\n## 3.")[0] ?? "";
+    expect(step2).toContain("automatically uses");
+    expect(step2).toMatch(/skipping CLI version \/ host\s+compatibility checks/);
+    expect(step2).toContain("Invalid metadata stops the CLI");
+    expect(step2).toContain("**enable prepares dependencies even non-interactively**");
+    expect(step2).toContain("at least 15 minutes");
+    expect(step2).not.toMatch(/ask before|must.*real terminal/);
+    const recovery = install.split('<a id="hermes-dependencies"></a>')[1]?.split("\n- **")[0] ?? "";
+    for (const text of ["uv lock", "uv sync", "1800s", "UV_DEFAULT_INDEX=<mirror-url>", "UV_INDEX_URL", "UV_HTTP_TIMEOUT=120", "UV_NATIVE_TLS=1", "SSL_CERT_FILE", "HTTPS_PROXY", '$env:UV_NATIVE_TLS = "1";', "retry the same command once", "never global"]) {
+      expect(recovery).toContain(text);
+    }
+    expect(recovery).not.toContain("UV_SYSTEM_CERTS");
+    const scanner = install.split("- **The host's scanner blocked the install")[1]?.split("\n- ")[0] ?? "";
+    expect(scanner).toContain("plugin_install_failed:scan_blocked");
+    expect(scanner).toContain("Do you approve continuing?");
+    expect(scanner).toContain("您是否同意继续？");
+    expect(scanner).toContain("<categories/counts>");
   });
 
   it("install.md step 4 makes the agent verify the gateway actually restarted", () => {
@@ -127,6 +149,7 @@ describe("published runtime guides", () => {
     writeFileSync(join(bin, "hermes"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     const out = execFileSync("bash", ["-c", bash], {
       env: { PATH: `${bin}:${process.env.PATH}`, HOME: root, HERMES_HOME: profile },
+      stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
     });
     expect(out.split("\n")).toContain("coder");
@@ -417,6 +440,16 @@ describe("wiki progress forwarding instructions", () => {
     for (const reason of PROGRESS_REPORT_REASONS) expect(report).toContain(reason);
     const list = report.split("```text\n")[1]?.split("```")[0]?.trim().split("\n");
     expect(list).toEqual(PROGRESS_REPORT_REASONS);
+  });
+
+  it("covers failures before CLI download and distinguishes enable dependency failures", () => {
+    expect(report).toContain("**no `CLAWCHAT_REPORT:` line**");
+    expect(report).toContain("npx download failed");
+    expect(report).toContain("download/registry transport errors");
+    expect(report).toContain("`tls` for certificates");
+    for (const category of ["deps_timeout", "deps_tls", "deps_network", "deps_failed"]) {
+      expect(report).toContain(`\`${category}\``);
+    }
   });
 
   it("restricts forwarding to wiki-routed agents with a code and makes it best-effort", () => {

@@ -103,8 +103,16 @@ The whitelist and formatter live in `packages/core/src/progress-report.ts`;
 report lines never carry raw error text, paths, pairing codes or credentials.
 OpenClaw refusals report `host_too_old`, `prerelease_refused` or `legacy_config`;
 typed errors and raw host refusal text use the same classification, before
-generic subprocess errors such as "not found". The install categories append
-`prerelease_refused`, then `legacy_config`, before the final `other` category.
+generic subprocess failures. `host_missing` matches only a missing `hermes` /
+`openclaw` executable; missing git, repos or plugins are `host_error`. Explicit
+subprocess transport errors are `network`. Certificate verification failures
+are `tls` before any metadata marker; marked metadata transport failures are
+`metadata`. Parsing/version-format `METADATA` errors are `other`.
+Enable reasons include `deps_failed`, `deps_network`, `deps_tls`, `deps_timeout`
+for agents checking enablement; the CLI does not emit them. Activation recognizes
+the plugin's connect-code validation refusals as `code_rejected`, and transport
+failures without an HTTP status as `network` (or `timeout` when timed out);
+transport failures with a status remain `other`.
 These additive lines are enabled by default so agents can identify stages and
 failures; the CLI and scripts make no reporting network requests and retain
 existing install behavior and exit codes. Agents check Hermes enablement separately.
@@ -273,11 +281,16 @@ touched, the opposite of the OpenClaw order. The remaining steps are:
 
 1. Fetch `plugin.yaml` from
    `https://raw.githubusercontent.com/clawling/clawchat-plugin-hermes-agent/main/plugin.yaml`
-   (constant `HERMES_PLUGIN_YAML_URL`) with Node's own `fetch` (15s per-attempt
-   cap, one retry; 4xx is not retried). Injectable via `InstallerOptions.fetchFn`.
+   (constant `HERMES_PLUGIN_YAML_URL`) with Node's own `fetch` (20s per-attempt
+   cap, two retries after 2s and 4s; 4xx is not retried). Injectable via
+   `InstallerOptions.fetchFn`.
    Preferred over `curl`, which is absent on Windows builds older than 10/1803 —
    **except** when a proxy env var (`HTTPS_PROXY`, `http_proxy`, `ALL_PROXY`, …)
-   is set, which falls back to `curl -fsL`. undici does not read those vars and
+   is set, which uses `curl -fsL --max-time 20 --retry 2 --retry-delay 2`
+   (5s connect cap, 75s subprocess backstop). Any curl failure is treated as a
+   transport failure except exit 22 (`--fail`: the server answered HTTP 400 or
+   above; curl cannot tell 4xx from 5xx), which stops like a fetch 4xx. undici ignores
+   proxy vars;
    `NODE_USE_ENV_PROXY` needs Node 24+, so on a locked-down network `fetch`
    would lose egress entirely rather than merely skip the proxy.
 2. Parse the artifact `version` and the optional `requires.hermes` range
@@ -286,12 +299,29 @@ touched, the opposite of the OpenClaw order. The remaining steps are:
 3. Run `hermes --version` and assert it satisfies the range.
 4. Parse `hermes plugins list` for an existing `clawchat` row.
 
+If metadata transport fails (`TIMEOUT` / `HTTP_ERROR` from fetch, or
+`SUBPROCESS` other than exit 22 / `TIMEOUT` from curl), still run
+`hermes --version` to confirm the host exists and `hermes plugins list`.
+Automatically fall back only where the normal branch would call
+`installCanonical`: a missing plugin on `install` / `update --force`, or an
+installed plugin with `--force`. Progress explains the fallback to
+`hermes plugins install clawling/clawchat-plugin-hermes-agent --enable` and
+that CLI version / host compatibility checks are skipped. The result has
+`version: undefined` and a fallback `detail`. The host still validates and scans;
+the scan gate below is unchanged. This availability fallback is enabled by
+default because GitHub raw can be unreachable while the host's git clone works.
+HTTP 4xx (on the curl path, any HTTP error) and malformed metadata never fall
+back. All other branches rethrow
+the original metadata transport error (WeakSet marker, same code/message),
+including installed plugins without `--force` and missing plugins on plain
+`update`; metadata is required for their normal update/skip decisions.
+
 `install` then branches on `force` and on whether the plugin is already
 installed. The four result statuses are:
 
 | Status | Meaning |
 |--------|---------|
-| `installed` | plugin was missing; freshly installed and enabled |
+| `installed` | plugin was missing; freshly installed (check enablement separately) |
 | `updated`   | plugin was present and a newer version (or `--force` reinstall) was applied |
 | `updated` (`detail: "enabled existing plugin"`) | plugin was installed but disabled; we only re-enabled |
 | `skipped`   | installed version is equal to or newer than remote; nothing changed |

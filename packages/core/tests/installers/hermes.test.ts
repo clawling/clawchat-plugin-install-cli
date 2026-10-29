@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "../../src/config";
 import { ClawchatError } from "../../src/errors";
-import { isActivationFailure } from "../../src/progress-report";
+import { classifyInstallFailure, isActivationFailure } from "../../src/progress-report";
 import { installHermesPlugin, isHermesScanRefusal, resolveHermesInstallTimeoutMs, updateHermesPlugin } from "../../src/installers/hermes";
 
 const HERMES_CLONE_URL = "https://github.com/clawling/clawchat-plugin-hermes-agent.git";
@@ -37,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -214,7 +215,7 @@ describe("Hermes installer", () => {
       throw new Error(`unexpected capture: ${cmd} ${args.join(" ")}`);
     });
 
-    vi.stubEnv("HTTPS_PROXY", "http://proxy.internal:3128");
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
     try {
       await expect(installHermesPlugin({ run, capture })).resolves.toMatchObject({ status: "installed" });
     } finally {
@@ -864,5 +865,178 @@ describe("Hermes activation failure stages", () => {
     await expect(installHermesPlugin({ run, capture: createCapture(null), activateCode: "PLACEHOLDER_CODE" })).rejects.toBe(err);
     expect(isActivationFailure(err)).toBe(false);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Hermes metadata fallback", () => {
+  it("falls back after three metadata fetch timeouts with 2s and 4s backoff", async () => {
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const fetchFn = vi.fn(async () => { throw new DOMException("request timed out", "TimeoutError"); });
+    const run = vi.fn(async () => undefined);
+    const capture = createCapture(null, "unparseable host version");
+    const progress = vi.fn();
+    const pending = installHermesPlugin({ run, capture, fetchFn, onProgress: progress });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await pending;
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(timeout).toHaveBeenCalledWith(20_000);
+    timeout.mockRestore();
+    expect(result).toMatchObject({ status: "installed", detail: expect.stringContaining("fallback host install") });
+    expect(result.version).toBeUndefined();
+    expect(hostInstallCalls(run)).toEqual([["plugins", "install", HERMES_PLUGIN_SPEC, "--enable"]]);
+    expect(capture.mock.calls.map((call) => call.slice(0, 2))).toEqual([
+      ["hermes", ["--version"]], ["hermes", ["plugins", "list"]],
+    ]);
+    expect(progress).toHaveBeenCalledWith(expect.stringMatching(/metadata unavailable.*falling back to hermes plugins install.*skipping CLI version \/ host compatibility checks/));
+  });
+
+  it("falls back after retrying metadata HTTP 5xx responses", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn(async () => new Response("unavailable", { status: 503 }));
+    const run = vi.fn(async () => undefined);
+    const pending = installHermesPlugin({ run, capture: createCapture(null), fetchFn });
+    await vi.runAllTimersAsync();
+    await expect(pending).resolves.toMatchObject({ status: "installed", version: undefined });
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expectRemoteInstall(run);
+  });
+
+  it.each([401, 403, 404])("does not retry or fall back on metadata HTTP %s", async (status) => {
+    const fetchFn = vi.fn(async () => new Response("refused", { status }));
+    const run = vi.fn(async () => undefined);
+    const capture = createCapture(null);
+    await expect(installHermesPlugin({ run, capture, fetchFn })).rejects.toMatchObject({ code: "PRECONDITION" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back on malformed metadata", async () => {
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture: createCapture(null), fetchFn: async () => new Response("name: clawchat") })).rejects.toMatchObject({ code: "METADATA" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([installHermesPlugin, updateHermesPlugin])("preserves and classifies metadata timeouts for installed plugins without force (%s)", async (action) => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn(async () => { throw new DOMException("timeout", "TimeoutError"); });
+    const run = vi.fn(async () => undefined);
+    const pending = action({ run, capture: createCapture("0.1.1"), fetchFn }).catch((err: unknown) => err);
+    await vi.runAllTimersAsync();
+    const err = await pending;
+    expect(err).toMatchObject({ code: "TIMEOUT", message: `GET ${HERMES_PLUGIN_YAML_URL} timed out after 20000ms` });
+    expect(classifyInstallFailure(err)).toBe("metadata");
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [installHermesPlugin, "0.1.1", "updated"],
+    [updateHermesPlugin, null, "installed"],
+    [updateHermesPlugin, "0.1.1", "updated"],
+  ] as const)("falls back only to canonical installs requested with force (%s, %s)", async (action, installed, status) => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn(async () => { throw new Error("network unavailable"); });
+    const run = vi.fn(async () => undefined);
+    const pending = action({ run, capture: createCapture(installed), fetchFn, force: true });
+    await vi.runAllTimersAsync();
+    await expect(pending).resolves.toMatchObject({ status, version: undefined, previousVersion: installed });
+    expect(hostInstallCalls(run)).toEqual([["plugins", "install", HERMES_PLUGIN_SPEC, "--enable"]]);
+  });
+
+  it("still requires the host executable before installing without metadata", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn(async () => undefined);
+    const hostError = new ClawchatError("SUBPROCESS", "hermes failed: spawn hermes ENOENT");
+    const pending = installHermesPlugin({
+      run,
+      capture: async () => { throw hostError; },
+      fetchFn: async () => { throw new Error("offline"); },
+    }).catch((err: unknown) => err);
+    await vi.runAllTimersAsync();
+    expect(await pending).toBe(hostError);
+    expect(classifyInstallFailure(await pending)).toBe("host_missing");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("retries response body timeouts before falling back", async () => {
+    vi.useFakeTimers();
+    const fetchFn = vi.fn(async () => {
+      const response = new Response("");
+      vi.spyOn(response, "text").mockRejectedValue(new DOMException("timeout", "AbortError"));
+      return response;
+    });
+    const run = vi.fn(async () => undefined);
+    const pending = installHermesPlugin({ run, capture: createCapture(null), fetchFn });
+    await vi.runAllTimersAsync();
+    await expect(pending).resolves.toMatchObject({ status: "installed" });
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expectRemoteInstall(run);
+  });
+
+  it("keeps the metadata error for update without force when the plugin is absent", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn(async () => undefined);
+    const pending = updateHermesPlugin({ run, capture: createCapture(null), fetchFn: async () => { throw new Error("offline"); } }).catch((err: unknown) => err);
+    await vi.runAllTimersAsync();
+    expect(classifyInstallFailure(await pending)).toBe("metadata");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("keeps the scan gate during fallback and classifies caution as scan_blocked", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn(async () => { throw new ClawchatError("SUBPROCESS", HOST_CAUTION_REFUSAL); });
+    const pending = installHermesPlugin({ run, capture: createCapture("0.1.1"), force: true, fetchFn: async () => { throw new Error("offline"); } }).catch((err: unknown) => err);
+    await vi.runAllTimersAsync();
+    const err = await pending;
+    expect(err).toMatchObject({ code: "SCAN_BLOCKED" });
+    expect(classifyInstallFailure(err)).toBe("scan_blocked");
+    expect(hostInstallCalls(run)).toEqual([["plugins", "install", HERMES_PLUGIN_SPEC, "--enable"]]);
+  });
+
+  it("replaces during fallback only after the host reports already exists", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn(async (_cmd: string, args: readonly string[]) => {
+      if (!args.includes("--force")) throw new ClawchatError("SUBPROCESS", HOST_ALREADY_EXISTS);
+    });
+    const pending = installHermesPlugin({ run, capture: createCapture("0.1.1"), force: true, fetchFn: async () => { throw new Error("offline"); } });
+    await vi.runAllTimersAsync();
+    await expect(pending).resolves.toMatchObject({ status: "updated" });
+    expect(hostInstallCalls(run)).toEqual([
+      ["plugins", "install", HERMES_PLUGIN_SPEC, "--enable"],
+      ["plugins", "install", HERMES_PLUGIN_SPEC, "--force", "--enable"],
+    ]);
+  });
+
+  it("does not fall back when curl reports an HTTP error (exit 22)", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
+    const baseCapture = createCapture(null);
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "curl") throw new ClawchatError("SUBPROCESS", `curl -fsL ${HERMES_PLUGIN_YAML_URL} failed with exit code 22`);
+      return baseCapture(cmd, args);
+    });
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture })).rejects.toMatchObject({ code: "SUBPROCESS" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each(["SUBPROCESS", "TIMEOUT"])("falls back on curl transport failure %s", async (code) => {
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
+    const baseCapture = createCapture(null);
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "curl") throw new ClawchatError(code, "curl failed");
+      return baseCapture(cmd, args);
+    });
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture })).resolves.toMatchObject({ status: "installed" });
+    expectRemoteInstall(run);
+    expect(capture).toHaveBeenCalledWith("curl", expect.arrayContaining(["--max-time", "20", "--retry", "2"]), { timeoutMs: 75_000 });
   });
 });

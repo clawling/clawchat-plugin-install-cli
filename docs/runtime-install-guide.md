@@ -50,8 +50,10 @@ success signal.
    ClawChat already installed, and — for Hermes — which profile is active.
 2. **Install** — run
    `npx -y @clawling/clawchat-plugin-install-cli@latest install --target <target>`,
-   with a documented fallback to installing directly via the host when the
-   GitHub-raw fetch is blocked.
+   with automatic Hermes fallback to host cloning when metadata transport
+   fails on a fresh/forced install, plus a manual host path if the CLI still
+   fails. Hermes enablement prepares dependencies non-interactively; the guide
+   gives command timeout, index, TLS and network recovery instructions.
 3. **Activate (single-use code)** — invoke the target plugin's activation command
    exactly once (Hermes v0.12.0, which has no `hermes clawchat` command, is
    sent to the Hermes plugin's activation guide), including the
@@ -83,10 +85,12 @@ Then:
   replaced, wrong Hermes profile, no greeting, model/provider timeouts, a pinned
   Hermes plugin that `update` refuses, corrupted plugin files), each resuming the
   numbered flow. A scan refusal is an owner decision: the guide never tells the
-  agent to override it. A *caution* verdict (with Hermes' `[y/N]` prompt on a
-  terminal) is expected for this plugin; the agent relays it to the owner, who
-  answers, and uses the host's `--force` only on the owner's explicit
-  instruction. Unattended installs stop and report.
+  agent to override it. Current ClawChat is safe on Hermes v0.21.6+; older hosts
+  may give *caution*
+  (with a `[y/N]` prompt on a terminal). The agent relays the actual finding
+  categories/counts and official source to the owner for approval, and uses
+  the host's `--force` only on the owner's explicit instruction. Unattended
+  installs stop and report.
 - **Update or repair later** — the `update --target <target>` command, plus
   `--force` as the documented reinstall/repair path for an already-installed
   plugin. It only reinstalls and never gets past the host's scan (for Hermes

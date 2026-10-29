@@ -14,10 +14,9 @@ install and pair the ClawChat plugin for **one** target - `openclaw` **or**
 `hermes`. Each code block is one terminal call; use your target's block.
 
 **On Windows, use PowerShell** - not `cmd.exe`. The `npx`, `openclaw`, and
-`hermes` commands below are identical there; only four blocks differ and each
-has a PowerShell twin right next to the bash one: the step 0 pre-check, and in
-step 1 the Hermes venv activation, the Hermes profile check and the `HERMES_HOME`
-export. Never
+`hermes` commands below are identical there; shell-specific blocks have
+PowerShell examples: the step 0 pre-check, step 1
+venv/profile/`HERMES_HOME` setup, and dependency recovery. Never
 use PowerShell's `curl` - it is an alias for `Invoke-WebRequest` and takes
 entirely different flags. If you would rather not run steps 1-2 by hand, the
 one-shot script `install-clawchat.ps1` published alongside this guide does them
@@ -39,17 +38,18 @@ per reason: `GET <wiki origin>/hello?c=<your code>&agent=<openclaw|hermes>&step=
 `<wiki origin>` is the site you read `start.md` from (normally
 `https://agent-connection.clawling.com`). Add nothing else to the URL.
 
-Copy each `CLAWCHAT_REPORT: <reason>` from the step 2 CLI or one-shot script
-verbatim. For a direct host install (step 2 fallback), use `plugin_installed` or
-an install failure below; choose `other` when unsure. After the Hermes enable
-check, use `plugin_enabled` on success or `plugin_enable_failed:<category>`:
-`deps_failed` for dependency setup failure, `scan_disabled` for a scan-disabled
-plugin, otherwise `other`.
-After a step 3 command you ran yourself, use `plugin_activated` on success.
-On failure use `plugin_activate_failed:<category>`: already-paired refusal → `already_paired`;
-invalid/expired/used code → `code_rejected`; network error → `network`;
-unknown `hermes clawchat` → `no_command`; plugin too old / "invite code is required"
-→ `plugin_too_old`; timeout → `timeout`; anything else → `other`.
+Copy `CLAWCHAT_REPORT: <reason>` verbatim. With **no `CLAWCHAT_REPORT:` line**
+(e.g. npx download failed), use `plugin_install_failed:` plus `network` for
+download/registry transport errors, `tls` for certificates, otherwise `other`.
+For direct host installs, use `plugin_installed` or a failure below. Unsure: `other`.
+After the Hermes enable check: `plugin_enabled` on success; otherwise
+`plugin_enable_failed:` plus `deps_timeout` for timeout, `deps_tls` for certificate
+errors, `deps_network` for reset/DNS/download errors, `deps_failed` for other
+dependency errors, `scan_disabled` for scan-disabled plugins, otherwise `other`.
+After your step 3 command: `plugin_activated` on success; otherwise
+`plugin_activate_failed:` plus `already_paired`, `code_rejected` (invalid/expired/used),
+`network`, `no_command` (unknown `hermes clawchat`), `plugin_too_old` ("invite code
+is required"), `timeout`, or `other`.
 
 Only these complete reasons are allowed:
 
@@ -62,6 +62,8 @@ plugin_install_failed:host_missing
 plugin_install_failed:host_too_old
 plugin_install_failed:npx_missing
 plugin_install_failed:network
+plugin_install_failed:tls
+plugin_install_failed:metadata
 plugin_install_failed:timeout
 plugin_install_failed:already_exists
 plugin_install_failed:host_error
@@ -70,6 +72,9 @@ plugin_install_failed:prerelease_refused
 plugin_install_failed:legacy_config
 plugin_install_failed:other
 plugin_enable_failed:deps_failed
+plugin_enable_failed:deps_network
+plugin_enable_failed:deps_tls
+plugin_enable_failed:deps_timeout
 plugin_enable_failed:scan_disabled
 plugin_enable_failed:other
 plugin_activate_failed:already_paired
@@ -82,7 +87,7 @@ plugin_activate_failed:other
 ```
 
 Best-effort: never wait on it, never retry it, and never let it block or change
-any step. If it errors or answers that it could not read the request, carry on.
+any step. Ignore reporting errors.
 Report the failure before working the Troubleshooting case. Never include error
 text, paths, tokens or anything other than the listed words.
 
@@ -261,16 +266,15 @@ unpinned spec. An explicit `--target openclaw@<ref>` skips version selection.
 
 The CLI delegates to the host's plugin manager (OpenClaw -> `openclaw plugins
 install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`,
-plus `--accept-capabilities` when the host advertises it, which OpenClaw 2026.8+
-requires; Hermes -> checks remote metadata + Hermes version, then
-`hermes plugins install clawling/clawchat-plugin-hermes-agent`). Skill content is
-bundled in the plugin.
+plus `--accept-capabilities` when advertised; Hermes -> remote metadata and
+version checks, then `hermes plugins install clawling/clawchat-plugin-hermes-agent`).
+If the metadata read fails in transit on a fresh or forced install, the CLI
+automatically uses that host install alone, skipping CLI version / host
+compatibility checks; an installed plugin without `--force` still needs
+metadata. Invalid metadata stops the CLI. The host's scan gate is unchanged.
 
-**If the install fails on a network / GitHub error** - e.g.
-`raw.githubusercontent.com` times out while npm and `git` to github.com still
-work (common in locked-down environments) - do **not** just rerun with `--force`,
-which takes the same path. Install **directly via the host**, which bypasses the
-CLI's GitHub-raw fetch:
+**If the CLI still fails on a network / GitHub error**, use the direct host
+path below. Do not add `--force` to the CLI to solve a network failure.
 
 ```bash
 # Hermes
@@ -286,38 +290,24 @@ source, and `--accept-capabilities` consents to the plugin's declared capabiliti
 Without them the install is cancelled or rejected and the plugin never lands. Run
 `openclaw plugins install --help` if you are unsure which line your host wants.
 
-The direct Hermes install also clones from GitHub, so it does not help when
-GitHub is unreachable altogether (DNS failures, connection resets, certificate
-revocation-check errors). Never turn off certificate verification to get past
-that; stop and ask the owner for a source this machine can reach.
+Direct Hermes installs still need GitHub. Never disable certificate verification;
+ask the owner for a reachable source if needed.
 
 Then continue to step 3.
 
-**Hermes stops on its security scan - expected for this plugin.** Hermes 0.20.3
-and newer scan every third-party plugin before installing it, and for ClawChat
-the scan reports a couple of dozen findings (matches in comments and docs) with
-a *caution* verdict and a `Decision: BLOCKED` line. Through the `npx` command
-the install then fails with `SCAN_BLOCKED`; a direct `hermes plugins install` in
-a real terminal instead **waits** at `Install anyway? ... [y/N]`. Either way it
-is the **owner's** decision, not yours: don't answer the prompt, don't add
-`--force`, and don't sit on it silently - see
-[Troubleshooting](#troubleshooting) before doing anything else.
+**Hermes security scan:** current ClawChat is safe on Hermes v0.21.6+; older
+hosts may report *caution*. If blocked or asked `Install anyway?`, don't answer
+the prompt or add `--force`; follow the [scanner case](#troubleshooting).
 
-**Hermes: check the plugin is enabled before you activate.** `hermes plugins
-list` (with `-p <name>` for a profile) must show `clawchat` as **enabled**. If
-it shows disabled, or `hermes clawchat` is an unknown command, the plugin's
-Python dependencies were never prepared. Hermes 0.21.6 and newer ask before
-installing them and, when nobody can answer, skip them and leave the plugin
-disabled - the `npx` CLI and the one-shot scripts never give Hermes a terminal,
-so on those hosts this is the normal outcome, not a failed install (the host
-may print `Non-interactive install — skipping dependency install`). On older
-hosts the cause is that the host could not rebuild its plugin environment.
-Either way, run `hermes plugins enable clawchat` (with `-p <name>` for a
-profile): it prepares the dependencies itself. If it fails, read its error,
-which may name an unrelated dependency. If the plugin was
-disabled by the security scan, that is the owner's call (see above), not
-something to undo. Don't activate a disabled plugin - the step 4 restart would
-load no ClawChat.
+**Hermes: check the plugin is enabled before you activate.** Run `hermes plugins
+list` (add `-p <name>` for a profile). Non-interactive **install** can print
+`Non-interactive install — skipping dependency install` and leave ClawChat
+disabled; this is normal. Run `hermes plugins enable clawchat` in the same
+profile: **enable prepares dependencies even non-interactively**, with no
+terminal or consent prompt required. Give your command tool at least 15 minutes
+or run it in the background and wait; never start another enable while it runs.
+For slow or failed preparation, see [dependency recovery](#hermes-dependencies).
+Do not activate until enabled; a scan-disabled plugin needs owner review first.
 
 ## 3. Activate (single-use code)
 
@@ -582,36 +572,54 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   config and runs `openclaw doctor --fix`, then reruns the installer. Never
   edit their config yourself.
 
-- **The host's scanner blocked the install (Hermes).** Hermes 0.20.3+ scans
-  every third-party plugin before installing it. For ClawChat a *caution*
-  verdict is **expected**: a couple of dozen findings, all matches in comments
-  and docs, ending in `Decision: BLOCKED ... Use --force to override.` That
-  line is the scanner's generic wording, not an instruction to you. What
-  follows depends on how Hermes ran:
-  - **Through the `npx` CLI** (it never hands Hermes a terminal): the CLI exits
-    with `SCAN_BLOCKED` and nothing is installed or replaced. The CLI never
-    passes `--force` on the owner's behalf, and its own `--force` does not
-    change that.
-  - **`hermes plugins install` in a real terminal:** Hermes prints the report
-    and waits at `Install anyway? Only continue if you trust the source. [y/N]`
-    with no timeout. An agent that just waits there stalls the install
-    indefinitely.
+- **The host's scanner blocked the install (Hermes).** Current ClawChat is
+  safe on v0.21.6+; older hosts may give *caution* (often comment/doc matches).
+  Report `plugin_install_failed:scan_blocked`: the CLI already prints it;
+  report it yourself for direct host installs. A CLI `SCAN_BLOCKED` leaves
+  nothing installed/replaced. A terminal host may wait indefinitely at
+  `Install anyway? ... [y/N]`. Stop and relay the verdict, finding categories /
+  counts and `Scan:` source to the owner; require the source to be
+  `clawling/clawchat-plugin-hermes-agent`. Ask:
+  "This is the official ClawChat plugin from `clawling/clawchat-plugin-hermes-agent`.
+  The scan flagged `<categories/counts>`, mostly matches in comments and docs
+  (use the report's actual findings). Do you approve continuing?"
+  “这是 ClawChat 官方插件，来源 `clawling/clawchat-plugin-hermes-agent`。
+  扫描命中 `<类别/数量>`，多为注释和文档匹配（以报告为准）。您是否同意继续？”
 
-  This is a review gate, not a network error, so retrying or switching paths is
-  wrong. Stop and **relay it to the owner**: the verdict, a short summary of the
-  findings, and the source on the report's `Scan:` line, which must be
-  `clawling/clawchat-plugin-hermes-agent` (anything else: stop, don't install).
-  Then wait for the owner. Continue only if the owner explicitly approves
-  installing past it: at the prompt the **owner** answers `y`; if the prompt is
-  in a terminal only you can reach, or the CLI already stopped, run
+  Continue only if the owner explicitly approves: at the prompt the **owner**
+  answers `y`; after the CLI stops or in an agent-only terminal, run
   `hermes plugins install clawling/clawchat-plugin-hermes-agent --force --enable`
-  only when the owner explicitly tells you to (`--force` accepts a caution
-  verdict; a *dangerous* one is refused with no prompt and `--force` does not
-  override it - report the findings instead). Never override it on your own:
-  don't type `y` yourself, don't add `--force` unasked, and never switch to a
-  mirror or another unreviewed source to get around it. **Unattended install**
-  (no owner reachable, CI, a scheduled job): stop and report to the owner
-  rather than forcing; the install stays undone until they decide.
+  only when the owner explicitly tells you to. This accepts *caution*;
+  *dangerous* cannot be overridden — report it to maintainers. Never override it on your own:
+  don't type `y` yourself, don't add `--force` unasked, or switch to a mirror /
+  unreviewed source. **Unattended install**: stop and report rather than forcing.
+
+- <a id="hermes-dependencies"></a>**Hermes dependency preparation is slow / fails.**
+  `enable` resolves the host and all enabled plugins with `uv lock`, then
+  `uv sync` into a new environment; it switches only after success. Each stage
+  has a 30-minute host limit. A 180-second tool timeout
+  is your tool's limit: allow ≥15 minutes or background it; never run two at once. Failure preserves the old environment/config
+  and leaves ClawChat disabled, so retrying after failure is safe.
+  `Enable 'clawchat' refused: …` contains the cause; host timeouts say
+  `uv lock timed out after 1800s` / `uv sync timed out after 1800s`; other errors
+  say `uv <stage> exited <code>: <uv output tail>`.
+
+  Set these only for this command, never global pip/uv/npm config:
+
+  - Slow package index: ask the owner for an approved mirror, then
+    `UV_DEFAULT_INDEX=<mirror-url> hermes plugins enable clawchat`; do not pick
+    one yourself. `UV_INDEX_URL` is also passed through. Index changes cannot
+    fix dependencies fetched from git.
+  - Slow link: `UV_HTTP_TIMEOUT=120 hermes plugins enable clawchat`.
+  - TLS `unknown issuer` / `unable to get local issuer certificate` (proxy or
+    self-signed root): `UV_NATIVE_TLS=1 hermes plugins enable clawchat` uses
+    system certificates. Never disable verification. `HTTPS_PROXY` and
+    `SSL_CERT_FILE` are inherited too.
+  - `ECONNRESET` / `connection reset`: retry the same command once after it
+    exits; if it still fails, show the owner the original error.
+
+  PowerShell (one call): `$env:UV_NATIVE_TLS = "1"; hermes plugins enable clawchat`.
+  Report the result with the categories [at the top](#install-clawchat-plugin).
 
 - **Windows: install or update fails because files in the plugin folder are
   in use.** A shell or process whose working directory is inside the plugin
