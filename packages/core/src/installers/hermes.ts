@@ -334,6 +334,19 @@ function isHermesPinnedUpdateError(message: string): boolean {
  * A 4xx is deterministic (wrong URL, deleted branch) so it is raised as
  * PRECONDITION and never retried; transport faults and 5xx stay retryable.
  */
+/** Node TLS verification error codes; undici wraps them in TypeError("fetch failed").cause. */
+const FETCH_TLS_ERROR_CODES = new Set([
+  "UNABLE_TO_GET_ISSUER_CERT", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "SELF_SIGNED_CERT_IN_CHAIN", "DEPTH_ZERO_SELF_SIGNED_CERT", "CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID",
+  "CERT_UNTRUSTED", "CERT_REJECTED", "CERT_SIGNATURE_FAILURE", "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+
+/** The known TLS code from a fetch error's cause, never the raw cause text. */
+function fetchTlsErrorCode(err: unknown): string | undefined {
+  const code = ((err as { cause?: { code?: unknown } })?.cause)?.code;
+  return typeof code === "string" && FETCH_TLS_ERROR_CODES.has(code) ? code : undefined;
+}
+
 async function fetchPluginYamlOnce(url: string, fetchFn: FetchLike): Promise<string> {
   try {
     const response = await fetchFn(url, { signal: AbortSignal.timeout(PLUGIN_YAML_TIMEOUT_MS) });
@@ -348,11 +361,14 @@ async function fetchPluginYamlOnce(url: string, fetchFn: FetchLike): Promise<str
     if (err instanceof ClawchatError) throw err;
     const name = (err as Error)?.name;
     const timedOut = name === "TimeoutError" || name === "AbortError";
+    const tlsCode = fetchTlsErrorCode(err);
     throw new ClawchatError(
       timedOut ? "TIMEOUT" : "HTTP_ERROR",
       timedOut
         ? `GET ${url} timed out after ${PLUGIN_YAML_TIMEOUT_MS}ms`
-        : `GET ${url} failed: ${(err as Error).message}`,
+        : tlsCode
+          ? `GET ${url} failed: certificate verify failed (${tlsCode})`
+          : `GET ${url} failed: ${(err as Error).message}`,
     );
   }
 }
