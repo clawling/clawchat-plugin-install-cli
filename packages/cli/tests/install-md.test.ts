@@ -117,12 +117,13 @@ describe("published runtime guides", () => {
   it("install.md step 4 hands Hermes restart to the owner and verifies readiness", () => {
     const step4 = install.split("## 4. Restart the agent")[1]?.split("\n## 5.")[0] ?? "";
     expect(step4).toContain("a plugin reload does not start the ClawChat connection");
-    expect(step4).toMatch(/except a multiplexed profile on Hermes 0\.21\.6\+: wait\s+~30 s for its ready line, restart only if none \(step 3\)/);
+    expect(step4).toMatch(/First wait\s+~30 s for a `clawchat state -> ready` log line after activation/);
+    expect(step4).toMatch(/a multiplexed\s+profile on 0\.21\.6\+ \(step 3\) or a gateway that started with ClawChat enabled\s+connects without a restart - then skip to step 5/);
     expect(step4).toContain("end this reply");
     expect(step4).toContain("`hermes gateway restart` (`-p <name>` for a named profile");
     expect(step4).toContain("**external shell**, not in chat or your terminal tool");
     expect(step4).toContain("waits for open sessions, including this turn");
-    expect(step4).toMatch(/If no ready line yet, report\s+`plugin_awaiting_restart` once \(the CLI prints it after `plugin_activated`\)/);
+    expect(step4).toMatch(/Otherwise report\s+`plugin_awaiting_restart` once \(the CLI prints it\)/);
     expect(step4).toContain("`clawchat: message for the owner` line (`en` or `zh`) verbatim");
     expect(step4).toContain("`clawchat state -> ready` log line from *after*");
     expect(step4).toContain("plugin's greeting (step 5)");
@@ -133,7 +134,7 @@ describe("published runtime guides", () => {
 
   it("install.md step 3 splits multiplexed profile pickup by Hermes version", () => {
     const step3 = install.split("## 3. Activate")[1]?.split("\n## 4.")[0] ?? "";
-    expect(step3).toMatch(/Hermes 0\.21\.6\+ with the multiplexer already running: it serves the newly\s+activated profile within about 30 s - no restart/);
+    expect(step3).toMatch(/Hermes 0\.21\.6\+ with the multiplexer already running: it serves the newly\s+activated profile within ~30 s - no restart/);
     expect(step3).toMatch(/If you just turned multiplexing on, or on older Hermes, restart\s+the \*\*default\*\* gateway/);
   });
 

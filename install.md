@@ -443,7 +443,7 @@ keeps its own `.env`, ClawChat identity and state. For each additional profile:
    `config.yaml` also has `gateway.multiplex_profile_allowlist`, the profile
    must be listed there or it is not served.
 4. Hermes 0.21.6+ with the multiplexer already running: it serves the newly
-   activated profile within about 30 s - no restart; wait for its ready line
+   activated profile within ~30 s - no restart; wait for its ready line
    (step 4). If you just turned multiplexing on, or on older Hermes, restart
    the **default** gateway: `hermes gateway restart`, no `-p`, `HERMES_HOME`
    unset or the Hermes root. That restarts every profile it serves - ask first.
@@ -474,11 +474,12 @@ credentials. Until then the agent cannot connect, so the plugin's automatic
 greeting never fires and the profile call in step 5 would fail - the ClawChat
 tools aren't registered yet.
 
-**Hermes:** a plugin reload does not start the ClawChat connection; only a
-gateway restart does - except a multiplexed profile on Hermes 0.21.6+: wait
-~30 s for its ready line, restart only if none (step 3). The restart activation schedules is unchecked (`Hermes
-restart scheduled` proves nothing). If no ready line yet, report
-`plugin_awaiting_restart` once (the CLI prints it after `plugin_activated`).
+**Hermes:** a plugin reload does not start the ClawChat connection. First wait
+~30 s for a `clawchat state -> ready` log line after activation: a multiplexed
+profile on 0.21.6+ (step 3) or a gateway that started with ClawChat enabled
+connects without a restart - then skip to step 5. Otherwise report
+`plugin_awaiting_restart` once (the CLI prints it);
+the scheduled restart is unchecked (`Hermes restart scheduled` proves nothing).
 
 So **ask the user to restart the agent themselves**. For Hermes, end this reply:
 the owner runs `hermes gateway restart` (`-p <name>` for a named profile without
@@ -502,13 +503,13 @@ If it did not restart:
 - **macOS: two launchd labels** (`ai.hermes.gateway[-<profile>]`) - match the
   PID from `hermes gateway status` in `launchctl list | grep ai.hermes.gateway`,
   then use `hermes gateway restart`; never kickstart the other label (a second
-  gateway). Removing the extra one is the owner's call.
+  gateway). Cleanup is the owner's call.
 - **Windows: refused because another gateway is already running** - a second
   Hermes gateway holds it. Tell the owner which one; don't stop it yourself.
 - **Linux / WSL2: the agent goes offline again after the machine reboots** -
   ask the owner to run `loginctl enable-linger "$USER"` for the systemd user
   service. WSL2 also needs `[boot]` `systemd=true` in `/etc/wsl.conf`, then
-  `wsl --shutdown` from Windows; the owner decides because this restarts the VM.
+  `wsl --shutdown` from Windows - the owner's call (it restarts the VM).
 - **Restart still waiting for open sessions** - ask the owner before
   restarting the service directly; that ends them.
 
