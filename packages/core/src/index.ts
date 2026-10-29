@@ -2,6 +2,7 @@ export * from "./auth";
 export * from "./hermes-home";
 export * from "./config";
 export * from "./errors";
+export * from "./progress-report";
 export * from "./installers/hermes";
 export * from "./installers/openclaw";
 export * from "./installers/openclaw-config-migration";

@@ -76,11 +76,13 @@ fi
 
 if ! command -v "$TARGET" >/dev/null 2>&1; then
   echo "$TARGET CLI not found in PATH" >&2
+  echo "CLAWCHAT_REPORT: plugin_install_failed:host_missing" >&2
   exit 1
 fi
 
 if ! command -v npx >/dev/null 2>&1; then
   echo "npx is required to run @clawling/clawchat-plugin-install-cli" >&2
+  echo "CLAWCHAT_REPORT: plugin_install_failed:npx_missing" >&2
   exit 1
 fi
 

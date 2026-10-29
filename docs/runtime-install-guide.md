@@ -93,6 +93,8 @@ Then:
   the CLI never hands the host's `--force` a scan decision), which is why the
   guide never offers it for a failed install.
 
+`install.md` asks wiki-routed agents holding a pairing code to forward fixed progress reasons to `/hello` once per reason, best-effort.
+
 ## Editing rules
 
 - `install.md` is the canonical wording for everything end-users see at

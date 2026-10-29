@@ -110,3 +110,26 @@ describe.skipIf(!hasPwsh())("scripts/install-clawchat.ps1 behaviour", () => {
     expect(invalid.stderr).toContain("--target must be one of: openclaw, hermes");
   });
 });
+
+describe("bootstrap report parity", () => {
+  it.each(["host_missing", "npx_missing"])("both scripts report %s", (category) => {
+    for (const script of [bashScript, psScript]) {
+      expect(script).toContain(`CLAWCHAT_REPORT: plugin_install_failed:${category}`);
+    }
+  });
+});
+
+describe.skipIf(!hasPwsh())("PowerShell prerequisite reports", () => {
+  const exe = spawnSync("pwsh", ["-NoProfile", "-Command", "exit 0"]).status === 0 ? "pwsh" : "powershell";
+
+  it.each(["host_missing", "npx_missing"])("reports %s on stderr", (category) => {
+    // Change PATH inside PowerShell so locating PowerShell itself is unaffected.
+    const target = category === "npx_missing" ? "function global:openclaw {}" : "";
+    const result = spawnSync(exe, ["-NoProfile", "-Command",
+      `$env:PATH = ''; ${target}; & '${psScriptPath.replace(/'/g, "''")}' openclaw`,
+    ], { cwd: repoRoot, encoding: "utf8" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`CLAWCHAT_REPORT: plugin_install_failed:${category}`);
+    expect(result.stdout).toBe("");
+  });
+});

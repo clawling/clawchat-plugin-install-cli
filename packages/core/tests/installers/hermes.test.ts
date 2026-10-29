@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "../../src/config";
 import { ClawchatError } from "../../src/errors";
+import { isActivationFailure } from "../../src/progress-report";
 import { installHermesPlugin, isHermesScanRefusal, resolveHermesInstallTimeoutMs, updateHermesPlugin } from "../../src/installers/hermes";
 
 const HERMES_CLONE_URL = "https://github.com/clawling/clawchat-plugin-hermes-agent.git";
@@ -824,5 +825,44 @@ describe("Hermes pinned plugin update", () => {
     expect(err.message).toContain(`hermes plugins remove ${HERMES_PLUGIN_NAME}`);
     expect(err.message).toContain("install --target hermes");
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("Hermes activation failure stages", () => {
+  it("marks activation errors after install while preserving the original error", async () => {
+    const err = new ClawchatError("SUBPROCESS", "this Hermes profile is already paired");
+    const run = vi.fn(async (_cmd: string, args: readonly string[]) => {
+      if (args[0] === "clawchat") throw err;
+    });
+    const promise = installHermesPlugin({ run, capture: createCapture(null), activateCode: "PLACEHOLDER_CODE" });
+    await expect(promise).rejects.toBe(err);
+    expect(isActivationFailure(err)).toBe(true);
+    expect(err.code).toBe("SUBPROCESS");
+    expect(err.message).toBe("this Hermes profile is already paired");
+    expect(run.mock.calls.map((call) => call[1].slice(0, 2))).toEqual([
+      ["plugins", "install"], ["clawchat", "activate"],
+    ]);
+  });
+
+  it("retains activation stage when adding the existing read-only config hint", async () => {
+    const message = "OSError: [Errno 16] Device or resource busy: '/example/config.yaml'";
+    const run = vi.fn(async () => { throw new ClawchatError("SUBPROCESS", message); });
+    try {
+      await installHermesPlugin({ run, capture: createCapture("0.1.1"), activateCode: "PLACEHOLDER_CODE" });
+      expect.fail("activation should fail");
+    } catch (err) {
+      expect(isActivationFailure(err)).toBe(true);
+      expect(err).toMatchObject({ code: "SUBPROCESS" });
+      expect((err as Error).message).toContain(message);
+      expect((err as Error).message).toContain("config.yaml is read-only");
+    }
+  });
+
+  it("does not mark an install failure as activation even with a pairing code", async () => {
+    const err = new ClawchatError("SUBPROCESS", "install failed");
+    const run = vi.fn(async () => { throw err; });
+    await expect(installHermesPlugin({ run, capture: createCapture(null), activateCode: "PLACEHOLDER_CODE" })).rejects.toBe(err);
+    expect(isActivationFailure(err)).toBe(false);
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });

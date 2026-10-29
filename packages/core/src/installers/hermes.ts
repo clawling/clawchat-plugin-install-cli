@@ -5,6 +5,7 @@ import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "
 import { writeHermesBaseUrls } from "../baseurl/write-hermes";
 import { parseHermesGitRef } from "../baseurl/target";
 import { ClawchatError } from "../errors";
+import { markActivationFailure } from "../progress-report";
 import type { FetchLike } from "../http/client";
 import {
   assertVersionSatisfiesRange,
@@ -607,13 +608,16 @@ async function maybeActivateHermes(options: InstallerOptions, result: InstallAct
 }
 
 export async function installHermesPlugin(options: InstallerOptions = {}): Promise<InstallActionResult> {
+  let installed = false;
   try {
     const result = await installHermesPluginCore(options);
+    installed = true;
     return await maybeActivateHermes(options, result);
   } catch (err) {
     // Any config.yaml write (enable / activate) fails with EBUSY when config.yaml
     // is a read-only mount — surface the deployment fix instead of a raw OS error.
-    throw appendHermesConfigBusyHint(err);
+    const hinted = appendHermesConfigBusyHint(err);
+    throw installed ? markActivationFailure(hinted) : hinted;
   }
 }
 

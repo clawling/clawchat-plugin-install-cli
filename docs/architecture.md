@@ -93,6 +93,18 @@ Flag semantics:
   `hermes@<giturl#branch>`) is parsed by `parseTarget`; `ref` selects the npm
   dist-tag/version or the git ref to install. Works on both commands.
 
+The CLI appends `CLAWCHAT_REPORT: <reason>` after an install/update summary on
+stdout, or after the existing failure message on stderr. Success reports
+`plugin_installed` and, when activated, `plugin_activated`. A Hermes activation
+failure reports `plugin_installed` on stdout and an activation failure category
+on stderr, preserving the original error code and message. The bootstrap scripts
+also report missing host/npx prerequisites; help and usage output carry no report.
+The whitelist and formatter live in `packages/core/src/progress-report.ts`;
+report lines never carry raw error text, paths, pairing codes or credentials.
+These additive lines are enabled by default so agents can identify stages and
+failures; the CLI and scripts make no reporting network requests and retain
+existing install behavior and exit codes. Agents check Hermes enablement separately.
+
 ## Install flow per target
 
 ### OpenClaw
