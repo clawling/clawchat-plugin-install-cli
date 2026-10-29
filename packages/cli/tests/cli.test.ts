@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ClawchatError, markActivationFailure } from "@clawling/clawchat-plugin-install-core";
+import { ClawchatError, installHermesPlugin, markActivationFailure } from "@clawling/clawchat-plugin-install-core";
 import { runClawchatCli } from "../src/cli";
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
 
 function createIo(stdin = "") {
@@ -299,7 +300,7 @@ describe("runClawchatCli progress reports", () => {
       [new ClawchatError("PRERELEASE_REFUSED", "OpenClaw refused a prerelease"), "prerelease_refused"],
       [new ClawchatError("LEGACY_CONFIG", "OpenClaw refused legacy config keys"), "legacy_config"],
       [new ClawchatError("HTTP_ERROR", "HTTP failed"), "network"],
-      [new ClawchatError("METADATA", "metadata failed"), "network"],
+      [new ClawchatError("METADATA", "metadata failed"), "other"],
       [new ClawchatError("PRECONDITION", "metadata returned 404"), "other"],
       [new ClawchatError("TIMEOUT", "install timed out"), "timeout"],
       [new ClawchatError("SUBPROCESS", "plugin already exists"), "already_exists"],
@@ -353,5 +354,36 @@ describe("runClawchatCli progress reports", () => {
     await runClawchatCli(args, { ...io.io, installOpenClawPlugin: action, installHermesPlugin: action });
     expect(action).not.toHaveBeenCalled();
     expect(`${io.stdout}${io.stderr}`).not.toContain("CLAWCHAT_REPORT:");
+  });
+});
+
+describe("Hermes metadata reports through the CLI", () => {
+  it.each([false, true])("reports real metadata fallback success or fail-closed metadata failure (installed: %s)", async (installed) => {
+    vi.useFakeTimers();
+    const io = createIo();
+    const run = vi.fn(async () => undefined);
+    const fetchFn = vi.fn(async () => { throw new DOMException("timeout", "TimeoutError"); });
+    const capture = vi.fn(async (_cmd: string, args: readonly string[]) => args[0] === "--version"
+      ? "Hermes v0.22.5"
+      : installed ? "│ clawchat │ enabled │ 0.1.1 │ ClawChat │ git │" : "");
+    const pending = runClawchatCli(["install", "--target", "hermes"], {
+      ...io.io,
+      installHermesPlugin: (options) => installHermesPlugin({ ...options, run, capture, fetchFn, writeBaseUrls: () => undefined }),
+    });
+    await vi.runAllTimersAsync();
+    expect(await pending).toBe(installed ? 1 : 0);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    if (installed) {
+      expect(io.stderr).toContain("CLAWCHAT_REPORT: plugin_install_failed:metadata\n");
+      expect(io.stderr).toContain("timed out after 20000ms");
+      expect(io.stdout).not.toContain("CLAWCHAT_REPORT: plugin_installed");
+      expect(run).not.toHaveBeenCalled();
+    } else {
+      expect(io.stdout).toContain("falling back to hermes plugins install");
+      expect(io.stdout).toContain("fallback host install");
+      expect(io.stdout).toContain("CLAWCHAT_REPORT: plugin_installed\n");
+      expect(io.stderr).toBe("");
+      expect(run).toHaveBeenCalledWith("hermes", ["plugins", "install", "clawling/clawchat-plugin-hermes-agent", "--enable"], expect.anything());
+    }
   });
 });

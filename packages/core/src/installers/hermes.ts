@@ -5,7 +5,7 @@ import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "
 import { writeHermesBaseUrls } from "../baseurl/write-hermes";
 import { parseHermesGitRef } from "../baseurl/target";
 import { ClawchatError } from "../errors";
-import { markActivationFailure } from "../progress-report";
+import { markActivationFailure, markMetadataFailure } from "../progress-report";
 import type { FetchLike } from "../http/client";
 import {
   assertVersionSatisfiesRange,
@@ -53,21 +53,21 @@ const HERMES_INSTALL_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cl
 // network fails fast (bounded retries with short per-attempt caps) instead of
 // hanging on OS/git defaults. The canonical remote install cap is configurable.
 
-/** Per-attempt cap on the plugin.yaml read (matches curl's `--max-time 15`). */
-const PLUGIN_YAML_TIMEOUT_MS = 15_000;
-/** One retry, 2s apart — the same budget curl's `--retry 1 --retry-delay 2` had. */
-const PLUGIN_YAML_RETRIES = 1;
-const PLUGIN_YAML_BACKOFF_MS = [2_000] as const;
+/** Per-attempt cap on the plugin.yaml read (matches curl's `--max-time 20`). */
+const PLUGIN_YAML_TIMEOUT_MS = 20_000;
+/** Two retries after 2s and 4s: at most 66s across three attempts. */
+const PLUGIN_YAML_RETRIES = 2;
+const PLUGIN_YAML_BACKOFF_MS = [2_000, 4_000] as const;
 /** curl flags for the proxied fallback: fail fast, with curl's own bounded retry. */
 const CURL_NET_OPTS = [
   "--connect-timeout", "5",
-  "--max-time", "15",
-  "--retry", "1",
+  "--max-time", "20",
+  "--retry", "2",
   "--retry-delay", "2",
   "--retry-connrefused",
 ] as const;
-/** Backstop above curl's own --max-time*(--retry+1)+delay budget. */
-const CURL_TIMEOUT_MS = 45_000;
+/** Backstop above 20s * 3 + 2s + 4s, with 9s of process overhead margin. */
+const CURL_TIMEOUT_MS = 75_000;
 /** Fast local subprocesses (version / list / enable). */
 const HERMES_FAST_TIMEOUT_MS = 30_000;
 /** `plugins update` does a network git pull. */
@@ -147,7 +147,7 @@ interface HermesInstallerContext {
   capture: CommandCapturer;
   force: boolean;
   progress?: InstallProgressReporter;
-  artifact: PluginArtifactMetadata;
+  artifact: PluginArtifactMetadata | undefined;
   installed: HermesInstalledPlugin | null;
 }
 
@@ -335,10 +335,17 @@ function isHermesPinnedUpdateError(message: string): boolean {
  * PRECONDITION and never retried; transport faults and 5xx stay retryable.
  */
 async function fetchPluginYamlOnce(url: string, fetchFn: FetchLike): Promise<string> {
-  let response: Response;
   try {
-    response = await fetchFn(url, { signal: AbortSignal.timeout(PLUGIN_YAML_TIMEOUT_MS) });
+    const response = await fetchFn(url, { signal: AbortSignal.timeout(PLUGIN_YAML_TIMEOUT_MS) });
+    if (!response.ok) {
+      throw new ClawchatError(
+        response.status < 500 ? "PRECONDITION" : "HTTP_ERROR",
+        `GET ${url} returned status ${response.status}`,
+      );
+    }
+    return await response.text();
   } catch (err) {
+    if (err instanceof ClawchatError) throw err;
     const name = (err as Error)?.name;
     const timedOut = name === "TimeoutError" || name === "AbortError";
     throw new ClawchatError(
@@ -348,13 +355,6 @@ async function fetchPluginYamlOnce(url: string, fetchFn: FetchLike): Promise<str
         : `GET ${url} failed: ${(err as Error).message}`,
     );
   }
-  if (!response.ok) {
-    throw new ClawchatError(
-      response.status < 500 ? "PRECONDITION" : "HTTP_ERROR",
-      `GET ${url} returned status ${response.status}`,
-    );
-  }
-  return await response.text();
 }
 
 /** Proxy env vars curl honours and Node's global fetch does not. */
@@ -493,23 +493,39 @@ function installCanonical(run: CommandRunner, replaceExisting: boolean, timeoutM
   });
 }
 
-async function readHermesInstallerContext(options: InstallerOptions = {}): Promise<HermesInstallerContext> {
+async function readHermesInstallerContext(options: InstallerOptions = {}, action: "install" | "update" = "install"): Promise<HermesInstallerContext> {
   const { run, capture } = hermesRunners(options);
   const force = options.force ?? false;
   const progress = options.onProgress;
 
   progress?.("Checking Hermes plugin metadata...");
-  const pluginYaml = await fetchPluginYaml(HERMES_PLUGIN_YAML_URL, { fetchFn: options.fetchFn, capture });
-  const artifact = parseHermesPluginYaml(pluginYaml);
-  progress?.(`Downloaded Hermes plugin metadata ${artifact.version}`);
+  let artifact: PluginArtifactMetadata | undefined;
+  let metadataError: Error | undefined;
+  try {
+    const pluginYaml = await fetchPluginYaml(HERMES_PLUGIN_YAML_URL, { fetchFn: options.fetchFn, capture });
+    artifact = parseHermesPluginYaml(pluginYaml);
+    progress?.(`Downloaded Hermes plugin metadata ${artifact.version}`);
+  } catch (err) {
+    if (!(err instanceof ClawchatError) || !["TIMEOUT", "HTTP_ERROR", "SUBPROCESS"].includes(err.code)) throw err;
+    metadataError = markMetadataFailure(err);
+  }
 
   progress?.("Checking Hermes version...");
-  const hostVersion = parseHostVersion(await capture("hermes", ["--version"], { timeoutMs: HERMES_FAST_TIMEOUT_MS }));
-  assertVersionSatisfiesRange(hostVersion, artifact.hostRequirement, "Hermes");
-  progress?.(`Hermes version ok ${hostVersion}`);
+  const versionOutput = await capture("hermes", ["--version"], { timeoutMs: HERMES_FAST_TIMEOUT_MS });
+  if (artifact) {
+    const hostVersion = parseHostVersion(versionOutput);
+    assertVersionSatisfiesRange(hostVersion, artifact.hostRequirement, "Hermes");
+    progress?.(`Hermes version ok ${hostVersion}`);
+  }
 
   progress?.("Checking installed Hermes plugin...");
   const installed = parseHermesPluginList(await capture("hermes", ["plugins", "list"], { timeoutMs: HERMES_FAST_TIMEOUT_MS }));
+  if (metadataError) {
+    // Only canonical installs can proceed without version comparisons. Keep
+    // the original transport error for every update/skip decision needing it.
+    if (!force && (installed || action === "update")) throw metadataError;
+    progress?.(`Remote plugin metadata unavailable; falling back to hermes plugins install ${HERMES_PLUGIN_SPEC} --enable (host clones the repository); skipping CLI version / host compatibility checks`);
+  }
 
   return { run, capture, force, progress, artifact, installed };
 }
@@ -631,6 +647,17 @@ async function installHermesPluginCore(options: InstallerOptions = {}): Promise<
     return installHermesFromRef(options);
   }
   const { run, capture, force, progress, artifact, installed } = await readHermesInstallerContext(options);
+  if (!artifact) {
+    await installCanonical(run, force, installTimeoutMs, progress);
+    return {
+      kind: "plugin",
+      target: "hermes",
+      status: installed ? "updated" : "installed",
+      version: undefined,
+      previousVersion: installed?.version ?? null,
+      detail: "fallback host install; remote metadata unavailable, CLI version / host compatibility checks skipped",
+    };
+  }
 
   if (!installed) {
     progress?.(`plugin installing ${artifact.version}`);
@@ -710,7 +737,18 @@ async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<I
   if (options.ref) {
     return installHermesFromRef(options, "updated");
   }
-  const { run, capture, force, progress, artifact, installed } = await readHermesInstallerContext(options);
+  const { run, capture, force, progress, artifact, installed } = await readHermesInstallerContext(options, "update");
+  if (!artifact) {
+    await installCanonical(run, force, installTimeoutMs, progress);
+    return {
+      kind: "plugin",
+      target: "hermes",
+      status: installed ? "updated" : "installed",
+      version: undefined,
+      previousVersion: installed?.version ?? null,
+      detail: "fallback host install; remote metadata unavailable, CLI version / host compatibility checks skipped",
+    };
+  }
 
   if (!installed) {
     if (!force) {
