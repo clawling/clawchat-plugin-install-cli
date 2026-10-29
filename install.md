@@ -39,12 +39,12 @@ per reason: `GET <wiki origin>/hello?c=<your code>&agent=<openclaw|hermes>&step=
 `https://agent-connection.clawling.com`). Add nothing else to the URL.
 
 Copy `CLAWCHAT_REPORT: <reason>` verbatim. With **no `CLAWCHAT_REPORT:` line**
-(e.g. npx download failed), use `plugin_install_failed:` plus `network` for
+(npx download failed), use `plugin_install_failed:` plus `network` for
 download/registry transport errors, `tls` for certificates, otherwise `other`.
-For direct host installs, use `plugin_installed` or a failure below. Unsure: `other`.
+Direct host installs: `plugin_installed` or a failure below. Unsure: `other`.
 After the Hermes enable check: `plugin_enabled` on success; otherwise
 `plugin_enable_failed:` plus `deps_timeout` for timeout, `deps_tls` for certificate
-errors, `deps_network` for reset/DNS/download errors, `deps_failed` for other
+errors, `deps_network` for reset/DNS/download, `deps_failed` for other
 dependency errors, `scan_disabled` for scan-disabled plugins, otherwise `other`.
 After your step 3 command: `plugin_activated` on success; otherwise
 `plugin_activate_failed:` plus `already_paired`, `code_rejected` (invalid/expired/used),
@@ -57,6 +57,7 @@ Only these complete reasons are allowed:
 plugin_installed
 plugin_enabled
 plugin_activated
+plugin_awaiting_restart
 plugin_install_failed:scan_blocked
 plugin_install_failed:host_missing
 plugin_install_failed:host_too_old
@@ -441,11 +442,11 @@ keeps its own `.env`, ClawChat identity and state. For each additional profile:
    on - it changes how every profile on the host is served. If the default
    `config.yaml` also has `gateway.multiplex_profile_allowlist`, the profile
    must be listed there or it is not served.
-4. Restart the **default** gateway: `hermes gateway restart`, with no `-p` and
-   `HERMES_HOME` unset (or pointing at the Hermes root). The multiplexer only
-   picks up profiles when it starts, so a profile added or activated afterwards
-   stays offline until this restart - which also restarts every other profile
-   it serves, so ask the owner first.
+4. Hermes 0.21.6+ with the multiplexer already running: it serves the newly
+   activated profile within ~30 s - no restart; wait for its ready line
+   (step 4). If you just turned multiplexing on, or on older Hermes, restart
+   the **default** gateway: `hermes gateway restart`, no `-p`, `HERMES_HOME`
+   unset or the Hermes root. That restarts every profile it serves - ask first.
 
 **Alternative, if the owner doesn't want multiplexing:** give each profile a
 gateway of its own instead of steps 3-4 - `hermes -p <name> gateway install`,
@@ -473,47 +474,47 @@ credentials. Until then the agent cannot connect, so the plugin's automatic
 greeting never fires and the profile call in step 5 would fail - the ClawChat
 tools aren't registered yet.
 
-Hermes activation schedules this restart automatically, but the `Hermes restart
-scheduled` line proves nothing: the restart runs detached and nobody checks its
-result. In many environments the running agent also **cannot restart itself**
-(the restart needs the user's approval). Do **not** block or loop trying to
-self-restart.
+**Hermes:** a plugin reload does not start the ClawChat connection. First wait
+~30 s for a `clawchat state -> ready` log line after activation: a multiplexed
+profile on 0.21.6+ (step 3) or a gateway that started with ClawChat enabled
+connects without a restart - then skip to step 5. Otherwise report
+`plugin_awaiting_restart` once (the CLI prints it);
+the scheduled restart is unchecked (`Hermes restart scheduled` proves nothing).
 
-Instead, **ask the user to restart the agent themselves** - the OpenClaw or
-Hermes process that was just activated - and wait for it to come back.
+So **ask the user to restart the agent themselves**. For Hermes, end this reply:
+the owner runs `hermes gateway restart` (`-p <name>` for a named profile without
+multiplexing) in an **external shell**, not in chat or your terminal tool - it
+waits for open sessions, including this turn. Relay the printed
+`clawchat: message for the owner` line (`en` or `zh`) verbatim.
 
 **Then verify the gateway actually restarted after the activation.** OpenClaw:
 `openclaw channels status --probe` now shows the ClawChat channel running and
-connected. Hermes: `hermes gateway status` (with `-p <name>` for a profile)
-shows a gateway started *after* the activation, or the Hermes log has a
-`clawchat state -> ready` line from after it. If it did not restart:
+connected. Hermes: a `clawchat state -> ready` log line from *after*
+activation, then the plugin's greeting (step 5).
+If it did not restart:
 
-- **Hermes: "the default gateway is running as a profile multiplexer"** - one
-  gateway, owned by the default profile, serves several profiles and refuses a
-  per-profile restart. Restarting it (`hermes gateway restart`, no `-p`) also
-  restarts every other profile it serves - ask the owner first.
+- **Hermes: "the default gateway is running as a profile multiplexer"** - it
+  refuses per-profile restarts. Ask the owner before `hermes gateway restart`
+  (no `-p`): it restarts every profile.
 - **Hermes: the profile has no gateway service yet** - for a named profile,
-  prefer serving it from the default profile's multiplexed gateway and
-  restarting that one (see the end of step 3); without multiplexing, install
-  and start one for the profile: `hermes -p <name> gateway install`, then
-  `hermes -p <name> gateway start`. Plugin `0.14.0-100` and newer print both,
-  preferred first; older ones print only the per-profile pair.
-  On a single-profile host, install and start the default gateway:
-  `hermes gateway install`, then `hermes gateway start`.
-- **Windows: refused because another gateway is already running** - a second,
-  separately installed Hermes gateway holds it. Tell the owner which one is
-  running and let them decide; don't stop it yourself.
+  prefer the default profile's multiplexer (step 3); otherwise have the owner run
+  `hermes -p <name> gateway install`, then `hermes -p <name> gateway start`.
+  Single profile: `hermes gateway install`, then `hermes gateway start`.
+- **macOS: two launchd labels** (`ai.hermes.gateway[-<profile>]`) - match the
+  PID from `hermes gateway status` in `launchctl list | grep ai.hermes.gateway`,
+  then use `hermes gateway restart`; never kickstart the other label (a second
+  gateway). Cleanup is the owner's call.
+- **Windows: refused because another gateway is already running** - a second
+  Hermes gateway holds it. Tell the owner which one; don't stop it yourself.
 - **Linux / WSL2: the agent goes offline again after the machine reboots** -
-  the gateway's systemd user service only starts at boot when lingering is on
-  for the user. Ask the owner to run `loginctl enable-linger "$USER"`. On WSL2,
-  systemd itself must be on as well (`[boot]` `systemd=true` in
-  `/etc/wsl.conf`, then `wsl --shutdown` from Windows) - that restarts the
-  whole WSL VM, so it is the owner's call.
-- **The restart waits for open sessions to finish** - ask the owner before
-  restarting the service directly; that ends those sessions.
+  ask the owner to run `loginctl enable-linger "$USER"` for the systemd user
+  service. WSL2 also needs `[boot]` `systemd=true` in `/etc/wsl.conf`, then
+  `wsl --shutdown` from Windows - the owner's call (it restarts the VM).
+- **Restart still waiting for open sessions** - ask the owner before
+  restarting the service directly; that ends them.
 
-A restart notice from the host itself ("gateway restarted", "back online") is
-not the plugin's greeting. Once the gateway is verified up, continue to step 5.
+A host restart notice ("gateway restarted") is not the plugin's greeting.
+Once the gateway is verified up, continue to step 5.
 
 ## 5. Confirm the greeting arrived (the success signal)
 

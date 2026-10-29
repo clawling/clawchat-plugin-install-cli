@@ -132,6 +132,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
         io.writeStdout(formatSummary("install", host, pluginResult));
         io.writeStdout(formatProgressReport("plugin_installed"));
         if (pluginResult.activated) io.writeStdout(formatProgressReport("plugin_activated"));
+        if (host === "hermes" && pluginResult.activated) io.writeStdout(formatProgressReport("plugin_awaiting_restart"));
       },
     );
 
@@ -168,6 +169,7 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
         io.writeStdout(formatSummary("update", host, pluginResult));
         io.writeStdout(formatProgressReport("plugin_installed"));
         if (pluginResult.activated) io.writeStdout(formatProgressReport("plugin_activated"));
+        if (host === "hermes" && pluginResult.activated) io.writeStdout(formatProgressReport("plugin_awaiting_restart"));
       },
     );
 

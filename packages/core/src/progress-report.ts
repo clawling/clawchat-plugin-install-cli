@@ -13,7 +13,7 @@ export const ACTIVATE_FAILURE_CATEGORIES = Object.freeze([
   "already_paired", "code_rejected", "network", "no_command", "plugin_too_old", "timeout", "other",
 ] as const);
 export const PROGRESS_REPORT_REASONS = Object.freeze([
-  "plugin_installed", "plugin_enabled", "plugin_activated",
+  "plugin_installed", "plugin_enabled", "plugin_activated", "plugin_awaiting_restart",
   ...INSTALL_FAILURE_CATEGORIES.map((category) => `plugin_install_failed:${category}`),
   ...ENABLE_FAILURE_CATEGORIES.map((category) => `plugin_enable_failed:${category}`),
   ...ACTIVATE_FAILURE_CATEGORIES.map((category) => `plugin_activate_failed:${category}`),

@@ -95,7 +95,11 @@ Flag semantics:
 
 The CLI appends `CLAWCHAT_REPORT: <reason>` after an install/update summary on
 stdout, or after the existing failure message on stderr. Success reports
-`plugin_installed` and, when activated, `plugin_activated`. A Hermes activation
+`plugin_installed` and, when activated, `plugin_activated`, followed by
+`plugin_awaiting_restart` for Hermes: the gateway must restart to establish the
+ClawChat connection after activation (see
+[step 4 of the install guide](../install.md#4-restart-the-agent---the-user-must-do-this)).
+A Hermes activation
 failure reports `plugin_installed` on stdout and an activation failure category
 on stderr, preserving the original error code and message. The bootstrap scripts
 also report missing host/npx prerequisites; help and usage output carry no report.
