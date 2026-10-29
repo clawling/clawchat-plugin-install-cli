@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ClawchatError, markActivationFailure } from "@clawling/clawchat-plugin-install-core";
 import { runClawchatCli } from "../src/cli";
 
 afterEach(() => {
@@ -266,5 +267,89 @@ describe("runClawchatCli install/update", () => {
     expect(code).toBe(0);
     expect(installHermesPlugin).toHaveBeenCalledTimes(1);
     expect(installHermesPlugin).toHaveBeenCalledWith(expect.objectContaining({ profile: "coder" }));
+  });
+});
+
+describe("runClawchatCli progress reports", () => {
+  it.each(["install", "update"] as const)("reports a successful %s after its summary", async (command) => {
+    const io = createIo();
+    const action = async () => ({ kind: "plugin" as const, target: "openclaw" as const, status: "installed" as const });
+    expect(await runClawchatCli([command, "--target", "openclaw"], {
+      ...io.io, installOpenClawPlugin: action, updateOpenClawPlugin: action,
+    })).toBe(0);
+    expect(io.stdout).toBe(`ClawChat ${command} for openclaw complete\nplugin installed\nCLAWCHAT_REPORT: plugin_installed\n`);
+    expect(io.stderr).toBe("");
+  });
+
+  it("reports Hermes installation and activation without claiming enablement", async () => {
+    const io = createIo();
+    expect(await runClawchatCli(["install", "--target", "hermes", "--activate", "PLACEHOLDER_CODE"], {
+      ...io.io,
+      installHermesPlugin: async () => ({ kind: "plugin", target: "hermes", status: "installed", activated: true }),
+    })).toBe(0);
+    expect(io.stdout).toBe("ClawChat install for hermes complete\nplugin installed + activated\nCLAWCHAT_REPORT: plugin_installed\nCLAWCHAT_REPORT: plugin_activated\n");
+    expect(io.stderr).toBe("");
+  });
+
+  describe.each(["install", "update"] as const)("%s failures", (command) => {
+    it.each([
+      [new ClawchatError("SCAN_BLOCKED", "scan refused"), "scan_blocked"],
+      [new ClawchatError("SUBPROCESS", "hermes failed: spawnSync hermes ENOENT"), "host_missing"],
+      [new ClawchatError("PRECONDITION", "Hermes is too old"), "host_too_old"],
+      [new ClawchatError("HTTP_ERROR", "HTTP failed"), "network"],
+      [new ClawchatError("METADATA", "metadata failed"), "network"],
+      [new ClawchatError("PRECONDITION", "metadata returned 404"), "other"],
+      [new ClawchatError("TIMEOUT", "install timed out"), "timeout"],
+      [new ClawchatError("SUBPROCESS", "plugin already exists"), "already_exists"],
+      [new ClawchatError("SUBPROCESS", "host exit 1"), "host_error"],
+      [new ClawchatError("VALIDATION", "invalid argument"), "bad_input"],
+      [new ClawchatError("INVALID_INPUT", "invalid target"), "bad_input"],
+      [new Error("plugin failed"), "other"],
+    ])("reports %s as %s while preserving the original error text", async (err, category) => {
+      const io = createIo();
+      const action = async () => { throw err; };
+      expect(await runClawchatCli([command, "--target", "hermes"], {
+        ...io.io, installHermesPlugin: action, updateHermesPlugin: action,
+      })).toBe(1);
+      expect(io.stderr).toBe(`${err.message}\nCLAWCHAT_REPORT: plugin_install_failed:${category}\n`);
+      expect(io.stdout).toBe("");
+    });
+  });
+
+  it("reports completed installation before an activation-stage failure", async () => {
+    const io = createIo();
+    const err = new ClawchatError("SUBPROCESS", "this Hermes profile is already paired");
+    expect(await runClawchatCli(["install", "--target", "hermes", "--activate", "PLACEHOLDER_CODE"], {
+      ...io.io, installHermesPlugin: async () => { throw markActivationFailure(err); },
+    })).toBe(1);
+    expect(io.stdout).toBe("CLAWCHAT_REPORT: plugin_installed\n");
+    expect(io.stderr).toBe(`${err.message}\nCLAWCHAT_REPORT: plugin_activate_failed:already_paired\n`);
+    expect(err.code).toBe("SUBPROCESS");
+  });
+
+  it.each([false, true])("keeps placeholder secrets and paths out of failure reports (activation: %s)", async (activation) => {
+    const io = createIo();
+    const err = new ClawchatError("SUBPROCESS", "failed sk-test-SECRET /home/someone/x");
+    expect(await runClawchatCli(["install", "--target", "hermes"], {
+      ...io.io,
+      installHermesPlugin: async () => { throw activation ? markActivationFailure(err) : err; },
+    })).toBe(1);
+    const reports = `${io.stdout}${io.stderr}`.split("\n").filter((line) => line.startsWith("CLAWCHAT_REPORT: "));
+    expect(reports).toContain(`CLAWCHAT_REPORT: plugin_${activation ? "activate" : "install"}_failed:${activation ? "other" : "host_error"}`);
+    for (const report of reports) {
+      expect(report).not.toContain("sk-test-SECRET");
+      expect(report).not.toContain("/home/someone/x");
+    }
+    expect(io.stderr.startsWith(`${err.message}\n`)).toBe(true);
+  });
+
+  it.each([
+    ["--help"], ["install", "--help"], [], ["unknown"], ["install", "--unknown"], ["install", "--target"],
+  ])("prints no report before an install action runs (%j)", async (...args) => {
+    const io = createIo();
+    const action = vi.fn();
+    await runClawchatCli(args, { ...io.io, installOpenClawPlugin: action, installHermesPlugin: action });
+    expect(action).not.toHaveBeenCalled();
+    expect(`${io.stdout}${io.stderr}`).not.toContain("CLAWCHAT_REPORT:");
   });
 });

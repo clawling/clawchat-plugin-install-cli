@@ -32,6 +32,58 @@ complete" line in the terminal - is the success signal. If a step fails, don't
 stop: go to [Troubleshooting](#troubleshooting) and work the matching case until
 the user has a connected agent that has greeted them.
 
+**Report each stage to the connection wiki (only if it sent you here).**
+
+Only if you came through the connection wiki and hold a pairing code, fetch once
+per reason: `GET <wiki origin>/hello?c=<your code>&agent=<openclaw|hermes>&step=progress&reason=<reason>`.
+`<wiki origin>` is the site you read `start.md` from (normally
+`https://agent-connection.clawling.com`). Add nothing else to the URL.
+
+Copy each `CLAWCHAT_REPORT: <reason>` from the step 2 CLI or one-shot script
+verbatim. For a direct host install (step 2 fallback), use `plugin_installed` or
+an install failure below; choose `other` when unsure. After the Hermes enable
+check, use `plugin_enabled` on success or `plugin_enable_failed:<category>`:
+`deps_failed` for dependency setup failure, `scan_disabled` for a scan-disabled
+plugin, otherwise `other`.
+After a step 3 command you ran yourself, use `plugin_activated` on success.
+On failure use `plugin_activate_failed:<category>`: already-paired refusal → `already_paired`;
+invalid/expired/used code → `code_rejected`; network error → `network`;
+unknown `hermes clawchat` → `no_command`; plugin too old / "invite code is required"
+→ `plugin_too_old`; timeout → `timeout`; anything else → `other`.
+
+Only these complete reasons are allowed:
+
+```text
+plugin_installed
+plugin_enabled
+plugin_activated
+plugin_install_failed:scan_blocked
+plugin_install_failed:host_missing
+plugin_install_failed:host_too_old
+plugin_install_failed:npx_missing
+plugin_install_failed:network
+plugin_install_failed:timeout
+plugin_install_failed:already_exists
+plugin_install_failed:host_error
+plugin_install_failed:bad_input
+plugin_install_failed:other
+plugin_enable_failed:deps_failed
+plugin_enable_failed:scan_disabled
+plugin_enable_failed:other
+plugin_activate_failed:already_paired
+plugin_activate_failed:code_rejected
+plugin_activate_failed:network
+plugin_activate_failed:no_command
+plugin_activate_failed:plugin_too_old
+plugin_activate_failed:timeout
+plugin_activate_failed:other
+```
+
+Best-effort: never wait on it, never retry it, and never let it block or change
+any step. If it errors or answers that it could not read the request, carry on.
+Report the failure before working the Troubleshooting case. Never include error
+text, paths, tokens or anything other than the listed words.
+
 ## 0. Check the code is pairable
 
 Safe pre-check - does **not** consume the single-use code. Replace the target and code:
@@ -175,6 +227,9 @@ $env:HERMES_HOME = Join-Path $root 'profiles\<name>'                # Windows
 
 ## 2. Install
 
+After this step, report its `CLAWCHAT_REPORT:` line and, on Hermes, the enable
+check below ([see the top](#install-clawchat-plugin)).
+
 OpenClaw (installs can be slow - wait patiently, don't retry just because it
 looks idle):
 
@@ -258,6 +313,8 @@ something to undo. Don't activate a disabled plugin - the step 4 restart would
 load no ClawChat.
 
 ## 3. Activate (single-use code)
+
+After the activation command, report its result ([see the top](#install-clawchat-plugin)).
 
 Use the code **once** - never invent, reuse, or retry a spent code. If this
 guide was served to you by the connection wiki, set the environment variable

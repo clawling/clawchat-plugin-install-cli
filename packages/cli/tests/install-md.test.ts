@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { PROGRESS_REPORT_REASONS } from "@clawling/clawchat-plugin-install-core";
 
 const INSTALL_MD = resolve(__dirname, "../../../install.md");
 const PROTOCOL_MD = resolve(__dirname, "../../../docs/agent-protocol.md");
@@ -402,5 +403,34 @@ describe("shared orchestration skill", () => {
     expect(row).toMatch(/`approved_retry` = call the same tool once more/);
     expect(row).toMatch(/`denied` \/ `auto_denied` \/ `expired` \/ `failed` = do not retry/);
     expect(row).toContain("`conversation_id`");
+  });
+});
+
+describe("wiki progress forwarding instructions", () => {
+  const install = readFileSync(INSTALL_MD, "utf8");
+  const report = install.split("**Report each stage to the connection wiki (only if it sent you here).**")[1]?.split("## 0.")[0] ?? "";
+
+  it("lists every whitelisted reason in a compact subsection before step zero", () => {
+    expect(report.length).toBeGreaterThan(0);
+    expect(Buffer.byteLength(report)).toBeLessThanOrEqual(2500);
+    expect(Buffer.byteLength(install)).toBeLessThan(40_000);
+    for (const reason of PROGRESS_REPORT_REASONS) expect(report).toContain(reason);
+    const list = report.split("```text\n")[1]?.split("```")[0]?.trim().split("\n");
+    expect(list).toEqual(PROGRESS_REPORT_REASONS);
+  });
+
+  it("restricts forwarding to wiki-routed agents with a code and makes it best-effort", () => {
+    expect(report).toMatch(/Only if you came through the connection wiki and hold a pairing code/);
+    expect(report).toContain("fetch once\nper reason");
+    expect(report).toContain("Best-effort");
+    expect(report).toContain("never retry");
+    expect(report).toContain("never wait");
+    expect(report).toContain("never let it block or change");
+    expect(report).toContain("Add nothing else to the URL");
+    expect(report).toContain("/hello?c=<your code>&agent=<openclaw|hermes>&step=progress&reason=<reason>");
+    expect(report).toContain("Report the failure before working the Troubleshooting case");
+    expect(report).not.toMatch(/T\d+/);
+    const hosts = [...report.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((match) => match[1]);
+    expect(hosts).toEqual(["agent-connection.clawling.com"]);
   });
 });

@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -219,5 +219,32 @@ exit 2
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("npx is required to run @clawling/clawchat-plugin-install-cli");
+  });
+});
+
+describe("bootstrap prerequisite reports", () => {
+  it.each(["host_missing", "npx_missing"])("reports %s on stderr without changing the exit code", (category) => {
+    const { bin } = createHarness();
+    symlinkSync("/bin/bash", join(bin, "bash"));
+    if (category === "npx_missing") {
+      makeExecutable(join(bin, "openclaw"), "#!/bin/bash\nexit 0\n");
+    }
+    const result = spawnSync(join(bin, "bash"), [scriptPath, "openclaw"], {
+      cwd: repoRoot,
+      env: { ...process.env, PATH: bin },
+      encoding: "utf8",
+    });
+    const message = category === "host_missing"
+      ? "openclaw CLI not found in PATH"
+      : "npx is required to run @clawling/clawchat-plugin-install-cli";
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(`${message}\nCLAWCHAT_REPORT: plugin_install_failed:${category}\n`);
+    expect(result.stdout).toBe("");
+  });
+
+  it.each([[], ["invalid"], ["--help"]])("adds no reports to usage output (%j)", (...args) => {
+    const { bin } = createHarness();
+    const result = runScript(args, bin);
+    expect(`${result.stdout}${result.stderr}`).not.toContain("CLAWCHAT_REPORT:");
   });
 });

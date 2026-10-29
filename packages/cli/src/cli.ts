@@ -1,5 +1,9 @@
 import { cac } from "cac";
 import {
+  classifyActivateFailure,
+  classifyInstallFailure,
+  formatProgressReport,
+  isActivationFailure,
   installHermesPlugin,
   installOpenClawPlugin,
   normalizeHttpUrl,
@@ -126,6 +130,8 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
         };
         const pluginResult = await pluginActions.install[host](actionOptions);
         io.writeStdout(formatSummary("install", host, pluginResult));
+        io.writeStdout(formatProgressReport("plugin_installed"));
+        if (pluginResult.activated) io.writeStdout(formatProgressReport("plugin_activated"));
       },
     );
 
@@ -160,6 +166,8 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
         };
         const pluginResult = await pluginActions.update[host](actionOptions);
         io.writeStdout(formatSummary("update", host, pluginResult));
+        io.writeStdout(formatProgressReport("plugin_installed"));
+        if (pluginResult.activated) io.writeStdout(formatProgressReport("plugin_activated"));
       },
     );
 
@@ -178,6 +186,14 @@ export async function runClawchatCli(argv: string[], deps: Partial<CliDeps> = {}
     return 0;
   } catch (err) {
     io.writeStderr(`${(err as Error).message}\n`);
+    if (commandRan) {
+      if (isActivationFailure(err)) {
+        io.writeStdout(formatProgressReport("plugin_installed"));
+        io.writeStderr(formatProgressReport(`plugin_activate_failed:${classifyActivateFailure(err)}`));
+      } else {
+        io.writeStderr(formatProgressReport(`plugin_install_failed:${classifyInstallFailure(err)}`));
+      }
+    }
     return 1;
   }
 }

@@ -153,11 +153,13 @@ if ($Target -eq 'hermes' -and -not (Test-CommandExists 'hermes')) {
 
 if (-not (Test-CommandExists $Target)) {
     Write-Err "$Target CLI not found in PATH"
+    Write-Err 'CLAWCHAT_REPORT: plugin_install_failed:host_missing'
     exit 1
 }
 
 if (-not (Test-CommandExists 'npx')) {
     Write-Err 'npx is required to run @clawling/clawchat-plugin-install-cli'
+    Write-Err 'CLAWCHAT_REPORT: plugin_install_failed:npx_missing'
     exit 1
 }
 
