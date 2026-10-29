@@ -272,23 +272,41 @@ describe("runClawchatCli install/update", () => {
 });
 
 describe("runClawchatCli progress reports", () => {
-  it.each(["install", "update"] as const)("reports a successful %s after its summary", async (command) => {
+  it.each([
+    ["install", "openclaw"], ["update", "openclaw"],
+    ["install", "hermes"], ["update", "hermes"],
+  ] as const)("reports a successful %s for %s without activation after its summary", async (command, target) => {
     const io = createIo();
-    const action = async () => ({ kind: "plugin" as const, target: "openclaw" as const, status: "installed" as const });
-    expect(await runClawchatCli([command, "--target", "openclaw"], {
-      ...io.io, installOpenClawPlugin: action, updateOpenClawPlugin: action,
+    const action = async () => ({ kind: "plugin" as const, target, status: "installed" as const });
+    expect(await runClawchatCli([command, "--target", target], {
+      ...io.io,
+      installOpenClawPlugin: action, updateOpenClawPlugin: action,
+      installHermesPlugin: action, updateHermesPlugin: action,
     })).toBe(0);
-    expect(io.stdout).toBe(`ClawChat ${command} for openclaw complete\nplugin installed\nCLAWCHAT_REPORT: plugin_installed\n`);
+    expect(io.stdout).toBe(`ClawChat ${command} for ${target} complete\nplugin installed\nCLAWCHAT_REPORT: plugin_installed\n`);
     expect(io.stderr).toBe("");
   });
 
-  it("reports Hermes installation and activation without claiming enablement", async () => {
+  it.each(["install", "update"] as const)("reports Hermes %s and activation followed by awaiting restart without claiming enablement", async (command) => {
     const io = createIo();
-    expect(await runClawchatCli(["install", "--target", "hermes", "--activate", "PLACEHOLDER_CODE"], {
-      ...io.io,
-      installHermesPlugin: async () => ({ kind: "plugin", target: "hermes", status: "installed", activated: true }),
+    const action = async () => ({ kind: "plugin" as const, target: "hermes" as const, status: "installed" as const, activated: true });
+    const args = [command, "--target", "hermes"];
+    if (command === "install") args.push("--activate", "PLACEHOLDER_CODE");
+    expect(await runClawchatCli(args, {
+      ...io.io, installHermesPlugin: action, updateHermesPlugin: action,
     })).toBe(0);
-    expect(io.stdout).toBe("ClawChat install for hermes complete\nplugin installed + activated\nCLAWCHAT_REPORT: plugin_installed\nCLAWCHAT_REPORT: plugin_activated\n");
+    expect(io.stdout).toBe(`ClawChat ${command} for hermes complete\nplugin installed + activated\nCLAWCHAT_REPORT: plugin_installed\nCLAWCHAT_REPORT: plugin_activated\nCLAWCHAT_REPORT: plugin_awaiting_restart\n`);
+    expect(io.stderr).toBe("");
+  });
+
+  it.each(["install", "update"] as const)("does not report awaiting restart after OpenClaw %s activation", async (command) => {
+    const io = createIo();
+    const action = async () => ({ kind: "plugin" as const, target: "openclaw" as const, status: "installed" as const, activated: true });
+    expect(await runClawchatCli([command, "--target", "openclaw"], {
+      ...io.io, installOpenClawPlugin: action, updateOpenClawPlugin: action,
+    })).toBe(0);
+    expect(io.stdout).toBe(`ClawChat ${command} for openclaw complete\nplugin installed + activated\nCLAWCHAT_REPORT: plugin_installed\nCLAWCHAT_REPORT: plugin_activated\n`);
+    expect(io.stdout).not.toContain("CLAWCHAT_REPORT: plugin_awaiting_restart");
     expect(io.stderr).toBe("");
   });
 

@@ -114,6 +114,28 @@ describe("published runtime guides", () => {
     expect(step4).not.toMatch(/^\*\*Required\.\*\*/m);
   });
 
+  it("install.md step 4 hands Hermes restart to the owner and verifies readiness", () => {
+    const step4 = install.split("## 4. Restart the agent")[1]?.split("\n## 5.")[0] ?? "";
+    expect(step4).toContain("a plugin reload does not start the ClawChat connection");
+    expect(step4).toContain("end this reply");
+    expect(step4).toContain("`hermes gateway restart` (`-p <name>` for a named profile");
+    expect(step4).toContain("**external shell**, not in chat or your terminal tool");
+    expect(step4).toContain("waits for open sessions, including this turn");
+    expect(step4).toMatch(/If no ready line yet, report\s+`plugin_awaiting_restart` once \(the CLI prints it after `plugin_activated`\)/);
+    expect(step4).toContain("`clawchat: message for the owner` line (`en` or `zh`) verbatim");
+    expect(step4).toContain("`clawchat state -> ready` log line from *after*");
+    expect(step4).toContain("plugin's greeting (step 5)");
+    expect(step4).toContain("launchctl list | grep ai.hermes.gateway");
+    expect(step4).toContain("never kickstart the other label");
+    for (const paragraph of step4.split(/\n\n|\n(?=- )/)) expect(paragraph.length).toBeLessThanOrEqual(600);
+  });
+
+  it("install.md step 3 splits multiplexed profile pickup by Hermes version", () => {
+    const step3 = install.split("## 3. Activate")[1]?.split("\n## 4.")[0] ?? "";
+    expect(step3).toMatch(/Hermes 0\.21\.6\+ with the multiplexer already running: it serves the newly\s+activated profile within about 30 s - no restart/);
+    expect(step3).toMatch(/If you just turned multiplexing on, or on older Hermes, restart\s+the \*\*default\*\* gateway/);
+  });
+
   it("install.md sends a Hermes without `hermes clawchat` to the activation guide, not a shell python", () => {
     const step3 = install.split("## 3. Activate")[1]?.split("\n## 4.")[0] ?? "";
     expect(step3).toContain("https://github.com/clawling/clawchat-plugin-hermes-agent/blob/main/docs/activation.md");
@@ -468,4 +490,5 @@ describe("wiki progress forwarding instructions", () => {
     const hosts = [...report.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((match) => match[1]);
     expect(hosts).toEqual(["agent-connection.clawling.com"]);
   });
+
 });

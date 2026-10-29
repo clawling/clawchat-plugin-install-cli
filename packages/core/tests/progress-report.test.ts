@@ -144,7 +144,7 @@ describe("activation failure reports", () => {
 describe("progress report whitelist", () => {
   it("contains every stage and category exactly once and cannot be mutated", () => {
     expect(PROGRESS_REPORT_REASONS).toEqual([
-      "plugin_installed", "plugin_enabled", "plugin_activated",
+      "plugin_installed", "plugin_enabled", "plugin_activated", "plugin_awaiting_restart",
       ...INSTALL_FAILURE_CATEGORIES.map((c) => `plugin_install_failed:${c}`),
       ...ENABLE_FAILURE_CATEGORIES.map((c) => `plugin_enable_failed:${c}`),
       ...ACTIVATE_FAILURE_CATEGORIES.map((c) => `plugin_activate_failed:${c}`),
