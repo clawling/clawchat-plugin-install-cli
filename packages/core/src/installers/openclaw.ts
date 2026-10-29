@@ -1,11 +1,11 @@
 import {
   OPENCLAW_ACCEPT_CAPABILITIES_FLAG,
-  OPENCLAW_PLUGIN_SPEC,
   OPENCLAW_UNSAFE_INSTALL_FLAG,
 } from "../config";
 import { writeOpenClawBaseUrls } from "../baseurl/write-openclaw";
 import { applyLegacyOpenClawConfigMigration } from "./openclaw-config-migration";
 import { ensureQClawPluginLoadPath } from "./openclaw-qclaw";
+import { openClawSpec, translateOpenClawRefusal } from "./openclaw-host";
 import { captureCommand, runCommand, type CommandCapturer, type CommandRunner } from "./run";
 import { applyBaseUrlOverrides, type BaseUrlWriter, type InstallActionResult, type InstallProgressReporter, type InstallerOptions } from "./types";
 
@@ -15,10 +15,6 @@ const defaultOpenClawBaseUrlWriter: BaseUrlWriter = (values) =>
     websocketUrl: values.wsBaseUrl,
     mediaBaseUrl: values.mediaBaseUrl,
   });
-
-function openClawSpec(ref?: string): string {
-  return ref ? `${OPENCLAW_PLUGIN_SPEC}@${ref}` : OPENCLAW_PLUGIN_SPEC;
-}
 
 /**
  * Whether this host needs `--accept-capabilities` on delegated plugin commands.
@@ -114,8 +110,8 @@ export async function installOpenClawPlugin(options: InstallerOptions = {}): Pro
   const progress = options.onProgress;
 
   progress?.(force ? "Reinstalling OpenClaw plugin..." : "Installing OpenClaw plugin...");
+  const spec = await openClawSpec(capture, options.ref, progress);
   await repairStaleOpenClawWorkspace(run, capture);
-  const spec = openClawSpec(options.ref);
   // --force is unconditional on install: OpenClaw 2026.8 widened it to also mean
   // "confirm this non-ClawHub source", and the ClawChat plugin is always npm-sourced, so
   // without it the install is cancelled outright. On older hosts it only means "overwrite
@@ -127,7 +123,11 @@ export async function installOpenClawPlugin(options: InstallerOptions = {}): Pro
     "--force",
     OPENCLAW_UNSAFE_INSTALL_FLAG,
   ]);
-  await run("openclaw", args);
+  try {
+    await run("openclaw", args);
+  } catch (error) {
+    throw translateOpenClawRefusal(error);
+  }
   // Migrate any legacy openclaw-clawchat config to the renamed id BEFORE writing
   // base URLs, so the base-URL write lands on the migrated/new channel key.
   migrateLegacyOpenClawConfig(options);
@@ -152,15 +152,19 @@ export async function updateOpenClawPlugin(options: InstallerOptions = {}): Prom
   const progress = options.onProgress;
 
   progress?.(force ? "Reinstalling OpenClaw plugin..." : "Updating OpenClaw plugin...");
+  const spec = await openClawSpec(capture, options.ref, progress);
   await repairStaleOpenClawWorkspace(run, capture);
-  const spec = openClawSpec(options.ref);
   const args = await pluginCommandArgs(
     capture,
     force
       ? ["plugins", "install", spec, "--force", OPENCLAW_UNSAFE_INSTALL_FLAG]
       : ["plugins", "update", spec, OPENCLAW_UNSAFE_INSTALL_FLAG],
   );
-  await run("openclaw", args);
+  try {
+    await run("openclaw", args);
+  } catch (error) {
+    throw translateOpenClawRefusal(error);
+  }
   // Migrate any legacy openclaw-clawchat config to the renamed id BEFORE writing
   // base URLs (see installOpenClawPlugin).
   migrateLegacyOpenClawConfig(options);

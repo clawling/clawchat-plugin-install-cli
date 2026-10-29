@@ -101,6 +101,10 @@ on stderr, preserving the original error code and message. The bootstrap scripts
 also report missing host/npx prerequisites; help and usage output carry no report.
 The whitelist and formatter live in `packages/core/src/progress-report.ts`;
 report lines never carry raw error text, paths, pairing codes or credentials.
+OpenClaw refusals report `host_too_old`, `prerelease_refused` or `legacy_config`;
+typed errors and raw host refusal text use the same classification, before
+generic subprocess errors such as "not found". The install categories append
+`prerelease_refused`, then `legacy_config`, before the final `other` category.
 These additive lines are enabled by default so agents can identify stages and
 failures; the CLI and scripts make no reporting network requests and retain
 existing install behavior and exit codes. Agents check Hermes enablement separately.
@@ -110,9 +114,29 @@ existing install behavior and exit codes. Agents check Hermes enablement separat
 ### OpenClaw
 
 `installOpenClawPlugin` and `updateOpenClawPlugin` in
-`packages/core/src/installers/openclaw.ts` prepare the local OpenClaw
-workspace before delegating to the OpenClaw CLI. They do **no** remote
-pre-check, no host-version check, and no installed-version detection.
+`packages/core/src/installers/openclaw.ts` select a compatible plugin and prepare
+the local workspace before delegating to OpenClaw. They do no remote pre-check
+or installed-version detection.
+
+First, `openclaw-host.ts` captures `openclaw --version`, accepting the first
+calendar version in plain output or `OpenClaw <version> (<commit>)`. Numeric
+suffixes such as `-1` are stable corrections; other suffixes such as `-beta.4`
+sort below their base release. The newest-first `OPENCLAW_PLUGIN_HOST_COMPAT`
+table in `packages/core/src/config.ts` selects the spec:
+
+- Host >=2026.8.1: use the unpinned package spec (latest).
+- Host >=2026.5.4 and <2026.8.1: pin `@2026.10.9-2`, the last plugin declaring
+  the lower minimum, and report that upgrading OpenClaw gets the latest plugin.
+- Older host: stop with `PRECONDITION` ("too old") before any other host command
+  or config write; advise upgrading with `npm install -g openclaw@latest` or
+  the host's updater (such as `openclaw update`), then rerunning the same command.
+
+A failed or unparseable version probe reports that the version could not be
+read and keeps the unpinned path. Explicit `--target openclaw@<ref>` skips this
+probe and selection; the ref wins. This automatic selection fixes unsupported
+installs while keeping the current spec on supported current hosts. When a
+plugin release raises `openclaw.install.minHostVersion`, update the table and
+pin the last release declaring the previous minimum.
 
 Before install or update, the CLI reads
 `openclaw config get agents.defaults.workspace`. If a host process has
@@ -129,9 +153,24 @@ OpenClaw plugin manager remains responsible for reporting that state.
 | `update --target openclaw` | `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install` |
 | `update --target openclaw --force` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
 
+The package spec in each row is replaced by the selected pin or explicit ref.
 On a host whose `openclaw plugins install --help` advertises `--accept-capabilities`
 (OpenClaw >=2026.8), that flag is appended to every line above. See
 [capability consent](#capability-consent-and-the-non-clawhub-source-gate).
+
+Known `SUBPROCESS` refusals from delegated install/update calls become actionable
+errors: prerelease refusal → `PRERELEASE_REFUSED` (retain the host line, advise
+checking the host version and upgrading, or explicitly selecting the compatible
+pin on the older supported range); a host minimum-version refusal →
+`PRECONDITION` ("too old", with upgrade advice); legacy-key detection or
+`Config invalid` with `doctor --fix` → `LEGACY_CONFIG`. The latter strips ANSI
+and lists at most ten plausible key paths from the legacy-key section, never
+config contents or values; without keys it points to `openclaw config validate`.
+The owner must back up the config, run `openclaw doctor --fix` (or edit the keys
+as validation describes), then rerun the installer. The CLI never runs doctor
+or migrates those host schema keys automatically. Unrelated failures retain
+their original error object. These host schema refusals are separate from the
+plugin-id migration after a successful install described below.
 
 #### Files this flow writes
 

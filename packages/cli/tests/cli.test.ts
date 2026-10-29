@@ -296,6 +296,8 @@ describe("runClawchatCli progress reports", () => {
       [new ClawchatError("SCAN_BLOCKED", "scan refused"), "scan_blocked"],
       [new ClawchatError("SUBPROCESS", "hermes failed: spawnSync hermes ENOENT"), "host_missing"],
       [new ClawchatError("PRECONDITION", "Hermes is too old"), "host_too_old"],
+      [new ClawchatError("PRERELEASE_REFUSED", "OpenClaw refused a prerelease"), "prerelease_refused"],
+      [new ClawchatError("LEGACY_CONFIG", "OpenClaw refused legacy config keys"), "legacy_config"],
       [new ClawchatError("HTTP_ERROR", "HTTP failed"), "network"],
       [new ClawchatError("METADATA", "metadata failed"), "network"],
       [new ClawchatError("PRECONDITION", "metadata returned 404"), "other"],

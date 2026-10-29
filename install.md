@@ -66,6 +66,8 @@ plugin_install_failed:timeout
 plugin_install_failed:already_exists
 plugin_install_failed:host_error
 plugin_install_failed:bad_input
+plugin_install_failed:prerelease_refused
+plugin_install_failed:legacy_config
 plugin_install_failed:other
 plugin_enable_failed:deps_failed
 plugin_enable_failed:scan_disabled
@@ -252,6 +254,11 @@ folder on `PATH` in the same call - the folder step 1 found, e.g.
 `Scripts` folder to `$env:PATH` first, as in the step 1 *(Windows)* block, in
 the same call).
 
+The CLI first reads `openclaw --version`: hosts from 2026.5.4 up to 2026.8.1 get the last
+compatible plugin, `2026.10.9-2`; older hosts stop with upgrade advice before
+config writes. If the version is unreadable, it reports that and uses the
+unpinned spec. An explicit `--target openclaw@<ref>` skips version selection.
+
 The CLI delegates to the host's plugin manager (OpenClaw -> `openclaw plugins
 install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`,
 plus `--accept-capabilities` when the host advertises it, which OpenClaw 2026.8+
@@ -268,10 +275,10 @@ CLI's GitHub-raw fetch:
 ```bash
 # Hermes
 hermes plugins install clawling/clawchat-plugin-hermes-agent --enable
-# OpenClaw 2026.8 and newer
+# OpenClaw 2026.8.1 and newer
 openclaw plugins install @clawling/clawchat-plugin-openclaw --force --accept-capabilities
-# OpenClaw older than 2026.8 (it rejects --accept-capabilities as an unknown option)
-openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install
+# OpenClaw 2026.5.4 up to (not including) 2026.8.1
+openclaw plugins install @clawling/clawchat-plugin-openclaw@2026.10.9-2 --force --dangerously-force-unsafe-install
 ```
 
 On OpenClaw 2026.8+ both flags are required: `--force` confirms the npm (non-ClawHub)
@@ -565,6 +572,15 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   Otherwise retry the same `install` once and report stderr. Don't reach for
   `--force` here: it only reinstalls a plugin that is already installed, and it
   does not get past the host's scan either.
+
+- **OpenClaw: host too old / prerelease refused / legacy config.** For
+  `host_too_old` or `prerelease_refused`, ask the owner to upgrade OpenClaw
+  (`npm install -g openclaw@latest` or its own updater, e.g. `openclaw update`),
+  then rerun the same installer. Upgrading is the owner's decision; don't try
+  other plugin versions. For `legacy_config`, show the owner the listed keys
+  (or run `openclaw config validate` to list them). The owner backs up the
+  config and runs `openclaw doctor --fix`, then reruns the installer. Never
+  edit their config yourself.
 
 - **The host's scanner blocked the install (Hermes).** Hermes 0.20.3+ scans
   every third-party plugin before installing it. For ClawChat a *caution*

@@ -1,6 +1,16 @@
 export const DEFAULT_BASE_URL = "https://app.clawling.com";
 export const OPENCLAW_CHANNEL = "clawchat-plugin-openclaw";
 export const OPENCLAW_PLUGIN_SPEC = "@clawling/clawchat-plugin-openclaw";
+// Newest first. Keep in sync with the plugin's openclaw.install.minHostVersion
+// whenever a release raises it. Each pin is the last release declaring the lower minimum.
+// An omitted pluginVersion selects the unpinned spec (latest).
+export const OPENCLAW_PLUGIN_HOST_COMPAT: readonly {
+  minHostVersion: string;
+  pluginVersion?: string;
+}[] = [
+  { minHostVersion: "2026.8.1" },
+  { minHostVersion: "2026.5.4", pluginVersion: "2026.10.9-2" },
+];
 // ClawChat is a non-catalog ("unsafe") plugin: older OpenClaw blocks it at install
 // time without this flag, newer OpenClaw treats the flag as a deprecated no-op.
 // Passing it on every delegated `openclaw plugins install/update` is safe on both.
