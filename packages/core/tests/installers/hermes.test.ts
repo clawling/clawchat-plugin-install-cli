@@ -1015,6 +1015,33 @@ describe("Hermes metadata fallback", () => {
     ]);
   });
 
+  it("reports a fetch TLS verification failure as tls without echoing the raw cause", async () => {
+    vi.useFakeTimers();
+    const cause = Object.assign(new Error("unable to get local issuer certificate secret-cause-text"), { code: "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" });
+    const fetchFn = vi.fn(async () => { throw new TypeError("fetch failed", { cause }); });
+    const run = vi.fn(async () => undefined);
+    const pending = installHermesPlugin({ run, capture: createCapture("0.1.0"), fetchFn }).catch((err: unknown) => err);
+    await vi.runAllTimersAsync();
+    const err = await pending;
+    expect(err).toMatchObject({ code: "HTTP_ERROR" });
+    expect((err as Error).message).toContain("certificate verify failed (UNABLE_TO_GET_ISSUER_CERT_LOCALLY)");
+    expect((err as Error).message).not.toContain("secret-cause-text");
+    expect(classifyInstallFailure(err)).toBe("tls");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("keeps a non-TLS fetch cause as a plain transport failure", async () => {
+    vi.useFakeTimers();
+    const cause = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+    const fetchFn = vi.fn(async () => { throw new TypeError("fetch failed", { cause }); });
+    const run = vi.fn(async () => undefined);
+    const pending = installHermesPlugin({ run, capture: createCapture("0.1.0"), fetchFn }).catch((err: unknown) => err);
+    await vi.runAllTimersAsync();
+    const err = await pending;
+    expect((err as Error).message).toBe(`GET ${HERMES_PLUGIN_YAML_URL} failed: fetch failed`);
+    expect(classifyInstallFailure(err)).toBe("metadata");
+  });
+
   it("does not fall back when curl reports an HTTP error (exit 22)", async () => {
     vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
     const baseCapture = createCapture(null);

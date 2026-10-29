@@ -284,6 +284,10 @@ touched, the opposite of the OpenClaw order. The remaining steps are:
    (constant `HERMES_PLUGIN_YAML_URL`) with Node's own `fetch` (20s per-attempt
    cap, two retries after 2s and 4s; 4xx is not retried). Injectable via
    `InstallerOptions.fetchFn`.
+   A fetch failure whose `cause.code` is a known Node TLS verification code
+   (e.g. `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`) is reported as
+   `certificate verify failed (<code>)`, so it classifies as `tls`; the raw
+   cause text is never copied into the error.
    Preferred over `curl`, which is absent on Windows builds older than 10/1803 —
    **except** when a proxy env var (`HTTPS_PROXY`, `http_proxy`, `ALL_PROXY`, …)
    is set, which uses `curl -fsL --max-time 20 --retry 2 --retry-delay 2`

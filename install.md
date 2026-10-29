@@ -597,11 +597,11 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
 - <a id="hermes-dependencies"></a>**Hermes dependency preparation is slow / fails.**
   `enable` resolves the host and all enabled plugins with `uv lock`, then
   `uv sync` into a new environment; it switches only after success. Each stage
-  has a 30-minute host limit. A 180-second tool timeout
-  is your tool's limit: allow ≥15 minutes or background it; never run two at once. Failure preserves the old environment/config
-  and leaves ClawChat disabled, so retrying after failure is safe.
+  has a 30-minute host limit; a 180-second timeout is your tool's: allow ≥15
+  minutes or background it; never run two at once. Failure keeps the old
+  environment/config and ClawChat disabled, so retrying is safe.
   `Enable 'clawchat' refused: …` contains the cause; host timeouts say
-  `uv lock timed out after 1800s` / `uv sync timed out after 1800s`; other errors
+  `uv lock|sync timed out after 1800s`; other errors
   say `uv <stage> exited <code>: <uv output tail>`.
 
   Set these only for this command, never global pip/uv/npm config:
@@ -618,7 +618,8 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   - `ECONNRESET` / `connection reset`: retry the same command once after it
     exits; if it still fails, show the owner the original error.
 
-  PowerShell (one call): `$env:UV_NATIVE_TLS = "1"; hermes plugins enable clawchat`.
+  PowerShell (one call, restoring the value): `$o = $env:UV_NATIVE_TLS;
+  $env:UV_NATIVE_TLS = "1"; hermes plugins enable clawchat; $env:UV_NATIVE_TLS = $o`.
   Report the result with the categories [at the top](#install-clawchat-plugin).
 
 - **Windows: install or update fails because files in the plugin folder are

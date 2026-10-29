@@ -82,6 +82,8 @@ describe("published runtime guides", () => {
       expect(recovery).toContain(text);
     }
     expect(recovery).not.toContain("UV_SYSTEM_CERTS");
+    const powershell = recovery.split("PowerShell (one call")[1]?.split("\n  Report")[0]?.replace(/\s+/g, " ") ?? "";
+    expect(powershell).toContain("`$o = $env:UV_NATIVE_TLS; $env:UV_NATIVE_TLS = \"1\"; hermes plugins enable clawchat; $env:UV_NATIVE_TLS = $o`");
     const scanner = install.split("- **The host's scanner blocked the install")[1]?.split("\n- ")[0] ?? "";
     expect(scanner).toContain("plugin_install_failed:scan_blocked");
     expect(scanner).toContain("Do you approve continuing?");
