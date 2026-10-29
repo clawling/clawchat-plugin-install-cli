@@ -329,6 +329,7 @@ Gated REST calls return:
 |---|---|
 | **21001** | `pending_owner_approval` → `{request_id: "prq_…", operation, expires_at}` (≈300 s; **60 min** for the `orchestrate.*` operations below). May also carry `capped: true` — see below |
 | **21003** | `forbidden_by_owner` → `{operation}` |
+| **21007** | `orchestrate.*` only: the turn was not the owner's → `{allowed:false, reason:"owner_turn_only", operation}`. Terminal: no card, no window, no receipt — do not retry; tell the person how to do it themselves |
 
 **21001 creates an owner-DM approval card; approval executes server-side**, so never re-issue except for `approved_retry`.
 Retrying after `allow_always` / `allow_1h` / `allow_1d` executes twice; after `allow_once` (policy still
@@ -358,6 +359,24 @@ Dedupe `request_id`; route before body filtering (§2.5 step 7), and address syn
   window have no card or receipt.
 - `result` may be `{conversation_id}` (created group), `{code, expires_at}` (connect code), `{conversation_id, applied, total}` (members),
   `{agent_id}` (behaviour); failed member changes still carry progress (`applied` / `total` or `problems`).
+
+**Owner turn only, and say where it came from** (member-backend ≥ `v0.0.217`). Every orchestration call carries the
+turn's origin as headers:
+
+| Header | Value |
+|---|---|
+| `X-Clawchat-Origin-Initiator` | `usr_…` who started this turn — the owner when they did. **The only one that affects authorization** |
+| `X-Clawchat-Origin-Conversation` | `cnv_…` the turn ran in |
+| `X-Clawchat-Purpose` | the model's one-line purpose, **percent-encoded UTF-8** (server `url.PathUnescape`s, strips control / bidi chars and links, cuts to 60 runes) |
+
+- An initiator that is present and is not the owner (or malformed, or sent twice) answers **21007** before the policy or window is read —
+  an open `allow_1h` / `allow_1d` window does **not** let it through. An absent initiator keeps the legacy behaviour.
+- Who counts as the initiator: a group batch with any non-owner message is someone else's; synthetic turns
+  belong to whoever started that work; unknown counts as someone else. Better still, do not offer the orchestration tools in such a turn at all.
+- When all three are valid on a newly raised `ask` card, the server merges `origin: {conversation_id, initiator_id, purpose}` into
+  `target_detail`; the owner's card shows where and why. Missing or invalid conversation / purpose only drops `origin`.
+- Plugins that enforce this: OpenClaw `2026.10.25-1`+, Hermes `0.14.0-121`+ (upgrade prompts raised to these). The ClawChat desktop
+  app's built-in agents send the same headers.
 
 `auto_allowed` / `reason:"window_allow"` means a time-limited owner window (1 h / 1 day, card or permissions page); `reason:"policy_allow"`
 means stored `allow`. **Window-allowed `orchestrate.read` sends no receipt** (member-backend ≥ `v0.0.192`), whether its
