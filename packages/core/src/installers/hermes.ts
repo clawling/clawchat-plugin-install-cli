@@ -68,6 +68,8 @@ const CURL_NET_OPTS = [
 ] as const;
 /** Backstop above 20s * 3 + 2s + 4s, with 9s of process overhead margin. */
 const CURL_TIMEOUT_MS = 75_000;
+// curl proxy/DNS, connection, timeout, TLS handshake, and send/receive failures.
+const CURL_TRANSPORT_EXIT_CODES = new Set([5, 6, 7, 28, 35, 52, 55, 56]);
 /** Fast local subprocesses (version / list / enable). */
 const HERMES_FAST_TIMEOUT_MS = 30_000;
 /** `plugins update` does a network git pull. */
@@ -511,14 +513,16 @@ function installCanonical(run: CommandRunner, replaceExisting: boolean, timeoutM
 
 /**
  * Whether a failed plugin.yaml read may fall back to the host install. Only
- * transport failures qualify. curl's `--fail` exit 22 means the server answered
- * with HTTP 400 or above and cannot tell 4xx from 5xx, so on the proxied path
- * any HTTP error stops the install, like a 4xx does on the fetch path.
+ * TIMEOUT / HTTP_ERROR qualify; curl SUBPROCESS errors qualify only with a
+ * known transport exit code. Other exits (including HTTP and certificate
+ * verification errors), spawn failures, and unparseable errors stop the install.
  */
 function isMetadataTransportFailure(err: unknown): err is ClawchatError {
   if (!(err instanceof ClawchatError)) return false;
   if (err.code === "TIMEOUT" || err.code === "HTTP_ERROR") return true;
-  return err.code === "SUBPROCESS" && !/\bfailed with exit code 22\b/.test(err.message);
+  if (err.code !== "SUBPROCESS") return false;
+  const match = /^curl\b[^\r\n]*? failed with exit code (\d+)(?:: [\s\S]*)?$/.exec(err.message);
+  return match !== null && CURL_TRANSPORT_EXIT_CODES.has(Number(match[1]));
 }
 
 async function readHermesInstallerContext(options: InstallerOptions = {}, action: "install" | "update" = "install"): Promise<HermesInstallerContext> {

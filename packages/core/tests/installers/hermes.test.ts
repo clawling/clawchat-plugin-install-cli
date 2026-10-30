@@ -1054,11 +1054,61 @@ describe("Hermes metadata fallback", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it.each(["SUBPROCESS", "TIMEOUT"])("falls back on curl transport failure %s", async (code) => {
+  it.each([5, 6, 7, 28, 35, 52, 55, 56])("falls back when curl reports transport exit %i", async (exitCode) => {
     vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
     const baseCapture = createCapture(null);
     const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
-      if (cmd === "curl") throw new ClawchatError(code, "curl failed");
+      if (cmd === "curl") throw new ClawchatError("SUBPROCESS", `curl -fsL ${HERMES_PLUGIN_YAML_URL} failed with exit code ${exitCode}`);
+      return baseCapture(cmd, args);
+    });
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture })).resolves.toMatchObject({ status: "installed" });
+    expectRemoteInstall(run);
+  });
+
+  it("falls back when a curl transport exit has multiline error detail", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
+    const baseCapture = createCapture(null);
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "curl") throw new ClawchatError("SUBPROCESS", `curl -fsL ${HERMES_PLUGIN_YAML_URL} failed with exit code 6: Could not resolve host\nRetries exhausted`);
+      return baseCapture(cmd, args);
+    });
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture })).resolves.toMatchObject({ status: "installed" });
+    expectRemoteInstall(run);
+  });
+
+  it.each([3, 23, 47, 60, 99, 280])("stops without fallback when curl reports non-transport exit %i", async (exitCode) => {
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
+    const err = new ClawchatError("SUBPROCESS", `curl -fsL ${HERMES_PLUGIN_YAML_URL} failed with exit code ${exitCode}: detail mentions failed with exit code 28`);
+    const capture = vi.fn(async () => { throw err; });
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture })).rejects.toBe(err);
+    expect(run).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "curl failed: spawn curl ENOENT",
+    "curl failed",
+    "curl -fsL failed with exit code null",
+    "curl -fsL failed with exit code 28unexpected",
+    "curl -fsL failed with exit code 28 unexpected",
+  ])("stops without fallback when curl has no parseable exit code: %s", async (message) => {
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
+    const err = new ClawchatError("SUBPROCESS", message);
+    const capture = vi.fn(async () => { throw err; });
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture })).rejects.toBe(err);
+    expect(run).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when the subprocess runner times out curl", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://localhost:3128");
+    const baseCapture = createCapture(null);
+    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "curl") throw new ClawchatError("TIMEOUT", "curl did not finish within 75s and was stopped (SIGKILL).");
       return baseCapture(cmd, args);
     });
     const run = vi.fn(async () => undefined);
