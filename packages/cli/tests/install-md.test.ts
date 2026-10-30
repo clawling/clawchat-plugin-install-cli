@@ -425,6 +425,15 @@ describe("per-host greeting and liveware skills", () => {
     expect(openclaw).toContain("~/clawchat/friend-greeting.md");
   });
 
+  it.each(["openclaw", "hermes"])("reconcile ClawChat and liveware app lists before creating an app on %s", (target) => {
+    const text = readSkill(target, "clawchat-liveware");
+    const step = (text.split("3. **List existing apps**")[1]?.split("\n4. **Create the app")[0] ?? "").replace(/\s+/g, " ");
+    expect(step).toContain("`clawchat_list_apps()`");
+    const list = target === "hermes" ? '`"$LIVEWARE_BIN" app list --account <account>`' : '`"$LIVEWARE_BIN" app list`';
+    expect(step).toContain(list);
+    expect(step).toContain("Reuse an app that already appears in either list instead of creating a second one");
+  });
+
   it("make every Hermes liveware command name the agent's own account", () => {
     const hermes = readSkill("hermes", "clawchat-liveware");
     const commands = [...hermes.matchAll(/`((?:liveware|"\$LIVEWARE_BIN") (?:app|tunnel|status)\b[^`]*)`/g)].map((m) => m[1]!);

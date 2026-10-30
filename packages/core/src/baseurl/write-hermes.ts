@@ -30,8 +30,10 @@ export function writeHermesBaseUrls(values: HermesBaseUrls, options: WriteHermes
   let existing = "";
   try {
     existing = fs.readFileSync(envPath, "utf8");
-  } catch {
-    existing = "";
+  } catch (err) {
+    // Only a missing file starts empty: replacing an unreadable `.env` would
+    // drop the tokens and other keys it holds.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const lines = existing.length
     ? existing.split(/\r?\n/).map((line) => line.replace(/\r$/, "")).filter((line) => line.length > 0)
@@ -54,16 +56,17 @@ export function writeHermesBaseUrls(values: HermesBaseUrls, options: WriteHermes
  * Replace `target` atomically: write a temp file in the same directory, fsync it,
  * then rename it over the target, so a crash never leaves a truncated `.env`
  * (which also holds the plugin's tokens). A new file is created 0600; an existing
- * file keeps its mode. A symlinked `.env` is written through to its target.
+ * file keeps its mode. A symlinked `.env` is written through to its target,
+ * even when that target does not exist yet.
  */
 function writeFileAtomic(target: string, data: string): void {
-  let dest = target;
+  const dest = resolveSymlinks(target);
   let mode = 0o600;
   try {
-    dest = fs.realpathSync(target);
     mode = fs.statSync(dest).mode & 0o777;
-  } catch {
+  } catch (err) {
     // Missing file: create it owner-only.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const dir = path.dirname(dest);
   const tmp = path.join(dir, `.${path.basename(dest)}.${process.pid}.${Date.now()}.tmp`);
@@ -99,4 +102,21 @@ function writeFileAtomic(target: string, data: string): void {
       // Directory fsync is best effort; not every filesystem supports it.
     }
   }
+}
+
+/** Follow a chain of symlinks, including one whose final target does not exist yet. */
+function resolveSymlinks(target: string): string {
+  let current = target;
+  for (let hops = 0; hops < 40; hops += 1) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return current;
+      throw err;
+    }
+    if (!stat.isSymbolicLink()) return current;
+    current = path.resolve(path.dirname(current), fs.readlinkSync(current));
+  }
+  throw new Error(`too many symbolic links resolving ${target}`);
 }

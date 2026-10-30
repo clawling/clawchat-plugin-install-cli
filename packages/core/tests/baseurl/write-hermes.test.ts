@@ -102,4 +102,35 @@ describe("writeHermesBaseUrls", () => {
     expect(fs.readdirSync(dir)).toEqual([".env"]);
     expect(fs.readdirSync(envPath)).toEqual(["keep"]);
   });
+  it.skipIf(process.platform === "win32")("creates the target of a dangling .env symlink and keeps the link", () => {
+    const dir = path.join(home, ".hermes");
+    fs.mkdirSync(dir, { recursive: true });
+    const real = path.join(home, "secrets", "hermes.env");
+    fs.mkdirSync(path.dirname(real), { recursive: true });
+    fs.symlinkSync(real, path.join(dir, ".env"));
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    expect(fs.lstatSync(path.join(dir, ".env")).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(real, "utf8")).toBe("CLAWCHAT_BASE_URL=https://api.test\n");
+    expect(fs.statSync(real).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses to replace an existing .env it cannot read",
+    () => {
+      const dir = path.join(home, ".hermes");
+      fs.mkdirSync(dir, { recursive: true });
+      const envPath = path.join(dir, ".env");
+      fs.writeFileSync(envPath, "CLAWCHAT_TOKEN=keep\n");
+      fs.chmodSync(envPath, 0o200);
+      try {
+        expect(() =>
+          writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" }),
+        ).toThrow();
+      } finally {
+        fs.chmodSync(envPath, 0o600);
+      }
+      expect(fs.readFileSync(envPath, "utf8")).toBe("CLAWCHAT_TOKEN=keep\n");
+    },
+  );
+
 });
