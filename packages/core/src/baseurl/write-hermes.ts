@@ -116,7 +116,9 @@ function resolveSymlinks(target: string): string {
       throw err;
     }
     if (!stat.isSymbolicLink()) return current;
-    current = path.resolve(path.dirname(current), fs.readlinkSync(current));
+    // Resolve relative to the link's real directory: `..` in a link target is
+    // taken from where the link physically lives, not from a lexical path.
+    current = path.resolve(fs.realpathSync(path.dirname(current)), fs.readlinkSync(current));
   }
   throw new Error(`too many symbolic links resolving ${target}`);
 }

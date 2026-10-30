@@ -133,4 +133,19 @@ describe("writeHermesBaseUrls", () => {
     },
   );
 
+  it.skipIf(process.platform === "win32")("resolves a relative .env link from the real directory of a symlinked home", () => {
+    // ~/.hermes -> profiles/a ; .env -> ../shared/hermes.env (relative to profiles/a)
+    const profile = path.join(home, "profiles", "a");
+    fs.mkdirSync(profile, { recursive: true });
+    fs.mkdirSync(path.join(home, "profiles", "shared"), { recursive: true });
+    fs.symlinkSync(profile, path.join(home, ".hermes"));
+    fs.symlinkSync("../shared/hermes.env", path.join(profile, ".env"));
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    expect(fs.readFileSync(path.join(home, "profiles", "shared", "hermes.env"), "utf8")).toBe(
+      "CLAWCHAT_BASE_URL=https://api.test\n",
+    );
+    expect(fs.existsSync(path.join(home, "shared"))).toBe(false);
+    expect(fs.lstatSync(path.join(profile, ".env")).isSymbolicLink()).toBe(true);
+  });
+
 });
