@@ -281,7 +281,10 @@ installer should set on the user's behalf.
 `packages/core/src/installers/hermes.ts` are stateful. Before anything else,
 both write the base-URL overrides (when passed) into
 `<profile home>/.env` via `writeHermesBaseUrls` — **before** the host is
-touched, the opposite of the OpenClaw order. The remaining steps are:
+touched, the opposite of the OpenClaw order. That `.env` also holds the
+plugin's tokens, so the write is atomic (temp file in the same directory,
+fsync, rename): a new file is created `0600`, an existing one keeps its mode,
+and a symlinked `.env` is written through to its target. The remaining steps are:
 
 1. Fetch `plugin.yaml` from
    `https://raw.githubusercontent.com/clawling/clawchat-plugin-hermes-agent/main/plugin.yaml`

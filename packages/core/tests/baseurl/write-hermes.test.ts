@@ -62,4 +62,44 @@ describe("writeHermesBaseUrls", () => {
     writeHermesBaseUrls({}, { homeDir: home, env: {}, platform: "linux" });
     expect(fs.existsSync(getHermesEnvPath({ homeDir: home, env: {}, platform: "linux" }))).toBe(false);
   });
+  it.skipIf(process.platform === "win32")("creates a new .env owner-only (0600)", () => {
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    const envPath = getHermesEnvPath({ homeDir: home, env: {}, platform: "linux" });
+    expect(fs.statSync(envPath).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the mode of an existing .env and leaves no temp files", () => {
+    const dir = path.join(home, ".hermes");
+    fs.mkdirSync(dir, { recursive: true });
+    const envPath = path.join(dir, ".env");
+    fs.writeFileSync(envPath, "CLAWCHAT_TOKEN=keep\n");
+    fs.chmodSync(envPath, 0o640);
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    expect(fs.statSync(envPath).mode & 0o777).toBe(0o640);
+    expect(fs.readdirSync(dir)).toEqual([".env"]);
+  });
+
+  it.skipIf(process.platform === "win32")("writes through a symlinked .env instead of replacing the link", () => {
+    const dir = path.join(home, ".hermes");
+    fs.mkdirSync(dir, { recursive: true });
+    const real = path.join(home, "real.env");
+    fs.writeFileSync(real, "CLAWCHAT_TOKEN=keep\n");
+    fs.symlinkSync(real, path.join(dir, ".env"));
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    expect(fs.lstatSync(path.join(dir, ".env")).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(real, "utf8")).toContain("CLAWCHAT_BASE_URL=https://api.test\n");
+  });
+
+  it.skipIf(process.platform === "win32")("removes the temp file and keeps the target when the rename fails", () => {
+    const dir = path.join(home, ".hermes");
+    // A non-empty directory at the .env path makes the final rename fail.
+    const envPath = path.join(dir, ".env");
+    fs.mkdirSync(envPath, { recursive: true });
+    fs.writeFileSync(path.join(envPath, "keep"), "x");
+    expect(() =>
+      writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" }),
+    ).toThrow();
+    expect(fs.readdirSync(dir)).toEqual([".env"]);
+    expect(fs.readdirSync(envPath)).toEqual(["keep"]);
+  });
 });
