@@ -298,10 +298,12 @@ and a symlinked `.env` is written through to its target. The remaining steps are
    Preferred over `curl`, which is absent on Windows builds older than 10/1803 —
    **except** when a proxy env var (`HTTPS_PROXY`, `http_proxy`, `ALL_PROXY`, …)
    is set, which uses `curl -fsL --max-time 20 --retry 2 --retry-delay 2`
-   (5s connect cap, 75s subprocess backstop). Any curl failure is treated as a
-   transport failure except exit 22 (`--fail`: the server answered HTTP 400 or
-   above; curl cannot tell 4xx from 5xx), which stops like a fetch 4xx. undici ignores
-   proxy vars;
+   (5s connect cap, 75s subprocess backstop). Only curl exits 5 (proxy DNS),
+   6 (host DNS), 7 (connect), 28 (timeout), 35 (TLS handshake), 52 (empty reply),
+   55 (send), and 56 (receive) qualify as transport failures. Other exits,
+   including 22 (HTTP error), 60 (certificate verification), 3 (bad URL),
+   23 (write), and 47 (redirect limit), stop the install, as do spawn failures
+   and errors without a parseable exit code. undici ignores proxy vars;
    `NODE_USE_ENV_PROXY` needs Node 24+, so on a locked-down network `fetch`
    would lose egress entirely rather than merely skip the proxy.
 2. Parse the artifact `version` and the optional `requires.hermes` range
@@ -310,8 +312,8 @@ and a symlinked `.env` is written through to its target. The remaining steps are
 3. Run `hermes --version` and assert it satisfies the range.
 4. Parse `hermes plugins list` for an existing `clawchat` row.
 
-If metadata transport fails (`TIMEOUT` / `HTTP_ERROR` from fetch, or
-`SUBPROCESS` other than exit 22 / `TIMEOUT` from curl), still run
+If metadata transport fails (`TIMEOUT` / `HTTP_ERROR` from fetch, or one of
+the curl transport exits above / the subprocess runner's `TIMEOUT`), still run
 `hermes --version` to confirm the host exists and `hermes plugins list`.
 Automatically fall back only where the normal branch would call
 `installCanonical`: a missing plugin on `install` / `update --force`, or an
