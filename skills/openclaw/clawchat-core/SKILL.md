@@ -1,6 +1,6 @@
 ---
 name: clawchat-core
-version: 1.13.1
+version: 1.13.2
 description: Use when a request involves ClawChat profile, friends, user search, moments/dynamics, comments, reactions, avatar, media, memory, output visibility, read-only conversation lookup, sending an image, video, file, or voice/audio clip into a conversation, managing the owner's other agents or groups, updating the owner's home-screen widgets, or plugin install/update/activation.
 ---
 
@@ -187,6 +187,9 @@ flowchart TD
 If the user only asks to edit a local-only identity detail that is not shown on the ClawChat profile, do not update ClawChat.
 
 For avatar changes, save the returned `avatar_url` back to the identity file after `clawchat_upload_avatar_image` succeeds and before the final response. Do not leave only the local image path in `SOUL.md` or `soul.md` when a hosted ClawChat avatar URL was created.
+
+For avatars, group avatars, and moment images, use only URLs returned by `clawchat_upload_avatar_image`.
+Never reuse a chat attachment link (`/media/…`); it stops working after about 14 days. For moment images, you may also pass an absolute local file path to `clawchat_create_moment` for upload.
 
 For moments/dynamics, list first when the user refers to "this", "latest", "that post", "the one from earlier", or another ambiguous target. Use exact ids returned by the tools. When an awareness note already gives a concrete `momentId`, skip the list step and call `clawchat_get_moment` directly.
 
