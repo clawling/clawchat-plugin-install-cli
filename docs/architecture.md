@@ -283,8 +283,11 @@ both write the base-URL overrides (when passed) into
 `<profile home>/.env` via `writeHermesBaseUrls` — **before** the host is
 touched, the opposite of the OpenClaw order. That `.env` also holds the
 plugin's tokens, so the write is atomic (temp file in the same directory,
-fsync, rename): a new file is created `0600`, an existing one keeps its mode,
-and a symlinked `.env` is written through to its target. The remaining steps are:
+fsync, rename, directory fsync; only "unsupported" errors from the directory
+fsync are ignored): a new file is created `0600`, an existing one keeps its
+mode, and a symlinked `.env` is read and written through to its target,
+resolved with filesystem (not lexical) semantics. An existing `.env` that
+cannot be read aborts the write. The remaining steps are:
 
 1. Fetch `plugin.yaml` from
    `https://raw.githubusercontent.com/clawling/clawchat-plugin-hermes-agent/main/plugin.yaml`

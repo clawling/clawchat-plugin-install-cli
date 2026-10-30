@@ -2,7 +2,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Wrap the fs calls whose failures these tests inject; every wrapper defaults
+// to the real implementation.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, renameSync: vi.fn(actual.renameSync), fsyncSync: vi.fn(actual.fsyncSync) };
+});
 import { getHermesEnvPath, writeHermesBaseUrls } from "../../src/baseurl/write-hermes";
 
 let home: string;
@@ -11,6 +18,8 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "hermes-home-"));
 });
 afterEach(() => {
+  vi.mocked(fs.renameSync).mockReset();
+  vi.mocked(fs.fsyncSync).mockReset();
   fs.rmSync(home, { recursive: true, force: true });
 });
 
@@ -90,18 +99,68 @@ describe("writeHermesBaseUrls", () => {
     expect(fs.readFileSync(real, "utf8")).toContain("CLAWCHAT_BASE_URL=https://api.test\n");
   });
 
-  it.skipIf(process.platform === "win32")("removes the temp file and keeps the target when the rename fails", () => {
+  it("keeps the existing .env and removes the temp file when the rename fails", () => {
     const dir = path.join(home, ".hermes");
-    // A non-empty directory at the .env path makes the final rename fail.
+    fs.mkdirSync(dir, { recursive: true });
     const envPath = path.join(dir, ".env");
-    fs.mkdirSync(envPath, { recursive: true });
-    fs.writeFileSync(path.join(envPath, "keep"), "x");
+    fs.writeFileSync(envPath, "CLAWCHAT_TOKEN=keep\n");
+    vi.mocked(fs.renameSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("rename failed"), { code: "EIO" });
+    });
     expect(() =>
       writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" }),
-    ).toThrow();
+    ).toThrow("rename failed");
+    expect(vi.mocked(fs.renameSync)).toHaveBeenCalledTimes(1);
+    expect(fs.readFileSync(envPath, "utf8")).toBe("CLAWCHAT_TOKEN=keep\n");
     expect(fs.readdirSync(dir)).toEqual([".env"]);
-    expect(fs.readdirSync(envPath)).toEqual(["keep"]);
   });
+
+  it.skipIf(process.platform === "win32")("surfaces a directory fsync I/O error after the rename", () => {
+    const real = vi.mocked(fs.fsyncSync).getMockImplementation()!;
+    // First fsync is the temp file, second the directory.
+    vi.mocked(fs.fsyncSync).mockImplementationOnce(real).mockImplementationOnce(() => {
+      throw Object.assign(new Error("dir fsync failed"), { code: "EIO" });
+    });
+    expect(() =>
+      writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" }),
+    ).toThrow("dir fsync failed");
+  });
+
+  it.skipIf(process.platform === "win32")("tolerates filesystems that cannot fsync a directory", () => {
+    const real = vi.mocked(fs.fsyncSync).getMockImplementation()!;
+    vi.mocked(fs.fsyncSync).mockImplementationOnce(real).mockImplementationOnce(() => {
+      throw Object.assign(new Error("not supported"), { code: "EINVAL" });
+    });
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    expect(readEnv()).toBe("CLAWCHAT_BASE_URL=https://api.test\n");
+  });
+
+  it.skipIf(process.platform === "win32")("follows `..` after a symlinked directory the way the kernel does", () => {
+    // .hermes/sub -> ../b/c, so .hermes/sub/.. is b (not .hermes).
+    const dir = path.join(home, ".hermes");
+    fs.mkdirSync(path.join(home, "b", "c"), { recursive: true });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.symlinkSync("../b/c", path.join(dir, "sub"));
+    const real = path.join(home, "b", "target.env");
+    fs.writeFileSync(real, "CLAWCHAT_TOKEN=keep\n");
+    fs.symlinkSync("sub/../target.env", path.join(dir, ".env"));
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    expect(fs.readFileSync(real, "utf8")).toBe("CLAWCHAT_TOKEN=keep\nCLAWCHAT_BASE_URL=https://api.test\n");
+    expect(fs.existsSync(path.join(dir, "target.env"))).toBe(false);
+    expect(fs.lstatSync(path.join(dir, ".env")).isSymbolicLink()).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")("creates a dangling link target behind a symlinked directory the way the kernel does", () => {
+    const dir = path.join(home, ".hermes");
+    fs.mkdirSync(path.join(home, "b", "c"), { recursive: true });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.symlinkSync("../b/c", path.join(dir, "sub"));
+    fs.symlinkSync("sub/../new.env", path.join(dir, ".env"));
+    writeHermesBaseUrls({ CLAWCHAT_BASE_URL: "https://api.test" }, { homeDir: home, env: {}, platform: "linux" });
+    expect(fs.readFileSync(path.join(home, "b", "new.env"), "utf8")).toBe("CLAWCHAT_BASE_URL=https://api.test\n");
+    expect(fs.existsSync(path.join(dir, "new.env"))).toBe(false);
+  });
+
   it.skipIf(process.platform === "win32")("creates the target of a dangling .env symlink and keeps the link", () => {
     const dir = path.join(home, ".hermes");
     fs.mkdirSync(dir, { recursive: true });

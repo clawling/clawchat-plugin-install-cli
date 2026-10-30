@@ -27,9 +27,12 @@ export function writeHermesBaseUrls(values: HermesBaseUrls, options: WriteHermes
     return;
   }
   const envPath = getHermesEnvPath(options);
+  fs.mkdirSync(path.dirname(envPath), { recursive: true });
+  // Read and replace the same file: the one a symlinked `.env` points at.
+  const dest = resolveWriteTarget(envPath);
   let existing = "";
   try {
-    existing = fs.readFileSync(envPath, "utf8");
+    existing = fs.readFileSync(dest, "utf8");
   } catch (err) {
     // Only a missing file starts empty: replacing an unreadable `.env` would
     // drop the tokens and other keys it holds.
@@ -48,19 +51,16 @@ export function writeHermesBaseUrls(values: HermesBaseUrls, options: WriteHermes
     }
   }
   const out = `${lines.join("\n").replace(/\n+$/, "")}\n`;
-  fs.mkdirSync(path.dirname(envPath), { recursive: true });
-  writeFileAtomic(envPath, out);
+  writeFileAtomic(dest, out);
 }
 
 /**
  * Replace `target` atomically: write a temp file in the same directory, fsync it,
  * then rename it over the target, so a crash never leaves a truncated `.env`
  * (which also holds the plugin's tokens). A new file is created 0600; an existing
- * file keeps its mode. A symlinked `.env` is written through to its target,
- * even when that target does not exist yet.
+ * file keeps its mode. `dest` is already symlink-resolved (see resolveWriteTarget).
  */
-function writeFileAtomic(target: string, data: string): void {
-  const dest = resolveSymlinks(target);
+function writeFileAtomic(dest: string, data: string): void {
   let mode = 0o600;
   try {
     mode = fs.statSync(dest).mode & 0o777;
@@ -98,27 +98,43 @@ function writeFileAtomic(target: string, data: string): void {
       } finally {
         fs.closeSync(dirFd);
       }
-    } catch {
-      // Directory fsync is best effort; not every filesystem supports it.
+    } catch (err) {
+      // Only "this filesystem cannot fsync a directory" is tolerated; a real I/O
+      // error means the rename may not be durable and must surface.
+      if (!DIR_FSYNC_UNSUPPORTED.has((err as NodeJS.ErrnoException).code ?? "")) throw err;
     }
   }
 }
 
-/** Follow a chain of symlinks, including one whose final target does not exist yet. */
-function resolveSymlinks(target: string): string {
+const DIR_FSYNC_UNSUPPORTED = new Set(["EINVAL", "ENOTSUP", "EOPNOTSUPP", "EISDIR"]);
+
+/**
+ * The file a write to `target` should replace, resolved the way the kernel
+ * would: an existing path through `fs.realpathSync.native`, and a symlink whose
+ * final target does not exist yet hop by hop, joining each link target to its
+ * link's real directory without lexical `..` normalization, so `..` after a
+ * symlinked directory follows the filesystem, not the string.
+ */
+function resolveWriteTarget(target: string): string {
   let current = target;
   for (let hops = 0; hops < 40; hops += 1) {
+    try {
+      return fs.realpathSync.native(current);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    const parent = fs.realpathSync.native(path.dirname(current));
+    const leaf = path.join(parent, path.basename(current));
     let stat: fs.Stats;
     try {
-      stat = fs.lstatSync(current);
+      stat = fs.lstatSync(leaf);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return current;
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return leaf;
       throw err;
     }
-    if (!stat.isSymbolicLink()) return current;
-    // Resolve relative to the link's real directory: `..` in a link target is
-    // taken from where the link physically lives, not from a lexical path.
-    current = path.resolve(fs.realpathSync(path.dirname(current)), fs.readlinkSync(current));
+    if (!stat.isSymbolicLink()) return leaf;
+    const link = fs.readlinkSync(leaf);
+    current = path.isAbsolute(link) ? link : `${parent}${path.sep}${link}`;
   }
   throw new Error(`too many symbolic links resolving ${target}`);
 }
