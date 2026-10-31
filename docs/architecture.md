@@ -379,7 +379,7 @@ v0.20.3–v0.20.6: their `plugin_guard` `agent_config_mod` rule hard-refuses
 ClawChat's AGENTS.md/docs, even with `--force`. `assertHermesHostSupported`
 rejects >=0.20.3 and <0.21.0 with `PRECONDITION` ("too old", reported as
 `host_too_old`) before listing/installing/updating, including metadata fallback
-and before GitHub ref cloning; it advises the owner to upgrade to v0.21.6+
+and before any `@ref` install (GitHub clone or raw spec); it advises the owner to upgrade to v0.21.6+
 (`hermes update`). Unparseable output remains tolerated in metadata fallback
 and the pre-clone exclusion check; the ref's post-clone host requirement check
 still uses strict parsing, reusing the single version probe.

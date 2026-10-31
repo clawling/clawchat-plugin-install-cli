@@ -703,9 +703,7 @@ describe("Hermes installer with @ref", () => {
 
   it("hands an unrecognized (non-GitHub) ref straight to the host installer", async () => {
     const run = vi.fn(async () => undefined);
-    const capture = vi.fn(async (cmd: string) => {
-      throw new Error(`unexpected capture: ${cmd}`);
-    });
+    const capture = captureVersionOnly();
 
     const result = await installHermesPlugin({
       run,
@@ -719,7 +717,19 @@ describe("Hermes installer with @ref", () => {
       ["hermes", ["plugins", "install", "git@example.com:weird", "--enable"]], // redact-allow:email (placeholder SSH git spec)
     ]);
     expect(cloneCall(run)).toBeUndefined();
-    expect(capture).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([installHermesPlugin, updateHermesPlugin])("refuses excluded hosts before handing a non-GitHub ref to the host (%s)", async (action) => {
+    const run = vi.fn(async () => undefined);
+    const capture = captureVersionOnly("Hermes Agent v0.20.5 (2026.8.19)\n");
+    const err = await action({ run, capture, writeBaseUrls: vi.fn(), ref: "file:///tmp/clawchat-plugin" }).catch((err: unknown) => err);
+
+    expect(err).toMatchObject({ code: "PRECONDITION", message: expect.stringContaining("too old") });
+    expect((err as Error).message).toContain("v0.21.6");
+    expect(classifyInstallFailure(err)).toBe("host_too_old");
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
   });
 });
 

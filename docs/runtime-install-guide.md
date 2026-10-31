@@ -106,7 +106,7 @@ Then:
 
 Hermes support follows the plugin's minimum (currently v0.12.0), excluding
 v0.20.3–v0.20.6: their install scan refuses ClawChat. The CLI checks this before
-install/update, including metadata fallback and before GitHub ref cloning, and
+install/update, including metadata fallback and before any `@ref` install, and
 reports `host_too_old` with advice to ask the owner for v0.21.6+ (`hermes update`).
 
 ## Editing rules

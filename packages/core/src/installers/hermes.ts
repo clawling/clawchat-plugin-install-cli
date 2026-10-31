@@ -591,16 +591,17 @@ async function installHermesFromRef(options: InstallerOptions, action: "installe
   const spec = options.ref as string;
   const parsed = parseHermesGitRef(spec);
 
+  // Every ref path reaches the host's install scan, so refuse excluded hosts first.
+  const versionOutput = await capture("hermes", ["--version"], { timeoutMs: HERMES_FAST_TIMEOUT_MS });
+  const hostVersion = parseOptionalHermesHostVersion(versionOutput);
+  if (hostVersion) assertHermesHostSupported(hostVersion);
+
   if (!parsed) {
     // Unrecognized ref (non-GitHub): hand the raw spec to the host installer.
     progress?.(`plugin installing ${spec}`);
     await installViaHost({ run, spec, replaceExisting: true, timeoutMs: HERMES_UPDATE_TIMEOUT_MS, progress });
     return { kind: "plugin", target: "hermes", status: action, version: spec, previousVersion: null };
   }
-
-  const versionOutput = await capture("hermes", ["--version"], { timeoutMs: HERMES_FAST_TIMEOUT_MS });
-  const hostVersion = parseOptionalHermesHostVersion(versionOutput);
-  if (hostVersion) assertHermesHostSupported(hostVersion);
 
   // Read plugin.yaml straight from the local checkout for the
   // version + host-compat guard. The branch is fetched exactly once: the old
