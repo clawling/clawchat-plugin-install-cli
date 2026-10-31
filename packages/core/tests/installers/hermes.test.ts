@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HERMES_PLUGIN_NAME, HERMES_PLUGIN_SPEC, HERMES_PLUGIN_YAML_URL } from "../../src/config";
 import { ClawchatError } from "../../src/errors";
 import { classifyInstallFailure, isActivationFailure } from "../../src/progress-report";
-import { installHermesPlugin, isHermesScanRefusal, resolveHermesInstallTimeoutMs, updateHermesPlugin } from "../../src/installers/hermes";
+import { assertHermesHostSupported, installHermesPlugin, isHermesScanRefusal, resolveHermesInstallTimeoutMs, updateHermesPlugin } from "../../src/installers/hermes";
 
 const HERMES_CLONE_URL = "https://github.com/clawling/clawchat-plugin-hermes-agent.git";
 
@@ -186,6 +186,14 @@ describe.each([
 });
 
 describe("Hermes installer", () => {
+  it.each(["0.20.2", "0.21.0"])("supports Hermes %s outside the excluded scan releases", async (version) => {
+    expect(() => assertHermesHostSupported(version)).not.toThrow();
+    const run = vi.fn(async () => undefined);
+    await expect(installHermesPlugin({ run, capture: createCapture(null, `Hermes Agent v${version}\n`) }))
+      .resolves.toMatchObject({ status: "installed" });
+    expectRemoteInstall(run);
+  });
+
   it("installs canonically from the remote spec when plugin is missing", async () => {
     const run = vi.fn(async () => undefined);
     const capture = createCapture(null);
@@ -411,6 +419,30 @@ describe("Hermes installer", () => {
 
 });
 
+describe.each([
+  ["install", installHermesPlugin],
+  ["update", updateHermesPlugin],
+] as const)("Hermes %s host scan compatibility", (_action, action) => {
+  it.each(["0.20.3 (2026.8.16.2)", "0.20.4", "0.20.5", "0.20.6"].flatMap(
+    (version) => [false, true].map((force) => ({ version, force })),
+  ))(
+    "refuses excluded Hermes $version before listing or installing (force=$force)",
+    async ({ version, force }) => {
+      const run = vi.fn(async () => undefined);
+      const capture = createCapture("0.1.0", `Hermes Agent v${version}\n`);
+      const err = await action({ run, capture, force }).catch((err: unknown) => err);
+
+      expect(err).toBeInstanceOf(ClawchatError);
+      expect(err).toMatchObject({ code: "PRECONDITION", message: expect.stringContaining("too old") });
+      expect((err as Error).message).toContain("v0.21.6");
+      expect((err as Error).message).toContain("hermes update");
+      expect(classifyInstallFailure(err)).toBe("host_too_old");
+      expect(headCalls(capture)).toEqual([["hermes", ["--version"]]]);
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+});
+
 const REF = "https://github.com/clawling/clawchat-plugin-hermes-agent.git#dev";
 const REF_YAML = "version: 0.14.0-22\nrequires:\n  hermes: \">=0.12.0\"\n";
 
@@ -441,6 +473,18 @@ function captureVersionOnly(hostVersion = "hermes 0.12.0\n") {
 }
 
 describe("Hermes installer with @ref", () => {
+  it.each([installHermesPlugin, updateHermesPlugin])("refuses excluded hosts before cloning a ref (%s)", async (action) => {
+    const run = runThatClones(null);
+    const capture = captureVersionOnly("Hermes Agent v0.20.3 (2026.8.16.2)\n");
+    const err = await action({ run, capture, writeBaseUrls: vi.fn(), ref: REF }).catch((err: unknown) => err);
+
+    expect(err).toMatchObject({ code: "PRECONDITION", message: expect.stringContaining("too old") });
+    expect((err as Error).message).toContain("v0.21.6");
+    expect(classifyInstallFailure(err)).toBe("host_too_old");
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("clones the requested branch and reads plugin.yaml from the checkout (no metadata fetch)", async () => {
     const run = runThatClones();
     const capture = captureVersionOnly();
@@ -449,6 +493,7 @@ describe("Hermes installer with @ref", () => {
 
     expect(result).toMatchObject({ kind: "plugin", target: "hermes", status: "installed", version: "0.14.0-22" });
     expectLocalClone(run, { branch: "dev" });
+    expect(capture).toHaveBeenCalledTimes(1);
     // The redundant raw.githubusercontent.com read is gone — version comes from the clone.
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -518,34 +563,50 @@ describe("Hermes installer with @ref", () => {
 
   it("still installs from a local checkout when the checkout has no plugin.yaml", async () => {
     const run = runThatClones(null);
-    // --version is never read because the version check is skipped.
-    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
-      throw new Error(`unexpected capture: ${cmd} ${args.join(" ")}`);
-    });
+    const capture = captureVersionOnly();
 
     const result = await installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF });
 
     expect(result.status).toBe("installed");
     expectLocalClone(run, { branch: "dev" });
-    expect(capture).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
   });
 
   it("still installs when the checkout has a malformed plugin.yaml (version check skipped)", async () => {
     // Valid YAML, but no `version` field → parseHermesPluginYaml throws METADATA,
     // which is caught and treated like a missing file: skip the check, install anyway.
     const run = runThatClones("manifest_version: 1\nname: clawchat\n");
-    const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
-      throw new Error(`unexpected capture: ${cmd} ${args.join(" ")}`);
-    });
+    const capture = captureVersionOnly();
 
     const result = await installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF });
 
     expect(result.status).toBe("installed");
     expectLocalClone(run, { branch: "dev" });
-    expect(capture).not.toHaveBeenCalled(); // version check skipped → --version never read
+    expect(capture).toHaveBeenCalledTimes(1);
   });
 
-  it("aborts the ref install when hermes --version fails during the version check", async () => {
+  it("tolerates unparseable host output before cloning when metadata is absent", async () => {
+    const run = runThatClones(null);
+    const capture = captureVersionOnly("unparseable host version");
+
+    await expect(installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF }))
+      .resolves.toMatchObject({ status: "installed" });
+    expectLocalClone(run, { branch: "dev" });
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it("still rejects unparseable host output for the checkout's host requirement", async () => {
+    const run = runThatClones();
+    const capture = captureVersionOnly("unparseable host version");
+
+    await expect(installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF }))
+      .rejects.toMatchObject({ code: "METADATA" });
+    expect(cloneCall(run)).toBeTruthy();
+    expect(installCall(run)).toBeUndefined();
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts before cloning when hermes --version fails", async () => {
     const run = runThatClones(); // valid plugin.yaml requiring >=0.12.0
     const capture = vi.fn(async (cmd: string, args: readonly string[]) => {
       if (cmd === "hermes" && args[0] === "--version") {
@@ -558,9 +619,7 @@ describe("Hermes installer with @ref", () => {
       installHermesPlugin({ run, capture, writeBaseUrls: vi.fn(), ref: REF }),
     ).rejects.toThrow(/timed out/);
 
-    // Compat check runs after a successful clone but aborts before the install.
-    expect(cloneCall(run)).toBeTruthy();
-    expect(installCall(run)).toBeUndefined();
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("surfaces a deployment hint when config.yaml is a read-only mount (EBUSY)", async () => {
@@ -644,9 +703,7 @@ describe("Hermes installer with @ref", () => {
 
   it("hands an unrecognized (non-GitHub) ref straight to the host installer", async () => {
     const run = vi.fn(async () => undefined);
-    const capture = vi.fn(async (cmd: string) => {
-      throw new Error(`unexpected capture: ${cmd}`);
-    });
+    const capture = captureVersionOnly();
 
     const result = await installHermesPlugin({
       run,
@@ -660,11 +717,23 @@ describe("Hermes installer with @ref", () => {
       ["hermes", ["plugins", "install", "git@example.com:weird", "--enable"]], // redact-allow:email (placeholder SSH git spec)
     ]);
     expect(cloneCall(run)).toBeUndefined();
-    expect(capture).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([installHermesPlugin, updateHermesPlugin])("refuses excluded hosts before handing a non-GitHub ref to the host (%s)", async (action) => {
+    const run = vi.fn(async () => undefined);
+    const capture = captureVersionOnly("Hermes Agent v0.20.5 (2026.8.19)\n");
+    const err = await action({ run, capture, writeBaseUrls: vi.fn(), ref: "file:///tmp/clawchat-plugin" }).catch((err: unknown) => err);
+
+    expect(err).toMatchObject({ code: "PRECONDITION", message: expect.stringContaining("too old") });
+    expect((err as Error).message).toContain("v0.21.6");
+    expect(classifyInstallFailure(err)).toBe("host_too_old");
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
   });
 });
 
-// Host wording (Hermes 0.20.2+, hermes_cli/plugins_cmd.py + tools/plugin_guard.py). The
+// Host wording (Hermes 0.20.3+, hermes_cli/plugins_cmd.py + tools/plugin_guard.py). The
 // host prints it on stdout through rich, which wraps at 80 columns when not a TTY —
 // hence the mid-phrase line breaks, which the matcher must survive.
 const HOST_CAUTION_REFUSAL =
@@ -869,6 +938,30 @@ describe("Hermes activation failure stages", () => {
 });
 
 describe("Hermes metadata fallback", () => {
+  it.each([
+    [installHermesPlugin, false],
+    [installHermesPlugin, true],
+    [updateHermesPlugin, false],
+    [updateHermesPlugin, true],
+  ] as const)("still refuses excluded scan releases without metadata (%s, force=%s)", async (action, force) => {
+    vi.useFakeTimers();
+    const run = vi.fn(async () => undefined);
+    const capture = createCapture(null, "Hermes Agent v0.20.6\n");
+    const pending = action({
+      run,
+      capture,
+      force,
+      fetchFn: async () => { throw new Error("offline"); },
+    }).catch((err: unknown) => err);
+    await vi.runAllTimersAsync();
+    const err = await pending;
+    expect(err).toMatchObject({ code: "PRECONDITION", message: expect.stringContaining("too old") });
+    expect((err as Error).message).toContain("v0.21.6");
+    expect(classifyInstallFailure(err)).toBe("host_too_old");
+    expect(headCalls(capture)).toEqual([["hermes", ["--version"]]]);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("falls back after three metadata fetch timeouts with 2s and 4s backoff", async () => {
     vi.useFakeTimers();
     const timeout = vi.spyOn(AbortSignal, "timeout");

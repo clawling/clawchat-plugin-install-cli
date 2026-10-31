@@ -47,6 +47,28 @@ function hermesRunners(options: InstallerOptions): { run: CommandRunner; capture
 
 const HERMES_FORCE_REPAIR_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes --force";
 const HERMES_INSTALL_COMMAND = "Run: npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes";
+const HERMES_EXCLUDED_HOST_RANGE = { minimum: "0.20.3", before: "0.21.0" } as const;
+
+export function assertHermesHostSupported(hostVersion: string): void {
+  if (
+    !isVersionOlder(hostVersion, HERMES_EXCLUDED_HOST_RANGE.minimum) &&
+    isVersionOlder(hostVersion, HERMES_EXCLUDED_HOST_RANGE.before)
+  ) {
+    throw new ClawchatError(
+      "PRECONDITION",
+      `Hermes version ${hostVersion} is too old for ClawChat: Hermes v0.20.3-v0.20.6 refuse the plugin at install scan. Ask the owner to upgrade Hermes to v0.21.6 or newer (hermes update), then rerun.`,
+    );
+  }
+}
+
+function parseOptionalHermesHostVersion(output: string): string | undefined {
+  try {
+    return parseHostVersion(output);
+  } catch {
+    // Metadata fallback and the pre-clone check tolerate unknown version output.
+    return undefined;
+  }
+}
 
 // --- Timeout / retry budget -------------------------------------------------
 // Designed so a healthy install finishes in well under a minute, and a dead
@@ -544,8 +566,9 @@ async function readHermesInstallerContext(options: InstallerOptions = {}, action
 
   progress?.("Checking Hermes version...");
   const versionOutput = await capture("hermes", ["--version"], { timeoutMs: HERMES_FAST_TIMEOUT_MS });
-  if (artifact) {
-    const hostVersion = parseHostVersion(versionOutput);
+  const hostVersion = artifact ? parseHostVersion(versionOutput) : parseOptionalHermesHostVersion(versionOutput);
+  if (hostVersion) assertHermesHostSupported(hostVersion);
+  if (artifact && hostVersion) {
     assertVersionSatisfiesRange(hostVersion, artifact.hostRequirement, "Hermes");
     progress?.(`Hermes version ok ${hostVersion}`);
   }
@@ -556,7 +579,7 @@ async function readHermesInstallerContext(options: InstallerOptions = {}, action
     // Only canonical installs can proceed without version comparisons. Keep
     // the original transport error for every update/skip decision needing it.
     if (!force && (installed || action === "update")) throw metadataError;
-    progress?.(`Remote plugin metadata unavailable; falling back to hermes plugins install ${HERMES_PLUGIN_SPEC} --enable (host clones the repository); skipping CLI version / host compatibility checks`);
+    progress?.(`Remote plugin metadata unavailable; falling back to hermes plugins install ${HERMES_PLUGIN_SPEC} --enable (host clones the repository); skipping CLI version / host compatibility checks from metadata; excluded scan versions remain blocked`);
   }
 
   return { run, capture, force, progress, artifact, installed };
@@ -568,6 +591,11 @@ async function installHermesFromRef(options: InstallerOptions, action: "installe
   const spec = options.ref as string;
   const parsed = parseHermesGitRef(spec);
 
+  // Every ref path reaches the host's install scan, so refuse excluded hosts first.
+  const versionOutput = await capture("hermes", ["--version"], { timeoutMs: HERMES_FAST_TIMEOUT_MS });
+  const hostVersion = parseOptionalHermesHostVersion(versionOutput);
+  if (hostVersion) assertHermesHostSupported(hostVersion);
+
   if (!parsed) {
     // Unrecognized ref (non-GitHub): hand the raw spec to the host installer.
     progress?.(`plugin installing ${spec}`);
@@ -575,7 +603,7 @@ async function installHermesFromRef(options: InstallerOptions, action: "installe
     return { kind: "plugin", target: "hermes", status: action, version: spec, previousVersion: null };
   }
 
-  // Clone first, then read plugin.yaml straight from the local checkout for the
+  // Read plugin.yaml straight from the local checkout for the
   // version + host-compat guard. The branch is fetched exactly once: the old
   // path also did a separate curl of raw.githubusercontent.com for the same
   // file, an extra network round-trip and failure point we no longer need.
@@ -601,8 +629,7 @@ async function installHermesFromRef(options: InstallerOptions, action: "installe
       }
       if (artifact) {
         version = artifact.version;
-        const hostVersion = parseHostVersion(await capture("hermes", ["--version"], { timeoutMs: HERMES_FAST_TIMEOUT_MS }));
-        assertVersionSatisfiesRange(hostVersion, artifact.hostRequirement, "Hermes");
+        assertVersionSatisfiesRange(parseHostVersion(versionOutput), artifact.hostRequirement, "Hermes");
       }
     },
   });
@@ -687,7 +714,7 @@ async function installHermesPluginCore(options: InstallerOptions = {}): Promise<
       status: installed ? "updated" : "installed",
       version: undefined,
       previousVersion: installed?.version ?? null,
-      detail: "fallback host install; remote metadata unavailable, CLI version / host compatibility checks skipped",
+      detail: "fallback host install; remote metadata unavailable, CLI version / host compatibility checks from metadata skipped; excluded scan versions remain blocked",
     };
   }
 
@@ -778,7 +805,7 @@ async function updateHermesPluginCore(options: InstallerOptions = {}): Promise<I
       status: installed ? "updated" : "installed",
       version: undefined,
       previousVersion: installed?.version ?? null,
-      detail: "fallback host install; remote metadata unavailable, CLI version / host compatibility checks skipped",
+      detail: "fallback host install; remote metadata unavailable, CLI version / host compatibility checks from metadata skipped; excluded scan versions remain blocked",
     };
   }
 

@@ -185,17 +185,19 @@ if (-not (Get-Command hermes -ErrorAction SilentlyContinue)) {
 hermes --version
 ```
 
-If the chosen command is still missing, stop and report it - don't switch
-targets. Then check whether ClawChat is already installed (`openclaw plugins
-list --json` or `hermes plugins list`). If it already shows ClawChat, skip step 2
-and run the [update](#update-or-repair-later) command instead, then go to step 3.
-If that update fails only because it cannot fetch plugin metadata from GitHub,
-the installed copy still works: go on to step 3 and update later.
+Hermes v0.12.0+ is supported **except v0.20.3–v0.20.6**: their install scan
+refuses ClawChat; the CLI stops with `plugin_install_failed:host_too_old`.
+Ask the owner to upgrade to Hermes v0.21.6+ (`hermes update`), then rerun.
+Don't try `--force`, other plugin versions or a direct host install.
 
-**Hermes with more than one profile** - confirm which profile you are on before
-installing or activating. Every ClawChat identity is keyed on the active
-`HERMES_HOME`, so a mis-targeted command pairs a *different* agent with no error
-and burns the single-use code:
+Missing command: stop and report; don't switch targets. Check `openclaw plugins
+list --json` or `hermes plugins list`. If ClawChat is installed, skip step 2:
+[update](#update-or-repair-later), then step 3. If that update fails only on a
+GitHub metadata fetch, the installed copy works: go on and update later.
+
+**Hermes with more than one profile** - confirm the profile before install or
+activation. Identity follows `HERMES_HOME`; a wrong profile silently pairs a
+different agent and burns the code:
 
 ```bash
 root="${HERMES_HOME:-$HOME/.hermes}"; case "$root" in */profiles/*) root="${root%/profiles/*}" ;; esac
@@ -218,11 +220,9 @@ hermes profile list
 
 `hermes` follows `-p <name>` -> a profile-scoped `HERMES_HOME` -> the sticky
 `active_profile` file -> default.
-`hermes profile create <name>` does *not* switch you into `<name>`. To target a
-specific profile, pin it on every command below - pass `--profile <name>` to
-this CLI (with `HERMES_HOME` unset or pointing at the Hermes root, never at the
-profile itself), and `-p <name>` plus an explicit `HERMES_HOME` to `hermes`
-calls:
+`hermes profile create <name>` does *not* switch profiles. Pin every command:
+CLI `--profile <name>` with `HERMES_HOME` unset or at the root, never the profile;
+`hermes` calls use `-p <name>` and an explicit `HERMES_HOME`:
 
 ```bash
 export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}/profiles/<name>"  # POSIX
@@ -235,11 +235,17 @@ $env:HERMES_HOME = Join-Path $root 'profiles\<name>'                # Windows
 
 ## 2. Install
 
-After this step, report its `CLAWCHAT_REPORT:` line and, on Hermes, the enable
-check below ([see the top](#install-clawchat-plugin)).
+Report `CLAWCHAT_REPORT:` and the Hermes enable result below
+([reporting](#install-clawchat-plugin)).
 
-OpenClaw (installs can be slow - wait patiently, don't retry just because it
-looks idle):
+**Node.js 18+ with npx is required for the CLI and OpenClaw.** On Hermes,
+if Node/npx is missing (`npx: command not found`, exit 127), report
+`plugin_install_failed:npx_missing` and install directly:
+`hermes plugins install clawling/clawchat-plugin-hermes-agent --enable` needs
+no Node. Continue with the enable check, then step 3; `hermes clawchat activate`
+also needs no Node (the one-shot scripts do).
+
+OpenClaw (can be slow; don't retry on idle):
 
 ```bash
 npx -y @clawling/clawchat-plugin-install-cli@latest install --target openclaw
@@ -251,31 +257,29 @@ Hermes:
 npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
-Each block is a separate terminal call, so a venv you activated in step 1 is
-gone here. If `npx` fails with `spawn hermes ENOENT`, put the venv's `bin`
-folder on `PATH` in the same call - the folder step 1 found, e.g.
+Step 1's venv activation doesn't persist across calls. For `spawn hermes ENOENT`,
+put its `bin` on `PATH` in the same call, e.g.
 `PATH="$HOME/.hermes/hermes-agent/venv/bin:$PATH" npx -y
 @clawling/clawchat-plugin-install-cli@latest install --target hermes`
-(`/opt/hermes/.venv/bin` in the Docker image; PowerShell: prepend the venv's
-`Scripts` folder to `$env:PATH` first, as in the step 1 *(Windows)* block, in
-the same call).
+(`/opt/hermes/.venv/bin` in Docker; PowerShell: prepend the venv's `Scripts`
+to `$env:PATH` as in step 1, in the same call).
 
-The CLI first reads `openclaw --version`: hosts from 2026.5.4 up to 2026.8.1 get the last
-compatible plugin, `2026.10.9-2`; older hosts stop with upgrade advice before
-config writes. If the version is unreadable, it reports that and uses the
-unpinned spec. An explicit `--target openclaw@<ref>` skips version selection.
+The CLI reads `openclaw --version`: 2026.5.4 to <2026.8.1 gets the last compatible
+plugin, `2026.10.9-2`; older hosts stop before config writes with upgrade advice.
+Unreadable versions are reported and use the unpinned spec.
+`--target openclaw@<ref>` skips version selection.
 
 The CLI delegates to the host's plugin manager (OpenClaw -> `openclaw plugins
 install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`,
-plus `--accept-capabilities` when advertised; Hermes -> remote metadata and
-version checks, then `hermes plugins install clawling/clawchat-plugin-hermes-agent`).
-If the metadata read fails in transit on a fresh or forced install, the CLI
-automatically uses that host install alone, skipping CLI version / host
-compatibility checks; an installed plugin without `--force` still needs
-metadata. Invalid metadata stops the CLI. The host's scan gate is unchanged.
+plus `--accept-capabilities` when advertised; Hermes -> version checks, then
+`hermes plugins install clawling/clawchat-plugin-hermes-agent`). If the metadata
+read fails in transit on a fresh or forced install, the CLI automatically uses
+that host install alone, skipping CLI version / host compatibility checks from
+metadata (excluded Hermes versions stay blocked). An installed plugin without
+`--force` still needs metadata. Invalid metadata stops the CLI. The host's scan gate is unchanged.
 
 **If the CLI still fails on a network / GitHub error**, use the direct host
-path below. Do not add `--force` to the CLI to solve a network failure.
+path below, never CLI `--force` for a network failure.
 
 ```bash
 # Hermes
@@ -286,15 +290,14 @@ openclaw plugins install @clawling/clawchat-plugin-openclaw --force --accept-cap
 openclaw plugins install @clawling/clawchat-plugin-openclaw@2026.10.9-2 --force --dangerously-force-unsafe-install
 ```
 
-On OpenClaw 2026.8+ both flags are required: `--force` confirms the npm (non-ClawHub)
-source, and `--accept-capabilities` consents to the plugin's declared capabilities.
-Without them the install is cancelled or rejected and the plugin never lands. Run
-`openclaw plugins install --help` if you are unsure which line your host wants.
+OpenClaw 2026.8+ requires both `--force` (npm/non-ClawHub source) and
+`--accept-capabilities` (declared capabilities); otherwise installation is refused.
+Unsure? `openclaw plugins install --help`.
 
-Direct Hermes installs still need GitHub. Never disable certificate verification;
-ask the owner for a reachable source if needed.
+Direct Hermes installs need GitHub; never disable certificate verification -
+ask the owner for a reachable source.
 
-Then continue to step 3.
+Next: Hermes, the enable check below; OpenClaw, step 3.
 
 **Hermes security scan:** current ClawChat is safe on Hermes v0.21.6+; older
 hosts may report *caution*. If blocked or asked `Install anyway?`, don't answer
@@ -303,16 +306,15 @@ the prompt or add `--force`; follow the [scanner case](#troubleshooting).
 **Hermes: check the plugin is enabled before you activate.** Run `hermes plugins
 list` (add `-p <name>` for a profile). Non-interactive **install** can print
 `Non-interactive install — skipping dependency install` and leave ClawChat
-disabled; this is normal. Run `hermes plugins enable clawchat` in the same
-profile: **enable prepares dependencies even non-interactively**, with no
-terminal or consent prompt required. Give your command tool at least 15 minutes
-or run it in the background and wait; never start another enable while it runs.
-For slow or failed preparation, see [dependency recovery](#hermes-dependencies).
-Do not activate until enabled; a scan-disabled plugin needs owner review first.
+disabled. Run `hermes plugins enable clawchat` in that profile:
+**enable prepares dependencies even non-interactively**, without a terminal or
+consent prompt. Allow at least 15 minutes or background it and wait; never run
+two enables at once. See [dependency recovery](#hermes-dependencies) for failures.
+Activate only when enabled; scan-disabled plugins need owner review first.
 
 ## 3. Activate (single-use code)
 
-After the activation command, report its result ([see the top](#install-clawchat-plugin)).
+Report activation's result ([reporting](#install-clawchat-plugin)).
 
 Use the code **once** - never invent, reuse, or retry a spent code. If this
 guide was served to you by the connection wiki, set the environment variable
@@ -468,11 +470,9 @@ and connected, no restart is needed - skip to step 5. If it does not, the
 restart below is required.
 
 **Required for Hermes, and for OpenClaw when that probe did not show the
-channel connected.** ClawChat's tools and live connection only become usable after the
-agent process **restarts** to load the newly installed plugin and activation
-credentials. Until then the agent cannot connect, so the plugin's automatic
-greeting never fires and the profile call in step 5 would fail - the ClawChat
-tools aren't registered yet.
+channel connected.** The agent must **restart** to load the plugin and activation
+credentials for ClawChat's tools, connection and automatic greeting; step 5's
+profile call needs those tools.
 
 **Hermes:** a plugin reload does not start the ClawChat connection. First wait
 ~30 s for a `clawchat state -> ready` log line after activation: a multiplexed
@@ -493,6 +493,11 @@ connected. Hermes: a `clawchat state -> ready` log line from *after*
 activation, then the plugin's greeting (step 5).
 If it did not restart:
 
+- **Hermes: container / no systemd.** The gateway is `hermes gateway run`, the
+  main process (`gateway install` says no service is needed). `hermes gateway
+  restart` runs it in the **foreground** ("Press Ctrl+C to stop"), never
+  returns - don't run restart from your terminal tool. The owner restarts the
+  container or that process (`-p <name>` for a profile).
 - **Hermes: "the default gateway is running as a profile multiplexer"** - it
   refuses per-profile restarts. Ask the owner before `hermes gateway restart`
   (no `-p`): it restarts every profile.
@@ -573,27 +578,26 @@ at step 5 (the user confirms the plugin's greeting reached ClawChat).
   config and runs `openclaw doctor --fix`, then reruns the installer. Never
   edit their config yourself.
 
-- **The host's scanner blocked the install (Hermes).** Current ClawChat is
-  safe on v0.21.6+; older hosts may give *caution* (often comment/doc matches).
-  Report `plugin_install_failed:scan_blocked`: the CLI already prints it;
-  report it yourself for direct host installs. A CLI `SCAN_BLOCKED` leaves
-  nothing installed/replaced. A terminal host may wait indefinitely at
-  `Install anyway? ... [y/N]`. Stop and relay the verdict, finding categories /
-  counts and `Scan:` source to the owner; require the source to be
-  `clawling/clawchat-plugin-hermes-agent`. Ask:
+- **The host's scanner blocked the install (Hermes).** For `host_too_old`, use
+  step 1's Hermes upgrade advice. Otherwise report `plugin_install_failed:scan_blocked`
+  (the CLI prints it; report it yourself for direct installs). `SCAN_BLOCKED`
+  leaves nothing installed/replaced. At `Install anyway? ... [y/N]`, stop.
+  Relay the report's actual `Scan:` source (must be
+  `clawling/clawchat-plugin-hermes-agent`), Hermes version, verdict and finding
+  categories/counts; don't assume counts or file types. For *caution*, ask:
   "This is the official ClawChat plugin from `clawling/clawchat-plugin-hermes-agent`.
-  The scan flagged `<categories/counts>`, mostly matches in comments and docs
-  (use the report's actual findings). Do you approve continuing?"
+  Hermes `<version>` reports `<verdict>` with `<categories/counts>`.
+  Do you approve continuing?"
   “这是 ClawChat 官方插件，来源 `clawling/clawchat-plugin-hermes-agent`。
-  扫描命中 `<类别/数量>`，多为注释和文档匹配（以报告为准）。您是否同意继续？”
+  Hermes `<版本>` 报告 `<判定>`，发现 `<类别/数量>`。您是否同意继续？”
 
   Continue only if the owner explicitly approves: at the prompt the **owner**
   answers `y`; after the CLI stops or in an agent-only terminal, run
   `hermes plugins install clawling/clawchat-plugin-hermes-agent --force --enable`
   only when the owner explicitly tells you to. This accepts *caution*;
-  *dangerous* cannot be overridden — report it to maintainers. Never override it on your own:
-  don't type `y` yourself, don't add `--force` unasked, or switch to a mirror /
-  unreviewed source. **Unattended install**: stop and report rather than forcing.
+  *dangerous* is refused, even with approval — report it to maintainers.
+  Never override it on your own: don't type `y` yourself, add `--force` unasked,
+  or use a mirror / unreviewed source. **Unattended install**: stop and report rather than forcing.
 
 - <a id="hermes-dependencies"></a>**Hermes dependency preparation is slow / fails.**
   `enable` resolves the host and all enabled plugins with `uv lock`, then

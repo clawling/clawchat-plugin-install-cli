@@ -53,7 +53,9 @@ success signal.
    with automatic Hermes fallback to host cloning when metadata transport
    fails on a fresh/forced install, plus a manual host path if the CLI still
    fails. Hermes enablement prepares dependencies non-interactively; the guide
-   gives command timeout, index, TLS and network recovery instructions.
+   gives command timeout, index, TLS and network recovery instructions. The CLI
+   requires Node.js 18+ with npx; Hermes without Node uses direct host installation,
+   then the enable check and activation, which need no Node.
 3. **Activate (single-use code)** — invoke the target plugin's activation command
    exactly once (Hermes v0.12.0, which has no `hermes clawchat` command, is
    sent to the Hermes plugin's activation guide), including the
@@ -66,12 +68,14 @@ success signal.
 4. **Restart the agent — the user must do this** — OpenClaw probes first
    (`openclaw channels status --probe`): activation hot-reloads the channel, so
    when the probe shows it running and connected the guide skips the restart.
-   Otherwise (always for Hermes) the plugin's tools and live connection only
-   exist after the host process restarts. The Hermes "restart
-   scheduled" line is not proof (the restart runs detached, unchecked), so the
+   Hermes first waits for readiness (including multiplexed profile pickup);
+   otherwise the host process must restart to load the plugin and credentials.
+   The Hermes "restart scheduled" line is not proof (the restart runs detached, unchecked), so the
    step ends by verifying the gateway came back after activation, with branches
    for a multiplexed gateway, a profile with no gateway service, a second
-   Windows gateway, and a restart waiting on open sessions.
+   Windows gateway, and a restart waiting on open sessions. In containers without
+   systemd, restart can run in the foreground indefinitely; the owner restarts
+   the container or the process running `hermes gateway run` instead.
 5. **Confirm the greeting arrived** — optionally call
    `clawchat_update_account_profile`, then have the user confirm the plugin's
    own greeting reached their ClawChat app.
@@ -88,8 +92,9 @@ Then:
   agent to override it. Current ClawChat is safe on Hermes v0.21.6+; older hosts
   may give *caution*
   (with a `[y/N]` prompt on a terminal). The agent relays the actual finding
-  categories/counts and official source to the owner for approval, and uses
-  the host's `--force` only on the owner's explicit instruction. Unattended
+  categories/counts, Hermes version, verdict and official `Scan:` source to the
+  owner for caution approval; dangerous is refused. It uses the host's `--force`
+  only on the owner's explicit instruction. Unattended
   installs stop and report.
 - **Update or repair later** — the `update --target <target>` command, plus
   `--force` as the documented reinstall/repair path for an already-installed
@@ -98,6 +103,11 @@ Then:
   guide never offers it for a failed install.
 
 `install.md` asks wiki-routed agents holding a pairing code to forward fixed progress reasons to `/hello` once per reason, best-effort.
+
+Hermes support follows the plugin's minimum (currently v0.12.0), excluding
+v0.20.3–v0.20.6: their install scan refuses ClawChat. The CLI checks this before
+install/update, including metadata fallback and before any `@ref` install, and
+reports `host_too_old` with advice to ask the owner for v0.21.6+ (`hermes update`).
 
 ## Editing rules
 
