@@ -122,6 +122,20 @@ describe("addOpenClawPluginLoadPath", () => {
 
   const PLUGIN_DIR = path.join("/home/alice/.qclaw/npm/projects", `${PROJECT_DIR_PREFIX}0123456789`, "node_modules", "@clawling", "clawchat-plugin-openclaw");
 
+  it.skipIf(process.platform === "win32")("atomically replaces a symlink target, preserving mode without temp files", () => {
+    const real = path.join(dir, "real.json");
+    fs.writeFileSync(real, "{}");
+    fs.chmodSync(real, 0o640);
+    const inode = fs.statSync(real).ino;
+    fs.symlinkSync(real, configPath);
+    expect(addOpenClawPluginLoadPath(configPath, PLUGIN_DIR)).toBe("added");
+    expect(fs.lstatSync(configPath).isSymbolicLink()).toBe(true);
+    expect(fs.statSync(real).ino).not.toBe(inode);
+    expect(fs.statSync(real).mode & 0o777).toBe(0o640);
+    expect(readConfig(real).plugins.load.paths).toEqual([PLUGIN_DIR]);
+    expect(fs.readdirSync(dir).sort()).toEqual(["openclaw.json", "real.json"]);
+  });
+
   it("appends the plugin directory after QClaw's own entries and keeps the rest of the config", () => {
     fs.writeFileSync(
       configPath,

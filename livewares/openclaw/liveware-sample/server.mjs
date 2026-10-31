@@ -32,6 +32,58 @@ const root = path.resolve(dir, "..");
 const startPort = Number(arg("port", "43110"));
 const agentId = String(arg("agent-id", "")).trim();
 
+// State is acknowledged only after the file and its rename are durable.
+function writeFileAtomic(file, text, cb) {
+  const parent = path.dirname(file);
+  const tmp = path.join(parent, `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`);
+  let fd;
+  let created = false;
+  function fail(err) {
+    const cleanup = () => {
+      if (created) fs.unlink(tmp, () => cb(err));
+      else cb(err);
+    };
+    if (fd !== undefined) {
+      const closing = fd;
+      fd = undefined;
+      fs.close(closing, cleanup);
+    } else cleanup();
+  }
+  function syncDirectory() {
+    if (process.platform === "win32") return cb(null);
+    const unsupported = (err) => err && ["EINVAL", "ENOTSUP", "EOPNOTSUPP", "EISDIR"].includes(err.code);
+    fs.open(parent, "r", (err, dirFd) => {
+      if (err) return cb(unsupported(err) ? null : err);
+      fs.fsync(dirFd, (syncErr) => {
+        fs.close(dirFd, (closeErr) => {
+          const error = syncErr && !unsupported(syncErr) ? syncErr : closeErr;
+          cb(unsupported(error) ? null : error);
+        });
+      });
+    });
+  }
+  fs.open(tmp, "wx", 0o666, (err, openedFd) => {
+    if (err) return fail(err);
+    fd = openedFd;
+    created = true;
+    fs.writeFile(fd, text, "utf8", (writeErr) => {
+      if (writeErr) return fail(writeErr);
+      fs.fsync(fd, (syncErr) => {
+        if (syncErr) return fail(syncErr);
+        fs.close(fd, (closeErr) => {
+          if (closeErr) return fail(closeErr);
+          fd = undefined;
+          fs.rename(tmp, file, (renameErr) => {
+            if (renameErr) return fail(renameErr);
+            created = false;
+            syncDirectory();
+          });
+        });
+      });
+    });
+  });
+}
+
 function stateWithMeta(state) {
   // state.json is agent-writable and the page renders deep links from this
   // field — only the supervisor-provided CLI value may populate it, so strip
@@ -344,22 +396,14 @@ function putData(req, res) {
       res.writeHead(400, { "content-type": "application/json" }).end('{"error":"expected a JSON object"}');
       return;
     }
-    const tmp = `${DATA_FILE}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFile(tmp, JSON.stringify(parsed, null, 2) + "\n", (err) => {
+    writeFileAtomic(DATA_FILE, JSON.stringify(parsed, null, 2) + "\n", (err) => {
       if (err) {
         res.writeHead(500, { "content-type": "application/json" }).end('{"error":"write failed"}');
         return;
       }
-      fs.rename(tmp, DATA_FILE, (err2) => {
-        if (err2) {
-          fs.unlink(tmp, () => {});
-          res.writeHead(500, { "content-type": "application/json" }).end('{"error":"write failed"}');
-          return;
-        }
-        selfWriteUntil = Date.now() + 500;
-        broadcast("data", {});
-        res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
-      });
+      selfWriteUntil = Date.now() + 500;
+      broadcast("data", {});
+      res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
     });
   });
 }
@@ -382,19 +426,12 @@ function postStage(req, res) {
       return res.writeHead(409, { "content-type": "application/json" }).end('{"error":"not in personalized stage"}');
     }
     const next = { ...state, stage: "kept" };
-    const tmp = `${STATE_FILE}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFile(tmp, JSON.stringify(next, null, 2) + "\n", (err) => {
+    writeFileAtomic(STATE_FILE, JSON.stringify(next, null, 2) + "\n", (err) => {
       if (err) return res.writeHead(500, { "content-type": "application/json" }).end('{"error":"write failed"}');
-      fs.rename(tmp, STATE_FILE, (err2) => {
-        if (err2) {
-          fs.unlink(tmp, () => {});
-          return res.writeHead(500, { "content-type": "application/json" }).end('{"error":"write failed"}');
-        }
-        capEventsFileIfNeeded();
-        fs.appendFile(EVENTS_FILE, JSON.stringify({ ts: Date.now(), type: "keep", payload: { tool: next.tool ?? null } }) + "\n", () => {});
-        broadcast("state", stateWithMeta(next)); // the watcher's echo is harmless
-        res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
-      });
+      capEventsFileIfNeeded();
+      fs.appendFile(EVENTS_FILE, JSON.stringify({ ts: Date.now(), type: "keep", payload: { tool: next.tool ?? null } }) + "\n", () => {});
+      broadcast("state", stateWithMeta(next)); // the watcher's echo is harmless
+      res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
     });
   });
 }

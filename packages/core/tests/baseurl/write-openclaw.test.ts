@@ -19,6 +19,55 @@ function readConfig() {
 }
 
 describe("writeOpenClawBaseUrls", () => {
+  it.each(["{bad json", "[]", "null", "42", '"text"'])("refuses invalid config %s without changing its bytes", (raw) => {
+    const file = path.join(home, ".openclaw", "openclaw.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, raw);
+    expect(() => writeOpenClawBaseUrls({ baseUrl: "https://example.invalid" }, { homeDir: home })).toThrow(
+      expect.objectContaining({ code: "PRECONDITION" }),
+    );
+    expect(fs.readFileSync(file, "utf8")).toBe(raw);
+    expect(fs.readdirSync(path.dirname(file))).toEqual(["openclaw.json"]);
+  });
+
+  it("accepts whitespace as an empty config", () => {
+    const file = path.join(home, ".openclaw", "openclaw.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, " \n\t");
+    writeOpenClawBaseUrls({ baseUrl: "https://example.invalid" }, { homeDir: home });
+    expect(readConfig().channels["clawchat-plugin-openclaw"].baseUrl).toBe("https://example.invalid");
+  });
+
+  it("refuses a config that cannot be read", () => {
+    const file = path.join(home, ".openclaw", "openclaw.json");
+    fs.mkdirSync(file, { recursive: true });
+    expect(() => writeOpenClawBaseUrls({ baseUrl: "https://example.invalid" }, { homeDir: home })).toThrow(
+      expect.objectContaining({ code: "PRECONDITION" }),
+    );
+    expect(fs.statSync(file).isDirectory()).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")("creates a missing config with mode 0600", () => {
+    writeOpenClawBaseUrls({ baseUrl: "https://example.invalid" }, { homeDir: home });
+    expect(fs.statSync(path.join(home, ".openclaw", "openclaw.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === "win32")("replaces the symlink target, preserves its mode and leaves no temp files", () => {
+    const file = path.join(home, ".openclaw", "openclaw.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const real = path.join(home, "real.json");
+    fs.writeFileSync(real, "{}");
+    fs.chmodSync(real, 0o640);
+    const inode = fs.statSync(real).ino;
+    fs.symlinkSync(real, file);
+    writeOpenClawBaseUrls({ baseUrl: "https://example.invalid" }, { homeDir: home });
+    expect(fs.lstatSync(file).isSymbolicLink()).toBe(true);
+    expect(fs.statSync(real).ino).not.toBe(inode);
+    expect(fs.statSync(real).mode & 0o777).toBe(0o640);
+    expect(JSON.parse(fs.readFileSync(real, "utf8")).channels).toBeDefined();
+    expect(fs.readdirSync(home).sort()).toEqual([".openclaw", "real.json"]);
+    expect(fs.readdirSync(path.dirname(file))).toEqual(["openclaw.json"]);
+  });
   it("creates the config file and channel when absent", () => {
     writeOpenClawBaseUrls(
       { baseUrl: "https://api.test:39001", websocketUrl: "wss://ws.test:39002/ws", mediaBaseUrl: "https://m.test:39003" },

@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { getOpenClawConfigPath } from "../auth/openclaw";
 import { OPENCLAW_PLUGIN_SPEC } from "../config";
+import { resolveWriteTarget, writeFileAtomicSync } from "../fs/atomic-write";
 import type { CommandCapturer } from "./run";
 import type { InstallProgressReporter } from "./types";
 
@@ -202,7 +203,7 @@ export function addOpenClawPluginLoadPath(configPath: string, pluginDir: string)
   ];
   plugins.load = load;
   config.plugins = plugins;
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeFileAtomicSync(resolveWriteTarget(configPath), `${JSON.stringify(config, null, 2)}\n`);
   return "added";
 }
 

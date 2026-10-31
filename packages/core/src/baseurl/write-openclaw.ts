@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getOpenClawConfigPath } from "../auth/openclaw";
 import { OPENCLAW_CHANNEL } from "../config";
+import { ClawchatError } from "../errors";
+import { resolveWriteTarget, writeFileAtomicSync } from "../fs/atomic-write";
 
 export interface OpenClawBaseUrls {
   baseUrl?: string;
@@ -22,13 +24,23 @@ export function writeOpenClawBaseUrls(values: OpenClawBaseUrls, options: WriteOp
   }
   const configPath = getOpenClawConfigPath({ homeDir: options.homeDir });
   let config: Record<string, any> = {};
+  let raw = "";
   try {
-    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    if (parsed && typeof parsed === "object") {
-      config = parsed;
+    raw = fs.readFileSync(configPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new ClawchatError("PRECONDITION", "Cannot read OpenClaw config; refusing to replace it.");
     }
-  } catch {
-    config = {};
+  }
+  if (raw.trim() !== "") {
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch {
+      throw new ClawchatError("PRECONDITION", "OpenClaw config is invalid JSON; refusing to replace it.");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new ClawchatError("PRECONDITION", "OpenClaw config must be a JSON object; refusing to replace it.");
+    }
+    config = parsed;
   }
   if (!config.channels || typeof config.channels !== "object") {
     config.channels = {};
@@ -40,5 +52,5 @@ export function writeOpenClawBaseUrls(values: OpenClawBaseUrls, options: WriteOp
     config.channels[OPENCLAW_CHANNEL][key] = value;
   }
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeFileAtomicSync(resolveWriteTarget(configPath), `${JSON.stringify(config, null, 2)}\n`);
 }

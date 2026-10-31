@@ -9,6 +9,49 @@ vi.mock("node:child_process", () => ({
 
 const spawnSyncMock = vi.mocked(spawnSync);
 
+describe("credential arguments at display boundaries", () => {
+  const secret = "PLACEHOLDER-ACTIVATE-CODE-0000";
+  beforeEach(() => spawnSyncMock.mockReset());
+
+  it.each([runCommand, captureCommand])("redacts argv and child echoes on nonzero exit (%s)", async (run) => {
+    spawnSyncMock.mockReturnValue({ status: 1, stdout: `stdout ${secret}`, stderr: `stderr ${secret}` } as ReturnType<typeof spawnSync>);
+    let message = "";
+    try { await run("hermes", ["clawchat", "activate", secret], { secretArgs: [2] }); } catch (err) { message = (err as Error).message; }
+    expect(message.includes(secret)).toBe(false);
+    expect(message).toContain("<redacted>");
+    expect(message).toContain("stdout <redacted>");
+    expect(message).toContain("stderr <redacted>");
+    expect(spawnSyncMock.mock.calls[0]![1]![2]).toBe(secret);
+  });
+
+  it.each([runCommand, captureCommand])("redacts timeout and spawn messages (%s)", async (run) => {
+    for (const code of ["ETIMEDOUT", "EIO"]) {
+      spawnSyncMock.mockReturnValue({ error: Object.assign(new Error(`failed ${secret}`), { code }), status: null } as unknown as ReturnType<typeof spawnSync>);
+      let message = "";
+      try { await run("hermes", ["clawchat", "activate", secret], { secretArgs: [2], timeoutMs: 1, timeoutHint: `hint ${secret}` }); } catch (err) { message = (err as Error).message; }
+      expect(message.includes(secret)).toBe(false);
+      expect(message).toContain("<redacted>");
+    }
+  });
+
+  it("redacts successful forwarded output and captures stdout instead of inheriting it", async () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: `activated ${secret}` } as ReturnType<typeof spawnSync>);
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      await runCommand("hermes", ["clawchat", "activate", secret], { secretArgs: [2] });
+      expect(write).toHaveBeenCalledWith("activated <redacted>");
+      expect(spawnSyncMock.mock.calls[0]![2]?.stdio).toEqual(["ignore", "pipe", "pipe"]);
+    } finally { write.mockRestore(); }
+  });
+
+  it("never echoes a rejected Windows credential argument", () => {
+    let message = "";
+    try { prepareArgs([`${secret}%`], "win32", [0]); } catch (err) { message = (err as Error).message; }
+    expect(message.includes(secret)).toBe(false);
+    expect(message).toContain("<redacted>");
+  });
+});
+
 describe("runCommand", () => {
   beforeEach(() => {
     spawnSyncMock.mockReset();

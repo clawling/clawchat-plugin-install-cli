@@ -1,0 +1,18 @@
+[
+  { "file": "packages/core/src/fs/atomic-write.ts", "match": "io.openSync(tmp,", "count": 1, "reason": "Core atomic helper exclusively creates a same-directory temp before file fsync and rename." },
+  { "file": "packages/core/src/fs/atomic-write.ts", "match": "io.writeFileSync(fd,", "count": 1, "reason": "Core atomic helper writes the temp descriptor and fsyncs it before rename." },
+  { "file": "packages/core/src/fs/atomic-write.ts", "match": "io.openSync(dir,", "count": 1, "reason": "Core atomic helper opens the containing directory for fsync after rename." },
+  { "file": "examples/cloud-agent/agent.mjs", "match": "io.openSync(tmp,", "count": 1, "reason": "Standalone container copies only agent.mjs; inline helper exclusively creates a same-directory temp." },
+  { "file": "examples/cloud-agent/agent.mjs", "match": "io.writeFileSync(fd,", "count": 1, "reason": "Standalone atomic helper writes and fsyncs its temp descriptor before rename." },
+  { "file": "examples/cloud-agent/agent.mjs", "match": "io.openSync(dir,", "count": 1, "reason": "Standalone atomic helper opens the directory for fsync after rename." },
+  { "file": "livewares/openclaw/liveware-sample/server.mjs", "match": "fs.open(tmp,", "count": 1, "reason": "Flat standalone Liveware inline helper exclusively creates a same-directory temp before fsync and rename." },
+  { "file": "livewares/openclaw/liveware-sample/server.mjs", "match": "fs.writeFile(fd,", "count": 1, "reason": "Liveware atomic helper writes a temp descriptor and fsyncs it before rename." },
+  { "file": "livewares/openclaw/liveware-sample/server.mjs", "match": "fs.open(parent,", "count": 1, "reason": "Liveware atomic helper opens the directory for fsync before acknowledging success." },
+  { "file": "livewares/openclaw/liveware-sample/server.mjs", "match": "fs.writeFileSync(EVENTS_FILE,", "count": 1, "reason": "events.jsonl is a disposable interaction log; truncation is best-effort and read failure can discard it, not authority-bearing state." },
+  { "file": "livewares/openclaw/liveware-sample/server.mjs", "match": "fs.appendFile(EVENTS_FILE, JSON.stringify", "count": 1, "reason": "Stage interaction event is a best-effort disposable log entry; state success depends only on the atomic state write." },
+  { "file": "livewares/openclaw/liveware-sample/server.mjs", "match": "fs.appendFile(EVENTS_FILE, line", "count": 1, "reason": "Page interactions append to disposable events.jsonl, a log whose unreadable contents may be discarded." },
+  { "file": "scripts/build-livewares-manifest.mjs", "match": "fs.writeFileSync(MANIFEST_PATH,", "count": 1, "reason": "Development-only generated manifest validated by --check; never runs on end-user machines." },
+  { "file": "scripts/build-skills-manifest.mjs", "match": "fs.writeFileSync(MANIFEST_PATH,", "count": 1, "reason": "Development-only generated manifest validated by --check; never runs on end-user machines." },
+  { "file": "scripts/sync-skills.mjs", "match": "fs.copyFileSync(path.join(skillsDir, entry.path), dest)", "count": 1, "reason": "Development-only skill snapshot copy into plugin repositories, not runtime state." },
+  { "file": "scripts/sync-skills.mjs", "match": "fs.copyFileSync(path.join(skillsDir, \"manifest.json\"),", "count": 1, "reason": "Development-only manifest snapshot copy into plugin repositories, not runtime state." }
+]

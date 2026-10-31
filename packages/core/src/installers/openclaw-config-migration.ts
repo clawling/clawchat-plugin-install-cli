@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getOpenClawConfigPath } from "../auth/openclaw";
 import { OPENCLAW_CHANNEL } from "../config";
+import { resolveWriteTarget, writeFileAtomicSync } from "../fs/atomic-write";
 
 /** Old OpenClaw ClawChat plugin id / channel key (pre-rename). */
 export const OLD_OPENCLAW_CLAWCHAT_ID = "openclaw-clawchat";
@@ -179,6 +180,6 @@ export function applyLegacyOpenClawConfigMigration(
   }
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeFileAtomicSync(resolveWriteTarget(configPath), `${JSON.stringify(config, null, 2)}\n`);
   return changes;
 }

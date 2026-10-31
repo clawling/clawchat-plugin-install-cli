@@ -3,6 +3,8 @@ import { ClawchatError } from "../errors";
 
 /** Per-call execution controls. */
 export interface CommandOptions {
+  /** argv indexes containing credentials, such as a single-use activation code. */
+  secretArgs?: readonly number[];
   /** Hard wall-clock cap (ms). On expiry the child is killed and a TIMEOUT error is thrown. */
   timeoutMs?: number;
   /** Advice appended to a TIMEOUT error. */
@@ -113,24 +115,37 @@ function quoteWindowsArg(value: string): string {
 export function prepareArgs(
   args: readonly string[],
   platform: NodeJS.Platform = process.platform,
+  secretArgs: readonly number[] = [],
 ): string[] {
   if (!usesShell(platform)) {
     return [...args];
   }
-  return args.map((arg) => {
+  return args.map((arg, index) => {
     if (WINDOWS_UNQUOTABLE.test(arg)) {
-      throw new ClawchatError("SUBPROCESS", `unsafe shell metacharacter in command input: ${arg}`);
+      const display = secretArgs.includes(index) ? "<redacted>" : redactSecrets(arg, args, { secretArgs });
+      throw new ClawchatError("SUBPROCESS", `unsafe shell metacharacter in command input: ${display}`);
     }
     return quoteWindowsArg(arg);
   });
 }
 
-function formatCommand(cmd: string, args: readonly string[]): string {
-  return [cmd, ...args].join(" ");
+function redactSecrets(text: string, args: readonly string[], options?: CommandOptions): string {
+  const secrets = (options?.secretArgs ?? []).map(index => args[index]).filter((value): value is string => Boolean(value));
+  // Longest first so a shorter credential cannot expose the tail of another.
+  for (const secret of secrets.sort((a, b) => b.length - a.length)) {
+    text = text.split(secret).join("<redacted>");
+  }
+  return text;
+}
+
+function formatCommand(cmd: string, args: readonly string[], options?: CommandOptions): string {
+  const displayArgs = args.map((arg, index) => options?.secretArgs?.includes(index)
+    ? "<redacted>" : redactSecrets(arg, args, options));
+  return [cmd, ...displayArgs].join(" ");
 }
 
 function spawnOptions(capture: boolean, options?: CommandOptions): SpawnSyncOptions {
-  const pipeStdout = capture || options?.collectStdout === true;
+  const pipeStdout = capture || options?.collectStdout === true || Boolean(options?.secretArgs?.length);
   const base: SpawnSyncOptions = {
     shell: usesShell(process.platform),
     stdio: pipeStdout ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "pipe"],
@@ -154,11 +169,11 @@ function spawnError(cmd: string, args: readonly string[], error: Error, options?
   if (code === "ETIMEDOUT") {
     return new ClawchatError(
       "TIMEOUT",
-      `${formatCommand(cmd, args)} did not finish within ${(options?.timeoutMs ?? 0) / 1000}s and was stopped (SIGKILL).` +
-        (options?.timeoutHint ? ` ${options.timeoutHint}` : ""),
+      `${formatCommand(cmd, args, options)} did not finish within ${(options?.timeoutMs ?? 0) / 1000}s and was stopped (SIGKILL).` +
+        (options?.timeoutHint ? ` ${redactSecrets(options.timeoutHint, args, options)}` : ""),
     );
   }
-  return new ClawchatError("SUBPROCESS", `${cmd} failed: ${error.message}`);
+  return new ClawchatError("SUBPROCESS", `${cmd} failed: ${redactSecrets(error.message, args, options)}`);
 }
 
 /**
@@ -172,28 +187,29 @@ function nonZeroExitError(
   status: number | null,
   stderr: string | Buffer | null | undefined,
   stdout: string | Buffer | null | undefined,
+  options?: CommandOptions,
 ): ClawchatError {
-  const detail = [normalizeOutput(stderr).trim(), normalizeOutput(stdout).trim()]
+  const detail = [stderr, stdout].map(value => redactSecrets(normalizeOutput(value), args, options).trim())
     .filter((part) => part !== "")
     .join("\n");
   return new ClawchatError(
     "SUBPROCESS",
-    `${formatCommand(cmd, args)} failed with exit code ${status}${detail ? `: ${detail}` : ""}`,
+    `${formatCommand(cmd, args, options)} failed with exit code ${status}${detail ? `: ${detail}` : ""}`,
   );
 }
 
 export async function runCommand(cmd: string, args: readonly string[], options?: CommandOptions): Promise<void> {
   assertSafeCommandName(cmd);
 
-  // Error messages below quote the ORIGINAL args, not the platform-prepared
-  // ones — a Windows user should read the path they passed, not our quoting.
-  const result = spawnSync(cmd, prepareArgs(args), spawnOptions(false, options));
+  // Preserve transport argv; mask credential arguments only for display.
+  const result = spawnSync(cmd, prepareArgs(args, process.platform, options?.secretArgs), spawnOptions(false, options));
   if (result.error) {
     throw spawnError(cmd, args, result.error, options);
   }
-  const stdout = options?.collectStdout === true ? normalizeOutput(result.stdout) : "";
+  const stdout = options?.collectStdout === true || options?.secretArgs?.length
+    ? redactSecrets(normalizeOutput(result.stdout), args, options) : "";
   if (result.status !== 0) {
-    throw nonZeroExitError(cmd, args, result.status, result.stderr, stdout);
+    throw nonZeroExitError(cmd, args, result.status, result.stderr, stdout, options);
   }
   if (stdout !== "") {
     process.stdout.write(stdout);
@@ -203,12 +219,12 @@ export async function runCommand(cmd: string, args: readonly string[], options?:
 export async function captureCommand(cmd: string, args: readonly string[], options?: CommandOptions): Promise<string> {
   assertSafeCommandName(cmd);
 
-  const result = spawnSync(cmd, prepareArgs(args), spawnOptions(true, options));
+  const result = spawnSync(cmd, prepareArgs(args, process.platform, options?.secretArgs), spawnOptions(true, options));
   if (result.error) {
     throw spawnError(cmd, args, result.error, options);
   }
   if (result.status !== 0) {
-    throw nonZeroExitError(cmd, args, result.status, result.stderr, result.stdout);
+    throw nonZeroExitError(cmd, args, result.status, result.stderr, result.stdout, options);
   }
-  return normalizeOutput(result.stdout);
+  return redactSecrets(normalizeOutput(result.stdout), args, options);
 }

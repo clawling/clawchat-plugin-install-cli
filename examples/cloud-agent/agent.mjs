@@ -7,9 +7,11 @@
 //   node agent.mjs run     激活 + 常驻（默认）
 //
 // 凭据只从 env 读：CLAWCHAT_CONNECT_CODE。永不落盘、永不打印。
-import { createHash, randomInt } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { createHash, randomInt, randomBytes } from 'node:crypto';
+import * as fs from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, realpathSync, lstatSync, readlinkSync } from 'node:fs';
+import { dirname, basename, join, isAbsolute, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { hostname } from 'node:os';
 
 const REST = process.env.CLAWCHAT_REST || 'https://app.clawling.com';
@@ -55,7 +57,67 @@ function loadState() {
 }
 function saveState(s) {
   mkdirSync(dirname(STATE_PATH), { recursive: true });
-  writeFileSync(STATE_PATH, JSON.stringify(s, null, 2));
+  writeFileAtomicSync(resolveWriteTarget(STATE_PATH), JSON.stringify(s, null, 2));
+}
+
+// Replace what a symlinked state path points at, not the link itself
+// (dangling links are followed hop by hop, as the kernel would).
+export function resolveWriteTarget(target) {
+  let current = target;
+  for (let hops = 0; hops < 40; hops += 1) {
+    try { return realpathSync.native(current); } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    const parent = realpathSync.native(dirname(current));
+    const leaf = join(parent, basename(current));
+    let stat;
+    try { stat = lstatSync(leaf); } catch (err) {
+      if (err.code === 'ENOENT') return leaf;
+      throw err;
+    }
+    if (!stat.isSymbolicLink()) return leaf;
+    const link = readlinkSync(leaf);
+    current = isAbsolute(link) ? link : `${parent}${sep}${link}`;
+  }
+  throw new Error(`too many symbolic links resolving ${target}`);
+}
+
+// Self-contained: the container copies only agent.mjs.
+export function writeFileAtomicSync(dest, data, io = fs) {
+  let mode = 0o600;
+  try { mode = io.statSync(dest).mode & 0o777; } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  const dir = dirname(dest);
+  const tmp = join(dir, `.${basename(dest)}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`);
+  let fd;
+  let created = false;
+  try {
+    fd = io.openSync(tmp, 'wx', mode);
+    created = true;
+    io.fchmodSync(fd, mode);
+    io.writeFileSync(fd, data, 'utf8');
+    io.fsyncSync(fd);
+    io.closeSync(fd);
+    fd = undefined;
+    io.renameSync(tmp, dest);
+  } catch (err) {
+    if (fd !== undefined) {
+      try { io.closeSync(fd); } catch { /* preserve original error */ }
+    }
+    if (created) {
+      try { io.rmSync(tmp, { force: true }); } catch { /* preserve original error */ }
+    }
+    throw err;
+  }
+  if (process.platform !== 'win32') {
+    try {
+      const dirFd = io.openSync(dir, 'r');
+      try { io.fsyncSync(dirFd); } finally { io.closeSync(dirFd); }
+    } catch (err) {
+      if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'EISDIR'].includes(err.code)) throw err;
+    }
+  }
 }
 
 // ── §2.6 message_id：`msg-` + 26 字符 Crockford base32 ULID，契约级 ──────────
@@ -545,6 +607,8 @@ function connect(state, onReady) {
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+if (isMain) {
 const mode = process.argv[2] ?? 'run';
 const code = process.env.CLAWCHAT_CONNECT_CODE;
 
@@ -642,3 +706,4 @@ function start() {
   };
 }
 start();
+}
