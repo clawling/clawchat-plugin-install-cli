@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClawchatError, installHermesPlugin, markActivationFailure } from "@clawling/clawchat-plugin-install-core";
 import { runClawchatCli } from "../src/cli";
+import { assertNoSecrets, PLACEHOLDER_SECRETS } from "./helpers/assert-no-secrets";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -350,7 +351,7 @@ describe("runClawchatCli progress reports", () => {
 
   it.each([false, true])("keeps placeholder secrets and paths out of failure reports (activation: %s)", async (activation) => {
     const io = createIo();
-    const err = new ClawchatError("SUBPROCESS", "failed sk-test-SECRET /home/someone/x");
+    const err = new ClawchatError("SUBPROCESS", `failed ${Object.values(PLACEHOLDER_SECRETS).join(" ")} /home/someone/x`);
     expect(await runClawchatCli(["install", "--target", "hermes"], {
       ...io.io,
       installHermesPlugin: async () => { throw activation ? markActivationFailure(err) : err; },
@@ -358,7 +359,7 @@ describe("runClawchatCli progress reports", () => {
     const reports = `${io.stdout}${io.stderr}`.split("\n").filter((line) => line.startsWith("CLAWCHAT_REPORT: "));
     expect(reports).toContain(`CLAWCHAT_REPORT: plugin_${activation ? "activate" : "install"}_failed:${activation ? "other" : "host_error"}`);
     for (const report of reports) {
-      expect(report).not.toContain("sk-test-SECRET");
+      assertNoSecrets({ report });
       expect(report).not.toContain("/home/someone/x");
     }
     expect(io.stderr.startsWith(`${err.message}\n`)).toBe(true);

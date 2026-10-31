@@ -207,6 +207,22 @@ describe("applyLegacyOpenClawConfigMigration (fs)", () => {
     expect(fs.readFileSync(configPath(), "utf8")).toBe(`${JSON.stringify(cfg, null, 2)}\n`);
   });
 
+  it.skipIf(process.platform === "win32")("atomically replaces a symlink target with its original mode and no temp files", () => {
+    writeConfig({ channels: { [OLD_ID]: { token: "PLACEHOLDER-TOKEN" } } });
+    const real = path.join(home, "real.json");
+    fs.renameSync(configPath(), real);
+    fs.chmodSync(real, 0o640);
+    const inode = fs.statSync(real).ino;
+    fs.symlinkSync(real, configPath());
+    expect(applyLegacyOpenClawConfigMigration({ homeDir: home }).length).toBeGreaterThan(0);
+    expect(fs.lstatSync(configPath()).isSymbolicLink()).toBe(true);
+    expect(fs.statSync(real).ino).not.toBe(inode);
+    expect(fs.statSync(real).mode & 0o777).toBe(0o640);
+    expect(readConfig().channels[NEW_ID]).toBeDefined();
+    expect(fs.readdirSync(home).sort()).toEqual([".openclaw", "real.json"]);
+    expect(fs.readdirSync(path.dirname(configPath()))).toEqual(["openclaw.json"]);
+  });
+
   it("does not write when there are no changes", () => {
     writeConfig({ channels: { [NEW_ID]: { token: "t" } } });
     const before = fs.statSync(configPath()).mtimeMs;

@@ -238,11 +238,13 @@ describe("Hermes installer", () => {
     const run = vi.fn(async () => undefined);
     const capture = createCapture("0.1.1"); // already current + enabled → install skipped
 
-    const result = await installHermesPlugin({ run, capture, activateCode: "ABC123" });
+    const result = await installHermesPlugin({ run, capture, activateCode: "PLACEHOLDER-ACTIVATE-CODE-0000" });
 
     expect(result).toMatchObject({ status: "skipped", activated: true });
     // No install/clone work, but activation still runs.
-    expect(headCalls(run)).toEqual([["hermes", ["clawchat", "activate", "ABC123"]]]);
+    expect(headCalls(run)).toEqual([["hermes", ["clawchat", "activate", "PLACEHOLDER-ACTIVATE-CODE-0000"]]]);
+    expect(run).toHaveBeenCalledWith("hermes", ["clawchat", "activate", "PLACEHOLDER-ACTIVATE-CODE-0000"],
+      expect.objectContaining({ secretArgs: [2] }));
   });
 
   it("skips install and enable when current plugin is already enabled", async () => {

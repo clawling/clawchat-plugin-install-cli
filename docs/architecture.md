@@ -202,7 +202,9 @@ Both `install` and `update` may rewrite the user's OpenClaw config
   warning and the install continues.
 - **Base URLs.** When any of `--apibaseurl` / `--wsbaseurl` / `--mediabaseurl` is
   passed, `writeOpenClawBaseUrls` upserts them under
-  `channels.clawchat-plugin-openclaw.*`.
+  `channels.clawchat-plugin-openclaw.*`. Only a missing file or whitespace-only
+  contents start an empty config. Read failures, invalid JSON and non-object
+  JSON raise `PRECONDITION` without writing, preserving the user's config.
 - **QClaw load path.** Last, `ensureQClawPluginLoadPath`
   (`packages/core/src/installers/openclaw-qclaw.ts`) asks the host which config
   it reads (`openclaw config file`, falling back to `getOpenClawConfigPath`). Only
@@ -218,6 +220,14 @@ Both `install` and `update` may rewrite the user's OpenClaw config
   list, is left untouched. Any failure is a warning that prints the manual step.
   `openclaw doctor --fix` may drop the entry as stale; rerunning the installer
   restores it. On stock OpenClaw this step writes nothing.
+
+All three config writes use `packages/core/src/fs/atomic-write.ts`: resolve
+symlinks, exclusively create a random temp beside the target, fchmod to its
+existing mode (new: `0600`), write, fsync, close, rename, then directory fsync
+except on Windows. Only directory-sync `EINVAL` / `ENOTSUP` / `EOPNOTSUPP` /
+`EISDIR` are tolerated. Pre-rename failure preserves the original. Cleanup
+removes only this attempt's temp, preserving the original error even if removal
+fails and leaves a temp. Directory-sync failure can surface after replacement.
 
 The first two happen **after** the plugin install, and in that order: the channel id is
 not registered until install completes, so writing `channels.<id>.*` earlier
@@ -282,11 +292,9 @@ installer should set on the user's behalf.
 both write the base-URL overrides (when passed) into
 `<profile home>/.env` via `writeHermesBaseUrls` — **before** the host is
 touched, the opposite of the OpenClaw order. That `.env` also holds the
-plugin's tokens, so the write is atomic (temp file in the same directory,
-fsync, rename, directory fsync; only "unsupported" errors from the directory
-fsync are ignored): a new file is created `0600`, an existing one keeps its
-mode, and a symlinked `.env` is read and written through to its target,
-resolved with filesystem (not lexical) semantics. An existing `.env` that
+plugin's tokens, so the write uses the same
+[atomic config replacement](#files-this-flow-writes) as OpenClaw, including
+mode preservation and filesystem symlink resolution. An existing `.env` that
 cannot be read aborts the write. The remaining steps are:
 
 1. Fetch `plugin.yaml` from
@@ -502,7 +510,7 @@ keep their own copy of this constant and all three move together), and
 | `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` | manual pre-release check: fail if the committed manifest is stale |
 | `pnpm skills:sync` | `node scripts/sync-skills.mjs` | copy the tree + manifest into the sibling plugin repos (`--hermes` / `--openclaw` override the default sibling paths) |
 | `pnpm test:scripts` | `node --test scripts/sync-skills.test.mjs` | only the sync script's tests; does not cover the other two script suites |
-| `pnpm test` | `pnpm -r test && node --test scripts/sync-skills.test.mjs scripts/build-livewares-manifest.test.mjs scripts/skill-frontmatter.test.mjs` | per-package Vitest suites plus all three script suites; excludes `skills:check` and `livewares:check` |
+| `pnpm test` | per-package Vitest suites, atomic-write gate, then script suites | includes sync, manifest, frontmatter, release-guard and atomic-write tests; excludes `skills:check` and `livewares:check` |
 
 See [`../skills/README.md`](../skills/README.md) for the release/versioning workflow.
 
@@ -557,6 +565,13 @@ livewares/
 The `clawchat-liveware-sample` skill (per host, under `skills/`) is what teaches
 the agent to operate this app; the two subsystems ship together.
 
+The standalone cloud-agent saves credentials with an inline synchronous atomic
+helper matching core's ordering and modes. Importing `agent.mjs` does not start
+its main/network flow. Liveware's inline callback helper for `data.json` and
+`state.json` uses that ordering, creating temps with `0666` filtered by umask.
+Responses and broadcasts follow helper success. `events.jsonl` is a disposable
+log: appends/truncation are best-effort; unreadable contents may be discarded.
+
 | npm script | Command | Purpose |
 |------------|---------|---------|
 | `pnpm livewares:manifest` | `node scripts/build-livewares-manifest.mjs` | rewrite `livewares/manifest.json` from the `livewares/` tree |
@@ -601,6 +616,14 @@ The property to rely on is therefore **"POSIX never involves a shell; Windows
 quotes, and rejects the few characters it cannot quote"** — not "user input is
 stripped of metacharacters before it reaches the installers". `CommandOptions.env`
 is not validated at all and must only ever carry hardcoded constants.
+
+`CommandOptions.secretArgs` marks zero-based credential indexes in original
+argv. Transport is unchanged; command displays, timeout hints, spawn errors,
+exit stdout/stderr and Windows argument rejection mask these values with
+`<redacted>`. Such calls pipe stdout and redact successful forwarded/captured
+output too. Hermes marks activation argument 2, shifting it for profile prefixes.
+CLI stderr preserves constructed errors; output assertions verify redaction at
+the source.
 
 ## Relationship to the sibling plugins
 

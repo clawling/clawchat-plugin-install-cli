@@ -21,15 +21,26 @@ async function waitForEventLines(file: string, count: number, timeoutMs = 5_000)
   throw new Error(`events.jsonl did not reach ${count} line(s) within ${timeoutMs}ms`);
 }
 
-async function startSample(beforeSpawn?: (dir: string) => void, agentId?: string): Promise<number> {
+async function startSample(beforeSpawn?: (dir: string) => void, agentId?: string, preload?: string): Promise<number> {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "liveware-sample-"));
+  // Keep data.json (one level above app/) isolated from other server tests.
+  tmpDir = path.join(tmpDir, "app");
+  fs.mkdirSync(tmpDir);
   for (const f of fs.readdirSync(SAMPLE_SRC)) {
     fs.copyFileSync(path.join(SAMPLE_SRC, f), path.join(tmpDir, f));
   }
   beforeSpawn?.(tmpDir);
+  const diagnostic = path.join(tmpDir, "stderr.log");
+  const diagnosticFd = fs.openSync(diagnostic, "w");
   const args = [path.join(tmpDir, "server.mjs"), "--dir", tmpDir, "--port", "0"];
+  if (preload) {
+    const file = path.join(tmpDir, "preload.mjs");
+    fs.writeFileSync(file, preload);
+    args.unshift("--import", file);
+  }
   if (agentId) args.push("--agent-id", agentId);
-  child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+  child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", diagnosticFd] });
+  fs.closeSync(diagnosticFd);
   return await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("server did not report port")), 10_000);
     let buf = "";
@@ -40,14 +51,19 @@ async function startSample(beforeSpawn?: (dir: string) => void, agentId?: string
       clearTimeout(timer);
       resolve(JSON.parse(line).port as number);
     });
-    child!.on("exit", (code) => { clearTimeout(timer); reject(new Error(`exit ${code}`)); });
+    child!.on("exit", (code) => {
+      clearTimeout(timer);
+      // A regular file also preserves diagnostics when pipe writes fail.
+      const stderr = fs.existsSync(diagnostic) ? fs.readFileSync(diagnostic, "utf8") : "";
+      reject(new Error(`exit ${code}: ${stderr}`));
+    });
   });
 }
 
 afterEach(() => {
   child?.kill("SIGTERM");
   child = null;
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  if (tmpDir) fs.rmSync(path.dirname(tmpDir), { recursive: true, force: true });
   tmpDir = "";
 });
 
@@ -64,6 +80,71 @@ function stateWithIcon(iconSvg: string) {
 }
 
 describe("liveware-sample server.mjs", () => {
+  function atomicPreload(failRename = false) {
+    return `import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const log = path.join(path.dirname(fileURLToPath(import.meta.url)), "calls.jsonl");
+const append = fs.appendFileSync.bind(fs);
+const originals = Object.fromEntries(["open", "fsync", "rename", "close"].map(name => [name, fs[name].bind(fs)]));
+const paths = new Map();
+const record = (name, args) => append(log, JSON.stringify({name, args}) + "\\n");
+fs.open = (...args) => {
+  const cb = args.pop();
+  originals.open(...args, (err, fd) => {
+    record("open", args);
+    if (!err) paths.set(fd, String(args[0]));
+    cb(err, fd);
+  });
+};
+fs.fsync = (fd, cb) => { record("fsync", [paths.get(fd)]); originals.fsync(fd, cb); };
+fs.close = (fd, cb) => { record("close", [paths.get(fd)]); originals.close(fd, cb); };
+fs.rename = (from, to, cb) => {
+  record("rename", [from, to]);
+  if (${failRename} && path.basename(to) === "data.json") return cb(Object.assign(new Error("rename failed"), { code: "EIO" }));
+  originals.rename(from, to, cb);
+};`;
+  }
+
+  it("durably saves data and stage before success, leaving no temporary files", async () => {
+    const port = await startSample((dir) => {
+      fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify({ stage: "personalized", title: "Example" }));
+    }, undefined, atomicPreload());
+    const dataFile = path.join(path.dirname(tmpDir), "data.json");
+    const response = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: '{"saved":true}' });
+    expect(response.status).toBe(200);
+    expect(JSON.parse(fs.readFileSync(dataFile, "utf8"))).toEqual({ saved: true });
+    const calls = fs.readFileSync(path.join(tmpDir, "calls.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const tmpOpen = calls.findIndex(call => call.name === "open" && String(call.args[0]).includes(".data.json."));
+    const sequence = calls.slice(tmpOpen);
+    expect(sequence.map(call => call.name)).toEqual(process.platform === "win32"
+      ? ["open", "fsync", "close", "rename"]
+      : ["open", "fsync", "close", "rename", "open", "fsync", "close"]);
+    const tmp = sequence[0].args[0];
+    expect(sequence[0].args).toEqual([tmp, "wx", 0o666]);
+    expect(sequence[1].args).toEqual([tmp]);
+    expect(sequence[2].args).toEqual([tmp]);
+    expect(sequence[3].args).toEqual([tmp, dataFile]);
+    if (process.platform !== "win32") {
+      expect(sequence[4].args).toEqual([path.dirname(dataFile), "r"]);
+      expect(sequence[5].args).toEqual([path.dirname(dataFile)]);
+    }
+    const stage = await fetch(`http://127.0.0.1:${port}/stage`, { method: "POST", body: '{"stage":"kept"}' });
+    expect(stage.status).toBe(200);
+    expect(JSON.parse(fs.readFileSync(path.join(tmpDir, "state.json"), "utf8")).stage).toBe("kept");
+    expect(fs.readdirSync(tmpDir).filter(file => file.endsWith(".tmp"))).toEqual([]);
+    expect(fs.readdirSync(path.dirname(tmpDir)).filter(file => file.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("returns 500 after a failed rename, preserving data and removing the temp", async () => {
+    const port = await startSample((dir) => {
+      fs.writeFileSync(path.join(path.dirname(dir), "data.json"), '{"original":true}');
+    }, undefined, atomicPreload(true));
+    const response = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: '{"next":true}' });
+    expect(response.status).toBe(500);
+    expect(fs.readFileSync(path.join(path.dirname(tmpDir), "data.json"), "utf8")).toBe('{"original":true}');
+    expect(fs.readdirSync(path.dirname(tmpDir)).sort()).toEqual(["app", "data.json"]);
+  });
   it("serves page, state, records events, pushes SSE on state change", async () => {
     const port = await startSample();
     const base = `http://127.0.0.1:${port}`;
@@ -272,7 +353,7 @@ describe("liveware-sample server.mjs", () => {
     expect("agentId" in stateNoFlag).toBe(false);
     child?.kill("SIGTERM");
     child = null;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(path.dirname(tmpDir), { recursive: true, force: true });
 
     // With --agent-id: only the CLI-provided value must show, never the spoofed one.
     const portWithFlag = await startSample(spoofState, "usr_test123");
@@ -307,7 +388,7 @@ describe("liveware-sample server.mjs", () => {
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;&amp;&quot;");
     child?.kill("SIGTERM");
     child = null;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(path.dirname(tmpDir), { recursive: true, force: true });
 
     // Unparseable state.json → serve index.html untouched (static fallback title).
     const portBroken = await startSample((dir) => {
@@ -355,7 +436,7 @@ describe("liveware-sample server.mjs", () => {
       expect(res.status, label).toBe(404);
       child?.kill("SIGTERM");
       child = null;
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(path.dirname(tmpDir), { recursive: true, force: true });
       tmpDir = "";
     }
   }, 60_000);
@@ -415,7 +496,7 @@ describe("liveware-sample server.mjs", () => {
     expect("iconVersion" in stateNone).toBe(false);
     child?.kill("SIGTERM");
     child = null;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(path.dirname(tmpDir), { recursive: true, force: true });
     tmpDir = "";
 
     const portBad = await startSample(

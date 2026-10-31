@@ -27,7 +27,7 @@ Run these from the repo root unless noted.
 |---------|--------------|
 | `pnpm build` | `pnpm -r build` — `tsdown` produces `dist/index.cjs` and `dist/index.d.cts` for each package |
 | `pnpm typecheck` | `pnpm -r typecheck` — `tsc --noEmit` with the shared strict settings in `tsconfig.base.json` |
-| `pnpm test` | `pnpm -r test` — Vitest in each package, then `node --test` for `scripts/sync-skills.test.mjs`, `scripts/build-livewares-manifest.test.mjs`, `scripts/skill-frontmatter.test.mjs`, and `scripts/release-guard.test.mjs` |
+| `pnpm test` | `pnpm -r test` — Vitest in each package, then the atomic-write gate, then `node --test` for sync-skills, build-livewares-manifest, skill-frontmatter, release-guard and check-atomic-writes |
 | `pnpm clean` | Remove `dist/` from each package |
 | `pnpm skills:manifest` | `node scripts/build-skills-manifest.mjs` — regenerate `skills/manifest.json` from the `SKILL.md` tree after editing a skill |
 | `pnpm skills:check` | `node scripts/build-skills-manifest.mjs --check` — manual pre-release check that fails when the committed manifest is stale |
@@ -55,6 +55,16 @@ Filter examples for working on a single package:
 pnpm --filter @clawling/clawchat-plugin-install-cli test
 pnpm --filter @clawling/clawchat-plugin-install-core typecheck
 ```
+
+## State files (G11 gate)
+
+Use `writeFileAtomicSync(resolveWriteTarget(file), text)` from `packages/core/src/fs/atomic-write.ts` for runtime state/config writes.
+The destination directory must already exist; the helper preserves mode and symlinks as [documented](architecture.md#files-this-flow-writes).
+`node scripts/check-atomic-writes.mjs` scans source writes; `pnpm test` runs this gate too.
+Standalone single-file apps keep inline helpers and register their internal operations.
+For exempt logs or development outputs, add `file`, a specific line `match`, exact `count`, and concrete `reason` to `scripts/atomic-write-allowlist.json`.
+Every matching line needs exactly one entry; stale counts and entries fail the gate.
+Verify gate changes with `node --test scripts/check-atomic-writes.test.mjs`.
 
 ## How the CLI bundles `core`
 

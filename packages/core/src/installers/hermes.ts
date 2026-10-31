@@ -17,7 +17,7 @@ import {
   type PluginArtifactMetadata,
 } from "./metadata";
 import { isTransientCommandError, withRetry } from "./retry";
-import { captureCommand, type CommandCapturer, type CommandRunner, runCommand } from "./run";
+import { captureCommand, type CommandCapturer, type CommandOptions, type CommandRunner, runCommand } from "./run";
 import { applyBaseUrlOverrides, type BaseUrlWriter, type InstallActionResult, type InstallProgressReporter, type InstallerOptions } from "./types";
 import { resolveHermesProfileHome, withHermesProfileArgs } from "./hermes-profile";
 
@@ -39,9 +39,17 @@ function hermesRunners(options: InstallerOptions): { run: CommandRunner; capture
   const profile = options.profile;
   const mapArgs = (cmd: string, args: readonly string[]): string[] =>
     cmd === "hermes" ? withHermesProfileArgs(profile, args) : [...args];
+  const mapOptions = (args: readonly string[], mapped: readonly string[], o?: CommandOptions): CommandOptions | undefined =>
+    o?.secretArgs ? { ...o, secretArgs: o.secretArgs.map(index => index + mapped.length - args.length) } : o;
   return {
-    run: (cmd, args, o) => baseRun(cmd, mapArgs(cmd, args), o),
-    capture: (cmd, args, o) => baseCapture(cmd, mapArgs(cmd, args), o),
+    run: (cmd, args, o) => {
+      const mapped = mapArgs(cmd, args);
+      return baseRun(cmd, mapped, mapOptions(args, mapped, o));
+    },
+    capture: (cmd, args, o) => {
+      const mapped = mapArgs(cmd, args);
+      return baseCapture(cmd, mapped, mapOptions(args, mapped, o));
+    },
   };
 }
 
@@ -677,7 +685,7 @@ async function maybeActivateHermes(options: InstallerOptions, result: InstallAct
   }
   const { run } = hermesRunners(options);
   options.onProgress?.("activating ClawChat with the provided code");
-  await run("hermes", ["clawchat", "activate", code], { timeoutMs: HERMES_ACTIVATE_TIMEOUT_MS });
+  await run("hermes", ["clawchat", "activate", code], { timeoutMs: HERMES_ACTIVATE_TIMEOUT_MS, secretArgs: [2] });
   options.onProgress?.("activation complete");
   return { ...result, activated: true };
 }
