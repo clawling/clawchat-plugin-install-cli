@@ -9,8 +9,8 @@
 // 凭据只从 env 读：CLAWCHAT_CONNECT_CODE。永不落盘、永不打印。
 import { createHash, randomInt, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
-import { readFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
-import { dirname, basename, join } from 'node:path';
+import { readFileSync, mkdirSync, existsSync, realpathSync, lstatSync, readlinkSync } from 'node:fs';
+import { dirname, basename, join, isAbsolute, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hostname } from 'node:os';
 
@@ -57,7 +57,29 @@ function loadState() {
 }
 function saveState(s) {
   mkdirSync(dirname(STATE_PATH), { recursive: true });
-  writeFileAtomicSync(STATE_PATH, JSON.stringify(s, null, 2));
+  writeFileAtomicSync(resolveWriteTarget(STATE_PATH), JSON.stringify(s, null, 2));
+}
+
+// Replace what a symlinked state path points at, not the link itself
+// (dangling links are followed hop by hop, as the kernel would).
+export function resolveWriteTarget(target) {
+  let current = target;
+  for (let hops = 0; hops < 40; hops += 1) {
+    try { return realpathSync.native(current); } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    const parent = realpathSync.native(dirname(current));
+    const leaf = join(parent, basename(current));
+    let stat;
+    try { stat = lstatSync(leaf); } catch (err) {
+      if (err.code === 'ENOENT') return leaf;
+      throw err;
+    }
+    if (!stat.isSymbolicLink()) return leaf;
+    const link = readlinkSync(leaf);
+    current = isAbsolute(link) ? link : `${parent}${sep}${link}`;
+  }
+  throw new Error(`too many symbolic links resolving ${target}`);
 }
 
 // Self-contained: the container copies only agent.mjs.

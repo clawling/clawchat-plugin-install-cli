@@ -565,7 +565,7 @@ livewares/
 The `clawchat-liveware-sample` skill (per host, under `skills/`) is what teaches
 the agent to operate this app; the two subsystems ship together.
 
-The standalone cloud-agent saves credentials with an inline synchronous atomic
+The standalone cloud-agent saves credentials (through a symlinked path to its target) with an inline synchronous atomic
 helper matching core's ordering and modes. Importing `agent.mjs` does not start
 its main/network flow. Liveware's inline callback helper for `data.json` and
 `state.json` uses that ordering, creating temps with `0666` filtered by umask.

@@ -8,13 +8,16 @@ import { recordingFs } from "../helpers/recording-fs";
 
 let dir: string;
 let write: (dest: string, data: string, io?: AtomicWriteFs) => void;
+let resolveWriteTarget: (target: string) => string;
 beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "cloud-state-"));
   const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("import must not fetch"));
   const exit = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("import must not exit"); });
   try {
     const url = pathToFileURL(path.resolve(__dirname, "../../../../examples/cloud-agent/agent.mjs")).href;
-    write = (await import(/* @vite-ignore */ url)).writeFileAtomicSync;
+    const agent = await import(/* @vite-ignore */ url);
+    write = agent.writeFileAtomicSync;
+    resolveWriteTarget = agent.resolveWriteTarget;
     expect(fetch).not.toHaveBeenCalled();
     expect(exit).not.toHaveBeenCalled();
   } finally { fetch.mockRestore(); exit.mockRestore(); }
@@ -72,4 +75,16 @@ it("keeps the mode when replacing state and cleans up a failed rename", () => {
   expect(caught).toBe(error);
   expect(fs.readFileSync(dest, "utf8")).toBe("original");
   expect(fs.readdirSync(dir)).toEqual(["agent.json"]);
+});
+
+it.skipIf(process.platform === "win32")("replaces the target of a symlinked state path, including a dangling link", () => {
+  const real = path.join(dir, "real.json");
+  const link = path.join(dir, "agent.json");
+  fs.symlinkSync("real.json", link);
+  write(resolveWriteTarget(link), '{"token":"PLACEHOLDER-DANGLING"}');
+  expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(fs.readFileSync(real, "utf8")).toBe('{"token":"PLACEHOLDER-DANGLING"}');
+  write(resolveWriteTarget(link), '{"token":"PLACEHOLDER-EXISTING"}');
+  expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+  expect(fs.readFileSync(real, "utf8")).toBe('{"token":"PLACEHOLDER-EXISTING"}');
 });
