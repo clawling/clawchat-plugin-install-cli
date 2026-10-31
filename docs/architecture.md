@@ -312,7 +312,7 @@ cannot be read aborts the write. The remaining steps are:
 2. Parse the artifact `version` and the optional `requires.hermes` range
    (only `>=X.Y[.Z[.W]]` is supported — see `assertVersionSatisfiesRange` in
    `packages/core/src/installers/metadata.ts`).
-3. Run `hermes --version` and assert it satisfies the range.
+3. Run `hermes --version`, reject excluded scan releases (below), and assert it satisfies the range.
 4. Parse `hermes plugins list` for an existing `clawchat` row.
 
 If metadata transport fails (`TIMEOUT` / `HTTP_ERROR` from fetch, or one of
@@ -322,7 +322,8 @@ Automatically fall back only where the normal branch would call
 `installCanonical`: a missing plugin on `install` / `update --force`, or an
 installed plugin with `--force`. Progress explains the fallback to
 `hermes plugins install clawling/clawchat-plugin-hermes-agent --enable` and
-that CLI version / host compatibility checks are skipped. The result has
+that CLI version / host compatibility checks from metadata are skipped; the
+scan-version exclusion still applies when the host version is parseable. The result has
 `version: undefined` and a fallback `detail`. The host still validates and scans;
 the scan gate below is unchanged. This availability fallback is enabled by
 default because GitHub raw can be unreachable while the host's git clone works.
@@ -372,6 +373,16 @@ installed. The four result statuses are:
   bind mount.
 
 #### Hermes host security scan
+
+Hermes support follows `plugin.yaml`'s minimum (currently v0.12.0), except
+v0.20.3–v0.20.6: their `plugin_guard` `agent_config_mod` rule hard-refuses
+ClawChat's AGENTS.md/docs, even with `--force`. `assertHermesHostSupported`
+rejects >=0.20.3 and <0.21.0 with `PRECONDITION` ("too old", reported as
+`host_too_old`) before listing/installing/updating, including metadata fallback
+and before GitHub ref cloning; it advises the owner to upgrade to v0.21.6+
+(`hermes update`). Unparseable output remains tolerated in metadata fallback
+and the pre-clone exclusion check; the ref's post-clone host requirement check
+still uses strict parsing, reusing the single version probe.
 
 Hermes 0.20.3+ scans a community plugin tree after cloning it and before moving
 it into place (`plugins.scan_on_install`, on by default). Verdicts: `safe`

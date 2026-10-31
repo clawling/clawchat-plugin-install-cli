@@ -62,11 +62,35 @@ describe("published runtime guides", () => {
     expect(scanner).toMatch(/don't\s+type\s+`y`\s+yourself/);
     expect(scanner).toMatch(/Unattended\s+install/);
     expect(scanner).toMatch(/rather\s+than\s+forcing/);
+    expect(scanner).toContain("`Scan:` source");
+    expect(scanner).toContain("Hermes version, verdict");
+    expect(scanner).toContain("Hermes `<version>` reports `<verdict>` with `<categories/counts>`");
+    expect(scanner).toContain("Hermes `<版本>` 报告 `<判定>`，发现 `<类别/数量>`");
+    expect(scanner).toContain("*dangerous* is refused, even with approval");
+    expect(scanner).not.toMatch(/comments and docs|comment\/doc|多为注释和文档/);
     const step2 = install.split("## 2. Install")[1]?.split("\n## 3.")[0] ?? "";
     // Current hosts scan this plugin as safe; older hosts can still require approval.
     expect(step2).toMatch(/safe on Hermes v0\.21\.6\+/);
     expect(step2).toMatch(/older\s+hosts may report \*caution\*/);
     expect(step2).toMatch(/don't\s+answer\s+the\s+prompt/);
+  });
+
+  it("install.md excludes Hermes scan releases and directs the owner to upgrade", () => {
+    const step1 = install.split("## 1. Verify")[1]?.split("\n## 2.")[0] ?? "";
+    expect(step1).toContain("Hermes v0.12.0+ is supported **except v0.20.3–v0.20.6**");
+    expect(step1).toContain("plugin_install_failed:host_too_old");
+    expect(step1).toContain("upgrade to Hermes v0.21.6+ (`hermes update`), then rerun");
+    expect(step1).toContain("Don't try `--force`, other plugin versions or a direct host install");
+  });
+
+  it("install.md sends Hermes without Node or npx through the direct host install and enable check", () => {
+    const step2 = install.split("## 2. Install")[1]?.split("\n## 3.")[0] ?? "";
+    expect(step2).toContain("Node.js 18+ with npx is required for the CLI and OpenClaw");
+    expect(step2).toContain("`npx: command not found`, exit 127");
+    expect(step2).toContain("plugin_install_failed:npx_missing");
+    expect(step2).toContain("`hermes plugins install clawling/clawchat-plugin-hermes-agent --enable` needs\nno Node");
+    expect(step2).toContain("Continue with the enable check, then step 3");
+    expect(step2).toContain("`hermes clawchat activate`\nalso needs no Node");
   });
 
   it("install.md documents automatic metadata fallback and non-interactive dependency recovery", () => {
@@ -97,6 +121,17 @@ describe("published runtime guides", () => {
     expect(step4).toContain("proves nothing");
     expect(step4).toContain("hermes gateway status");
     expect(step4).toContain("not the plugin's greeting");
+  });
+
+  it("install.md leaves foreground container gateways to the owner instead of hanging a tool", () => {
+    const step4 = install.split("## 4. Restart the agent")[1]?.split("\n## 5.")[0] ?? "";
+    const container = step4.split("- **Hermes: container / no systemd.**")[1]?.split("\n- **")[0] ?? "";
+    expect(container).toContain("The gateway is `hermes gateway run`");
+    expect(container).toContain("`gateway install` says no service is needed");
+    expect(container).toContain("**foreground** (\"Press Ctrl+C to stop\")");
+    expect(container).toContain("don't run restart from your terminal tool");
+    expect(container).toMatch(/The owner restarts the\s+container or that process/);
+    expect(container).toContain("`-p <name>`");
   });
 
   it("install.md step 4 probes OpenClaw before asking the user to restart", () => {
