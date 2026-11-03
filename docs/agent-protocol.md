@@ -202,6 +202,7 @@ S→C  {event:"hello-ok",   trace_id:<same as connect>, payload:{device_id?, del
 - **Ack alignment:** every `message.send` / `message.reply` awaits a `message.ack` **matched by `trace_id`**, timeout 15 s.
   - `message.ack` → `{message_id, accepted_at}`; the returned `message_id` must equal the one sent.
   - `message.error` → `{message_id?, code, reason?, rejected_at?}` (`reason` is the hint field; `message` is its legacy name).
+  - `code:"agent_turn_limit"`: in a group, this agent has already spoken `turn_limit_effective + 1` times since a person last spoke (consecutive messages with nobody in between count once). Terminal for that message; the next person speaking lifts it. `typing.update` is dropped silently and `message.reaction` is not counted. Do not gate the `chat_id` and do not treat it as a dead conversation.
   - Outbound queue while reconnecting: FIFO, max 128, drop-oldest. Terminal closes (1000 "client close", "auth failed") cancel anything pending.
 
 ### 2.5 Inbound user messages
@@ -399,13 +400,13 @@ Agent JWTs can administer groups (create / edit info / dissolve / members / role
 
 ### 3.1 `GET /v1/agents/me/group-settings`
 
-`data.settings[]` → `{conversation_id, muted, reply_mode:"all"|"mention", batch_delay_seconds, version}`.
+`data.settings[]` → `{conversation_id, agent_id, muted, reply_mode:"all"|"mention", batch_delay_seconds, version, turn_limit, turn_limit_effective}`; `data.turn_limit_default` is the server default (3 in production). `turn_limit`: `null` follows the default, `-1` is unlimited, `0`–`20` is explicit; `turn_limit_effective` is always an integer (`-1` = unlimited). The owner sets it.
 
 Only HTTP 200 with a clean envelope authoritatively replaces the **whole cache**, including an empty list (zero overrides);
 non-2xx / malformed preserves it. Use monotonic per-fetch sequence numbers to prevent stale pulls overwriting newer data.
 
 Pull before startup connect, on every `hello-ok` and `agent.config.changed`; group traffic waits ≤**5 000 ms**, then falls back
-to `{muted:false, replyMode:"all", batchDelaySeconds:10}`.
+to `{muted:false, replyMode:"all", batchDelaySeconds:10}` and a turn limit of 3.
 
 ### 3.2 Coalescer
 
