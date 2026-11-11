@@ -1,0 +1,53 @@
+# Writes `codex-review`: success = current head reviewed, no unresolved blocking Codex threads;
+#   failure = completed with unresolved P0/P1, P4-P9 or unreadable badges; pending = waiting,
+#   running, old head, incomplete summary/threads; error = read failure, head moved mid-read or write failure.
+# Logic and tests: .github/scripts/codex_review_status.py.
+#
+# workflow_dispatch --ref <branch> and pull_request_target with a non-default base use that branch's YAML;
+# verified 2026-10-28: it still receives statuses:write. The YAML if and script ref guard only prevent
+# stale copies / accidental use; writers can use their own workflow to write any commit status.
+# Protecting against writers requires a dedicated GitHub App writing statuses and a ruleset integration_id.
+# The script is checked out from the default branch; no PR code is checked out.
+# Codex edits its summary comment when a review starts and ends -> issue_comment.edited.
+# GitHub has no Actions trigger for resolving a review thread: after resolving, comment on
+# the PR (e.g. `@codex review`) or run this workflow by hand to recompute.
+name: codex-review status
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: codex-review-status-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  status:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Set codex-review status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 .github/scripts/codex_review_status.py
