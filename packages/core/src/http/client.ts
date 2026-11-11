@@ -53,13 +53,12 @@ export async function requestJson(
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const parsed = await parseResponse(response);
-  if (!response.ok && response.status >= 500) {
+  if (!response.ok) {
     throw new ClawchatError(
       "HTTP_ERROR",
       `ClawChat request failed with status ${response.status}: ${JSON.stringify(parsed)}`,
     );
   }
-  // 4xx bodies still carry useful data for callers; return them as-is.
   return parsed;
 }
 
