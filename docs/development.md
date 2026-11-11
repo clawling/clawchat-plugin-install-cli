@@ -131,6 +131,28 @@ need a real host CLI.
 Every path above takes an injectable override (`homeDir`, `env`, `platform`) so
 both layouts are testable without touching the real environment.
 
+## PR review status (`codex-review`)
+
+Every pull request head gets a `codex-review` commit status from
+`.github/workflows/codex-review-status.yml` (logic and tests in
+`.github/scripts/`; run `python3 -m unittest discover -s .github/scripts -v`
+from the repository root):
+
+- **success**: GitHub Codex completed on that head with no unresolved blocking
+  threads;
+- **failure**: completed with unresolved P0/P1, P4-P9 or unreadable badges;
+- **pending**: waiting, running, reviewing an old head, or summary/thread data
+  incomplete;
+- **error**: read failure, head moved during reading, or status write failure.
+
+The workflow and script always run from `main` and never check out pull
+request code, so a change to either takes effect only after it is merged. The
+root package is private and `.github/` is not part of any published package.
+Whether `main` requires the status is set in the repository ruleset
+(`main: PR only`). GitHub has no trigger for resolving a review thread: after
+resolving, comment on the pull request (for example `@codex review`) or run
+the workflow by hand with the PR number to recompute.
+
 ## Style
 
 - TypeScript ESM, strict mode (`tsconfig.base.json`); no separate linter.

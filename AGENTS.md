@@ -7,8 +7,8 @@ anything not covered here, follow the documentation map below.
 
 - Workspace topology, install flows per target, library API, security
   notes — [`docs/architecture.md`](docs/architecture.md).
-- pnpm setup, build, test, filters, local plugin testing —
-  [`docs/development.md`](docs/development.md).
+- pnpm setup, build, test, filters, local plugin testing, the `codex-review`
+  PR status — [`docs/development.md`](docs/development.md).
 - How to publish the CLI and refresh the R2-hosted install guide —
   [`docs/release.md`](docs/release.md).
 - Pre-release builds on the `dev` channel —
