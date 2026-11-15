@@ -90,7 +90,9 @@ function writeFileAtomic(file, text, cb) {
 // texts stay suppressed until a later success or different external content.
 // The set is bounded (each text can be up to MAX_DATA_BYTES): once full, the
 // oldest failed text is forgotten, so it is treated as ordinary external
-// content again — memory stays flat under a stream of failing writes.
+// content again — memory stays flat under a stream of failing writes. The text
+// currently on disk is never forgotten: it may still be a renamed-but-failed
+// write, and forgetting it would broadcast it as an external edit.
 const MAX_UNCONFIRMED_TEXTS = 16;
 const fileWrites = new Map();
 function writeFileForBroadcast(file, text, cb) {
@@ -111,7 +113,7 @@ function runFileWrites(file, writes) {
   writeFileAtomic(file, job.text, (err) => {
     writes.running = false;
     writes.pending--;
-    if (err) rememberUnconfirmed(writes.unconfirmed, job.text);
+    if (err) rememberUnconfirmed(writes.unconfirmed, job.text, file);
     else writes.unconfirmed.clear();
     job.cb(err);
     if (writes.queue.length) return runFileWrites(file, writes);
@@ -121,10 +123,19 @@ function runFileWrites(file, writes) {
   });
 }
 
-function rememberUnconfirmed(set, text) {
+function rememberUnconfirmed(set, text, file) {
   set.delete(text); // re-adding refreshes its age
   set.add(text);
-  while (set.size > MAX_UNCONFIRMED_TEXTS) set.delete(set.values().next().value);
+  if (set.size <= MAX_UNCONFIRMED_TEXTS) return;
+  let onDisk = null;
+  try {
+    onDisk = fs.readFileSync(file, "utf8");
+  } catch {}
+  for (const old of set) {
+    if (old === onDisk) continue;
+    set.delete(old);
+    if (set.size <= MAX_UNCONFIRMED_TEXTS) return;
+  }
 }
 
 function stateWithMeta(state) {

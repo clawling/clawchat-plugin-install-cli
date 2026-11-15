@@ -3,7 +3,7 @@
   "livewares": {
     "openclaw": {
       "liveware-sample": {
-        "version": "2.0.2",
+        "version": "2.0.3",
         "files": [
           {
             "path": "openclaw/liveware-sample/app.js",
@@ -22,13 +22,13 @@
           },
           {
             "path": "openclaw/liveware-sample/liveware.json",
-            "sha256": "fa029b43e2dc6f72c4b0ed518a3eeee0bc5f93388b94c9acebd979f2e09e0444",
+            "sha256": "f59841c06ab5a94d4893aa496c626f730a5915546e95340fed4821340e8d5329",
             "bytes": 54
           },
           {
             "path": "openclaw/liveware-sample/server.mjs",
-            "sha256": "8c1523a9a05fac95f7d71a27031fa147666196aba2dc498f68319e706d41c138",
-            "bytes": 23518
+            "sha256": "09ebb98219c56fa077d1a6cb6bc5cac40a7d73e76ea1558c2654e3c975490dd6",
+            "bytes": 23875
           },
           {
             "path": "openclaw/liveware-sample/state.json",
@@ -55,7 +55,7 @@
     },
     "hermes": {
       "liveware-sample": {
-        "version": "2.0.2",
+        "version": "2.0.3",
         "files": [
           {
             "path": "openclaw/liveware-sample/app.js",
@@ -74,13 +74,13 @@
           },
           {
             "path": "openclaw/liveware-sample/liveware.json",
-            "sha256": "fa029b43e2dc6f72c4b0ed518a3eeee0bc5f93388b94c9acebd979f2e09e0444",
+            "sha256": "f59841c06ab5a94d4893aa496c626f730a5915546e95340fed4821340e8d5329",
             "bytes": 54
           },
           {
             "path": "openclaw/liveware-sample/server.mjs",
-            "sha256": "8c1523a9a05fac95f7d71a27031fa147666196aba2dc498f68319e706d41c138",
-            "bytes": 23518
+            "sha256": "09ebb98219c56fa077d1a6cb6bc5cac40a7d73e76ea1558c2654e3c975490dd6",
+            "bytes": 23875
           },
           {
             "path": "openclaw/liveware-sample/state.json",

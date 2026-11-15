@@ -80,7 +80,7 @@ function stateWithIcon(iconSvg: string) {
 }
 
 describe("liveware-sample server.mjs", () => {
-  function atomicPreload(failRename = false, directorySyncFailureDelayMs?: number, directorySyncPlan?: Array<{ delayMs: number; fail: boolean }>) {
+  function atomicPreload(failRename = false, directorySyncFailureDelayMs?: number, directorySyncPlan?: Array<{ delayMs: number; fail: boolean }>, failRenameFrom = 0) {
     const plan = directorySyncPlan ?? (directorySyncFailureDelayMs === undefined ? [] : [{ delayMs: directorySyncFailureDelayMs, fail: true }]);
     return `import fs from "node:fs";
 import path from "node:path";
@@ -90,6 +90,7 @@ const append = fs.appendFileSync.bind(fs);
 const originals = Object.fromEntries(["open", "fsync", "rename", "close"].map(name => [name, fs[name].bind(fs)]));
 const paths = new Map();
 let directorySyncIndex = 0;
+let dataRenames = 0;
 const directorySyncPlan = ${JSON.stringify(plan)};
 const record = (name, args) => append(log, JSON.stringify({name, args}) + "\\n");
 fs.open = (...args) => {
@@ -113,7 +114,7 @@ fs.fsync = (fd, cb) => {
 fs.close = (fd, cb) => { record("close", [paths.get(fd)]); originals.close(fd, cb); };
 fs.rename = (from, to, cb) => {
   record("rename", [from, to]);
-  if (${failRename} && path.basename(to) === "data.json") return cb(Object.assign(new Error("rename failed"), { code: "EIO" }));
+  if (${failRename} && path.basename(to) === "data.json" && dataRenames++ >= ${failRenameFrom}) return cb(Object.assign(new Error("rename failed"), { code: "EIO" }));
   originals.rename(from, to, cb);
 };`;
   }
@@ -296,6 +297,25 @@ fs.rename = (from, to, cb) => {
       // The oldest failure was evicted: it now counts as external content.
       fs.writeFileSync(file, texts[0]!);
       await sse.waitForCount("data", 1);
+    } finally {
+      await sse.close();
+    }
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("keeps the on-disk failed text suppressed when later writes fail before rename and fill the set", async () => {
+    // First write renames then fails its directory fsync; the next 16 fail at
+    // rename, so the file still holds the first (unconfirmed) text.
+    const port = await startSample(undefined, undefined, atomicPreload(true, undefined, [{ delayMs: 0, fail: true }], 1));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      for (let i = 0; i < 17; i++) {
+        const res = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: JSON.stringify({ n: i }) });
+        expect(res.status).toBe(500);
+      }
+      expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ n: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
     } finally {
       await sse.close();
     }
