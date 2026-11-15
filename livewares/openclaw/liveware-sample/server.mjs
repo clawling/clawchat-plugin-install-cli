@@ -88,6 +88,15 @@ function writeFileAtomic(file, text, cb) {
 // Writes to one file run one at a time, so completions arrive in rename order
 // and a success only clears failures of writes it actually replaced. Failed
 // texts stay suppressed until a later success or different external content.
+// The set is bounded (each text can be up to MAX_DATA_BYTES): once full, the
+// oldest failed text is forgotten, so it is treated as ordinary external
+// content again — memory stays flat under a stream of failing writes. The text
+// currently on disk is never forgotten: it may still be a renamed-but-failed
+// write, and forgetting it would broadcast it as an external edit. If the file
+// cannot be read (so the on-disk text is unknown) nothing is evicted, up to a
+// hard cap of twice the limit; past that the oldest goes regardless.
+const MAX_UNCONFIRMED_TEXTS = 16;
+const HARD_MAX_UNCONFIRMED_TEXTS = MAX_UNCONFIRMED_TEXTS * 2;
 const fileWrites = new Map();
 function writeFileForBroadcast(file, text, cb) {
   let writes = fileWrites.get(file);
@@ -107,7 +116,7 @@ function runFileWrites(file, writes) {
   writeFileAtomic(file, job.text, (err) => {
     writes.running = false;
     writes.pending--;
-    if (err) writes.unconfirmed.add(job.text);
+    if (err) rememberUnconfirmed(writes.unconfirmed, job.text, file);
     else writes.unconfirmed.clear();
     job.cb(err);
     if (writes.queue.length) return runFileWrites(file, writes);
@@ -115,6 +124,27 @@ function runFileWrites(file, writes) {
     // once so an external write that landed meanwhile is not lost.
     recheckWatched(file);
   });
+}
+
+function rememberUnconfirmed(set, text, file) {
+  set.delete(text); // re-adding refreshes its age
+  set.add(text);
+  if (set.size <= MAX_UNCONFIRMED_TEXTS) return;
+  let onDisk = null; // null: file absent, nothing on disk to protect
+  try {
+    onDisk = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      // Unknown on-disk text: be conservative and retry on the next failure.
+      if (set.size <= HARD_MAX_UNCONFIRMED_TEXTS) return;
+      onDisk = null;
+    }
+  }
+  for (const old of set) {
+    if (old === onDisk) continue;
+    set.delete(old);
+    if (set.size <= MAX_UNCONFIRMED_TEXTS) return;
+  }
 }
 
 function stateWithMeta(state) {

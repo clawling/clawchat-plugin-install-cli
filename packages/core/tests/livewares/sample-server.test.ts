@@ -80,7 +80,7 @@ function stateWithIcon(iconSvg: string) {
 }
 
 describe("liveware-sample server.mjs", () => {
-  function atomicPreload(failRename = false, directorySyncFailureDelayMs?: number, directorySyncPlan?: Array<{ delayMs: number; fail: boolean }>) {
+  function atomicPreload(failRename = false, directorySyncFailureDelayMs?: number, directorySyncPlan?: Array<{ delayMs: number; fail: boolean }>, failRenameFrom = 0) {
     const plan = directorySyncPlan ?? (directorySyncFailureDelayMs === undefined ? [] : [{ delayMs: directorySyncFailureDelayMs, fail: true }]);
     return `import fs from "node:fs";
 import path from "node:path";
@@ -90,6 +90,13 @@ const append = fs.appendFileSync.bind(fs);
 const originals = Object.fromEntries(["open", "fsync", "rename", "close"].map(name => [name, fs[name].bind(fs)]));
 const paths = new Map();
 let directorySyncIndex = 0;
+let dataRenames = 0;
+const readFailFlag = path.join(path.dirname(fileURLToPath(import.meta.url)), "read-fail");
+const originalReadFileSync = fs.readFileSync.bind(fs);
+fs.readFileSync = (file, ...rest) => {
+  if (String(file).endsWith("data.json") && fs.existsSync(readFailFlag)) throw Object.assign(new Error("read failed"), { code: "EIO" });
+  return originalReadFileSync(file, ...rest);
+};
 const directorySyncPlan = ${JSON.stringify(plan)};
 const record = (name, args) => append(log, JSON.stringify({name, args}) + "\\n");
 fs.open = (...args) => {
@@ -113,7 +120,7 @@ fs.fsync = (fd, cb) => {
 fs.close = (fd, cb) => { record("close", [paths.get(fd)]); originals.close(fd, cb); };
 fs.rename = (from, to, cb) => {
   record("rename", [from, to]);
-  if (${failRename} && path.basename(to) === "data.json") return cb(Object.assign(new Error("rename failed"), { code: "EIO" }));
+  if (${failRename} && path.basename(to) === "data.json" && dataRenames++ >= ${failRenameFrom}) return cb(Object.assign(new Error("rename failed"), { code: "EIO" }));
   originals.rename(from, to, cb);
 };`;
   }
@@ -271,6 +278,77 @@ fs.rename = (from, to, cb) => {
       await sse.close();
     }
   }, 15_000);
+
+  it.skipIf(process.platform === "win32")("bounds remembered failed texts: the oldest is forgotten, recent ones stay suppressed", async () => {
+    const port = await startSample(undefined, undefined, atomicPreload(false, undefined,
+      Array.from({ length: 17 }, () => ({ delayMs: 0, fail: true }))));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      const texts: string[] = [];
+      // One more failing write than the cap (16), each with distinct content.
+      for (let i = 0; i < 17; i++) {
+        const res = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: JSON.stringify({ n: i }) });
+        expect(res.status).toBe(500);
+        texts.push(fs.readFileSync(file, "utf8"));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+
+      // Most recent failure is still remembered: re-writing it stays silent.
+      fs.writeFileSync(file, texts[16]!);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+
+      // The oldest failure was evicted: it now counts as external content.
+      fs.writeFileSync(file, texts[0]!);
+      await sse.waitForCount("data", 1);
+    } finally {
+      await sse.close();
+    }
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("keeps the on-disk failed text suppressed when later writes fail before rename and fill the set", async () => {
+    // First write renames then fails its directory fsync; the next 16 fail at
+    // rename, so the file still holds the first (unconfirmed) text.
+    const port = await startSample(undefined, undefined, atomicPreload(true, undefined, [{ delayMs: 0, fail: true }], 1));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      for (let i = 0; i < 17; i++) {
+        const res = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: JSON.stringify({ n: i }) });
+        expect(res.status).toBe(500);
+      }
+      expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ n: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+    } finally {
+      await sse.close();
+    }
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("does not evict when the file cannot be read, so a transient read error never leaks the on-disk failed text", async () => {
+    const port = await startSample(undefined, undefined, atomicPreload(true, undefined, [{ delayMs: 0, fail: true }], 1));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      fs.writeFileSync(path.join(tmpDir, "read-fail"), "");
+      for (let i = 0; i < 17; i++) {
+        const res = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: JSON.stringify({ n: i }) });
+        expect(res.status).toBe(500);
+      }
+      fs.rmSync(path.join(tmpDir, "read-fail"));
+      const onDisk = fs.readFileSync(file, "utf8");
+      expect(JSON.parse(onDisk)).toEqual({ n: 0 });
+      // Reads work again: the first failed text is still remembered, so an
+      // identical watcher notification stays silent.
+      fs.writeFileSync(file, onDisk);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+    } finally {
+      await sse.close();
+    }
+  }, 20_000);
 
   it.skipIf(process.platform === "win32")("re-reads after a pending write so an external edit made meanwhile still reaches SSE", async () => {
     const port = await startSample((dir) => {
