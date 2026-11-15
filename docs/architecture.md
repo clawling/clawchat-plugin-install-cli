@@ -565,17 +565,19 @@ livewares/
 The `clawchat-liveware-sample` skill (per host, under `skills/`) is what teaches
 the agent to operate this app; the two subsystems ship together.
 
-The standalone cloud-agent saves credentials (through a symlinked path to its target) with an inline synchronous atomic
-helper matching core's ordering and modes. Importing `agent.mjs` does not start
-its main/network flow. Liveware's inline callback helper for `data.json` and
-`state.json` uses that ordering, creating temps with `0666` filtered by umask.
-Responses and broadcasts follow helper success. `events.jsonl` is a disposable
-log: appends/truncation are best-effort; unreadable contents may be discarded.
+`agent.mjs` saves credentials through symlinks with core's synchronous atomic
+ordering/modes; import starts no main/network flow. Liveware uses that ordering
+and umask-filtered `0666` temps. Only success yields 200/request broadcasts.
+Local writes run one per file in order. Watchers defer pending writes and skip
+failed `data.json`/`state.json` texts, even after rename, until a later local
+success or different external JSON clears that record. Matching PUT echoes are
+muted for 500 ms. `events.jsonl` is disposable: appends/truncation are
+best-effort; unreadable contents may be discarded.
 
 | npm script | Command | Purpose |
 |------------|---------|---------|
-| `pnpm livewares:manifest` | `node scripts/build-livewares-manifest.mjs` | rewrite `livewares/manifest.json` from the `livewares/` tree |
-| `pnpm livewares:check` | `node scripts/build-livewares-manifest.mjs --check` | manual pre-release check: fail if the committed manifest is stale |
+| `pnpm livewares:manifest` | `node scripts/build-livewares-manifest.mjs` | regenerate manifest |
+| `pnpm livewares:check` | `node scripts/build-livewares-manifest.mjs --check` | fail if manifest is stale (pre-release) |
 
 ## Library API (currently unused by the CLI)
 
