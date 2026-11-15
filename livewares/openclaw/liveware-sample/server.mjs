@@ -88,6 +88,10 @@ function writeFileAtomic(file, text, cb) {
 // Writes to one file run one at a time, so completions arrive in rename order
 // and a success only clears failures of writes it actually replaced. Failed
 // texts stay suppressed until a later success or different external content.
+// The set is bounded (each text can be up to MAX_DATA_BYTES): once full, the
+// oldest failed text is forgotten, so it is treated as ordinary external
+// content again — memory stays flat under a stream of failing writes.
+const MAX_UNCONFIRMED_TEXTS = 16;
 const fileWrites = new Map();
 function writeFileForBroadcast(file, text, cb) {
   let writes = fileWrites.get(file);
@@ -107,7 +111,7 @@ function runFileWrites(file, writes) {
   writeFileAtomic(file, job.text, (err) => {
     writes.running = false;
     writes.pending--;
-    if (err) writes.unconfirmed.add(job.text);
+    if (err) rememberUnconfirmed(writes.unconfirmed, job.text);
     else writes.unconfirmed.clear();
     job.cb(err);
     if (writes.queue.length) return runFileWrites(file, writes);
@@ -115,6 +119,12 @@ function runFileWrites(file, writes) {
     // once so an external write that landed meanwhile is not lost.
     recheckWatched(file);
   });
+}
+
+function rememberUnconfirmed(set, text) {
+  set.delete(text); // re-adding refreshes its age
+  set.add(text);
+  while (set.size > MAX_UNCONFIRMED_TEXTS) set.delete(set.values().next().value);
 }
 
 function stateWithMeta(state) {

@@ -272,6 +272,35 @@ fs.rename = (from, to, cb) => {
     }
   }, 15_000);
 
+  it.skipIf(process.platform === "win32")("bounds remembered failed texts: the oldest is forgotten, recent ones stay suppressed", async () => {
+    const port = await startSample(undefined, undefined, atomicPreload(false, undefined,
+      Array.from({ length: 17 }, () => ({ delayMs: 0, fail: true }))));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      const texts: string[] = [];
+      // One more failing write than the cap (16), each with distinct content.
+      for (let i = 0; i < 17; i++) {
+        const res = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: JSON.stringify({ n: i }) });
+        expect(res.status).toBe(500);
+        texts.push(fs.readFileSync(file, "utf8"));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+
+      // Most recent failure is still remembered: re-writing it stays silent.
+      fs.writeFileSync(file, texts[16]!);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+
+      // The oldest failure was evicted: it now counts as external content.
+      fs.writeFileSync(file, texts[0]!);
+      await sse.waitForCount("data", 1);
+    } finally {
+      await sse.close();
+    }
+  }, 20_000);
+
   it.skipIf(process.platform === "win32")("re-reads after a pending write so an external edit made meanwhile still reaches SSE", async () => {
     const port = await startSample((dir) => {
       fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify({ stage: "personalized", title: "Original" }));
