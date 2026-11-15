@@ -570,7 +570,10 @@ ordering/modes; import starts no main/network flow. Liveware uses that ordering
 and umask-filtered `0666` temps. Only success yields 200/request broadcasts.
 Local writes run one per file in order. Watchers defer pending writes and skip
 failed `data.json`/`state.json` texts, even after rename, until a later local
-success or different external JSON clears that record. Matching PUT echoes are
+success or different external JSON clears that record. At most 16 failed texts
+are remembered per file; the oldest is evicted first, but never the text
+currently on disk. If the file cannot be read, nothing is evicted (up to a hard
+cap of 32, then the oldest goes). Matching PUT echoes are
 muted for 500 ms. `events.jsonl` is disposable: appends/truncation are
 best-effort; unreadable contents may be discarded.
 

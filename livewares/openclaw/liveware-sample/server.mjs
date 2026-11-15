@@ -92,8 +92,11 @@ function writeFileAtomic(file, text, cb) {
 // oldest failed text is forgotten, so it is treated as ordinary external
 // content again — memory stays flat under a stream of failing writes. The text
 // currently on disk is never forgotten: it may still be a renamed-but-failed
-// write, and forgetting it would broadcast it as an external edit.
+// write, and forgetting it would broadcast it as an external edit. If the file
+// cannot be read (so the on-disk text is unknown) nothing is evicted, up to a
+// hard cap of twice the limit; past that the oldest goes regardless.
 const MAX_UNCONFIRMED_TEXTS = 16;
+const HARD_MAX_UNCONFIRMED_TEXTS = MAX_UNCONFIRMED_TEXTS * 2;
 const fileWrites = new Map();
 function writeFileForBroadcast(file, text, cb) {
   let writes = fileWrites.get(file);
@@ -127,10 +130,16 @@ function rememberUnconfirmed(set, text, file) {
   set.delete(text); // re-adding refreshes its age
   set.add(text);
   if (set.size <= MAX_UNCONFIRMED_TEXTS) return;
-  let onDisk = null;
+  let onDisk = null; // null: file absent, nothing on disk to protect
   try {
     onDisk = fs.readFileSync(file, "utf8");
-  } catch {}
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      // Unknown on-disk text: be conservative and retry on the next failure.
+      if (set.size <= HARD_MAX_UNCONFIRMED_TEXTS) return;
+      onDisk = null;
+    }
+  }
   for (const old of set) {
     if (old === onDisk) continue;
     set.delete(old);

@@ -91,6 +91,12 @@ const originals = Object.fromEntries(["open", "fsync", "rename", "close"].map(na
 const paths = new Map();
 let directorySyncIndex = 0;
 let dataRenames = 0;
+const readFailFlag = path.join(path.dirname(fileURLToPath(import.meta.url)), "read-fail");
+const originalReadFileSync = fs.readFileSync.bind(fs);
+fs.readFileSync = (file, ...rest) => {
+  if (String(file).endsWith("data.json") && fs.existsSync(readFailFlag)) throw Object.assign(new Error("read failed"), { code: "EIO" });
+  return originalReadFileSync(file, ...rest);
+};
 const directorySyncPlan = ${JSON.stringify(plan)};
 const record = (name, args) => append(log, JSON.stringify({name, args}) + "\\n");
 fs.open = (...args) => {
@@ -314,6 +320,29 @@ fs.rename = (from, to, cb) => {
         expect(res.status).toBe(500);
       }
       expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ n: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+    } finally {
+      await sse.close();
+    }
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("does not evict when the file cannot be read, so a transient read error never leaks the on-disk failed text", async () => {
+    const port = await startSample(undefined, undefined, atomicPreload(true, undefined, [{ delayMs: 0, fail: true }], 1));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      fs.writeFileSync(path.join(tmpDir, "read-fail"), "");
+      for (let i = 0; i < 17; i++) {
+        const res = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: JSON.stringify({ n: i }) });
+        expect(res.status).toBe(500);
+      }
+      fs.rmSync(path.join(tmpDir, "read-fail"));
+      const onDisk = fs.readFileSync(file, "utf8");
+      expect(JSON.parse(onDisk)).toEqual({ n: 0 });
+      // Reads work again: the first failed text is still remembered, so an
+      // identical watcher notification stays silent.
+      fs.writeFileSync(file, onDisk);
       await new Promise((resolve) => setTimeout(resolve, 600));
       expect(sse.events("data")).toEqual([]);
     } finally {
