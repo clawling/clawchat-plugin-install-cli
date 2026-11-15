@@ -27,8 +27,8 @@
           },
           {
             "path": "openclaw/liveware-sample/server.mjs",
-            "sha256": "efe3a51a3c28e97ef3e30b473a7d3a69461f62da51a53e530f4fa408de5277db",
-            "bytes": 22624
+            "sha256": "5934d5bc71a02e22c386ebaa9cd4e7da12917d883b3b09bf881cf412975ebbab",
+            "bytes": 23047
           },
           {
             "path": "openclaw/liveware-sample/state.json",
@@ -79,8 +79,8 @@
           },
           {
             "path": "openclaw/liveware-sample/server.mjs",
-            "sha256": "efe3a51a3c28e97ef3e30b473a7d3a69461f62da51a53e530f4fa408de5277db",
-            "bytes": 22624
+            "sha256": "5934d5bc71a02e22c386ebaa9cd4e7da12917d883b3b09bf881cf412975ebbab",
+            "bytes": 23047
           },
           {
             "path": "openclaw/liveware-sample/state.json",

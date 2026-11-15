@@ -80,7 +80,8 @@ function stateWithIcon(iconSvg: string) {
 }
 
 describe("liveware-sample server.mjs", () => {
-  function atomicPreload(failRename = false, directorySyncFailureDelayMs?: number) {
+  function atomicPreload(failRename = false, directorySyncFailureDelayMs?: number, directorySyncPlan?: Array<{ delayMs: number; fail: boolean }>) {
+    const plan = directorySyncPlan ?? (directorySyncFailureDelayMs === undefined ? [] : [{ delayMs: directorySyncFailureDelayMs, fail: true }]);
     return `import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,7 +89,8 @@ const log = path.join(path.dirname(fileURLToPath(import.meta.url)), "calls.jsonl
 const append = fs.appendFileSync.bind(fs);
 const originals = Object.fromEntries(["open", "fsync", "rename", "close"].map(name => [name, fs[name].bind(fs)]));
 const paths = new Map();
-let directorySyncFailed = false;
+let directorySyncIndex = 0;
+const directorySyncPlan = ${JSON.stringify(plan)};
 const record = (name, args) => append(log, JSON.stringify({name, args}) + "\\n");
 fs.open = (...args) => {
   const cb = args.pop();
@@ -100,9 +102,11 @@ fs.open = (...args) => {
 };
 fs.fsync = (fd, cb) => {
   record("fsync", [paths.get(fd)]);
-  if (${directorySyncFailureDelayMs !== undefined} && !directorySyncFailed && fs.fstatSync(fd).isDirectory()) {
-    directorySyncFailed = true;
-    return setTimeout(() => cb(Object.assign(new Error("directory fsync failed"), { code: "EIO" })), ${directorySyncFailureDelayMs ?? 0});
+  if (directorySyncIndex < directorySyncPlan.length && fs.fstatSync(fd).isDirectory()) {
+    const step = directorySyncPlan[directorySyncIndex++];
+    return setTimeout(() => step.fail
+      ? cb(Object.assign(new Error("directory fsync failed"), { code: "EIO" }))
+      : originals.fsync(fd, cb), step.delayMs);
   }
   originals.fsync(fd, cb);
 };
@@ -284,6 +288,29 @@ fs.rename = (from, to, cb) => {
       expect((await pending).status).toBe(500);
       const frames = await sse.waitForCount("state", 1);
       expect(frames[0]).toContain('"title":"Edited meanwhile"');
+    } finally {
+      await sse.close();
+    }
+  }, 15_000);
+
+  it.skipIf(process.platform === "win32")("an earlier write's success does not clear a later overlapping write's failure", async () => {
+    // First directory fsync succeeds slowly, second fails fast: without
+    // per-file serialization the second write would rename and fail first.
+    const port = await startSample(undefined, undefined, atomicPreload(false, undefined, [
+      { delayMs: 600, fail: false }, { delayMs: 0, fail: true },
+    ]));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      const first = fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: '{"first":true}' });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const second = fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: '{"second":true}' });
+      expect((await first).status).toBe(200);
+      expect((await second).status).toBe(500);
+      expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ second: true });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      // Only the first PUT's own broadcast; the failed second text is withheld.
+      expect(sse.events("data")).toHaveLength(1);
     } finally {
       await sse.close();
     }

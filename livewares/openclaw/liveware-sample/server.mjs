@@ -85,24 +85,35 @@ function writeFileAtomic(file, text, cb) {
 }
 
 // Watchers must not publish a rename until this process knows it is durable.
-// Count overlapping requests and retain all failed texts until a successful
-// write or a different external value supersedes them.
+// Writes to one file run one at a time, so completions arrive in rename order
+// and a success only clears failures of writes it actually replaced. Failed
+// texts stay suppressed until a later success or different external content.
 const fileWrites = new Map();
 function writeFileForBroadcast(file, text, cb) {
   let writes = fileWrites.get(file);
   if (!writes) {
-    writes = { pending: 0, unconfirmed: new Set() };
+    writes = { pending: 0, queue: [], running: false, unconfirmed: new Set() };
     fileWrites.set(file, writes);
   }
   writes.pending++;
-  writeFileAtomic(file, text, (err) => {
+  writes.queue.push({ text, cb });
+  runFileWrites(file, writes);
+}
+function runFileWrites(file, writes) {
+  if (writes.running) return;
+  const job = writes.queue.shift();
+  if (!job) return;
+  writes.running = true;
+  writeFileAtomic(file, job.text, (err) => {
+    writes.running = false;
     writes.pending--;
-    if (err) writes.unconfirmed.add(text);
+    if (err) writes.unconfirmed.add(job.text);
     else writes.unconfirmed.clear();
-    cb(err);
-    // Watcher events seen while the write was pending were skipped; re-read
+    job.cb(err);
+    if (writes.queue.length) return runFileWrites(file, writes);
+    // Watcher events seen while writes were pending were skipped; re-read
     // once so an external write that landed meanwhile is not lost.
-    if (writes.pending === 0) recheckWatched(file);
+    recheckWatched(file);
   });
 }
 

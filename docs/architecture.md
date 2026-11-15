@@ -568,10 +568,10 @@ the agent to operate this app; the two subsystems ship together.
 `agent.mjs` saves credentials through symlinks with core's synchronous atomic
 ordering/modes; import starts no main/network flow. Liveware uses that ordering
 and umask-filtered `0666` temps. Only success yields 200/request broadcasts.
-Watchers defer pending writes, skip failed `data.json`/`state.json` texts, even after
-rename, until local success or different valid external JSON clears the
-process-local record. Matching data PUT echoes are suppressed for 500 ms;
-different content passes. `events.jsonl` is disposable: appends/truncation are
+Local writes run one per file in order. Watchers defer pending writes and skip
+failed `data.json`/`state.json` texts, even after rename, until a later local
+success or different external JSON clears that record. Matching PUT echoes are
+muted for 500 ms. `events.jsonl` is disposable: appends/truncation are
 best-effort; unreadable contents may be discarded.
 
 | npm script | Command | Purpose |
