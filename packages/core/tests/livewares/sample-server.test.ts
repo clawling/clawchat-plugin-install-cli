@@ -80,7 +80,7 @@ function stateWithIcon(iconSvg: string) {
 }
 
 describe("liveware-sample server.mjs", () => {
-  function atomicPreload(failRename = false) {
+  function atomicPreload(failRename = false, directorySyncFailureDelayMs?: number) {
     return `import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,6 +88,7 @@ const log = path.join(path.dirname(fileURLToPath(import.meta.url)), "calls.jsonl
 const append = fs.appendFileSync.bind(fs);
 const originals = Object.fromEntries(["open", "fsync", "rename", "close"].map(name => [name, fs[name].bind(fs)]));
 const paths = new Map();
+let directorySyncFailed = false;
 const record = (name, args) => append(log, JSON.stringify({name, args}) + "\\n");
 fs.open = (...args) => {
   const cb = args.pop();
@@ -97,13 +98,62 @@ fs.open = (...args) => {
     cb(err, fd);
   });
 };
-fs.fsync = (fd, cb) => { record("fsync", [paths.get(fd)]); originals.fsync(fd, cb); };
+fs.fsync = (fd, cb) => {
+  record("fsync", [paths.get(fd)]);
+  if (${directorySyncFailureDelayMs !== undefined} && !directorySyncFailed && fs.fstatSync(fd).isDirectory()) {
+    directorySyncFailed = true;
+    return setTimeout(() => cb(Object.assign(new Error("directory fsync failed"), { code: "EIO" })), ${directorySyncFailureDelayMs ?? 0});
+  }
+  originals.fsync(fd, cb);
+};
 fs.close = (fd, cb) => { record("close", [paths.get(fd)]); originals.close(fd, cb); };
 fs.rename = (from, to, cb) => {
   record("rename", [from, to]);
   if (${failRename} && path.basename(to) === "data.json") return cb(Object.assign(new Error("rename failed"), { code: "EIO" }));
   originals.rename(from, to, cb);
 };`;
+  }
+
+  async function collectSse(port: number) {
+    const controller = new AbortController();
+    const response = await fetch(`http://127.0.0.1:${port}/sse`, { signal: controller.signal });
+    const reader = response.body!.getReader();
+    const frames: string[] = [];
+    let readError: unknown;
+    const reading = (async () => {
+      let buffered = "";
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffered += decoder.decode(value, { stream: true });
+        let end;
+        while ((end = buffered.indexOf("\n\n")) >= 0) {
+          frames.push(buffered.slice(0, end));
+          buffered = buffered.slice(end + 2);
+        }
+      }
+    })().catch((err) => { if (!controller.signal.aborted) readError = err; });
+    const events = (event: string) => {
+      if (readError) throw readError;
+      return frames.filter(frame => frame.startsWith(`event: ${event}\n`));
+    };
+    return {
+      events,
+      async waitForCount(event: string, count: number) {
+        const deadline = Date.now() + 5_000;
+        while (Date.now() < deadline) {
+          if (events(event).length >= count) return events(event);
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        throw new Error(`did not receive ${count} SSE ${event} event(s)`);
+      },
+      async close() {
+        controller.abort();
+        await reading;
+        reader.releaseLock();
+      },
+    };
   }
 
   it("durably saves data and stage before success, leaving no temporary files", async () => {
@@ -145,6 +195,114 @@ fs.rename = (from, to, cb) => {
     expect(fs.readFileSync(path.join(path.dirname(tmpDir), "data.json"), "utf8")).toBe('{"original":true}');
     expect(fs.readdirSync(path.dirname(tmpDir)).sort()).toEqual(["app", "data.json"]);
   });
+
+  // Windows skips directory fsync in the atomic helper. Delaying its failure
+  // beyond debounce also exercises the gate while the request is in progress.
+  for (const delay of [0, 800]) {
+    it.skipIf(process.platform === "win32").each([
+      { route: "data", method: "PUT", event: "data" },
+      { route: "stage", method: "POST", event: "state" },
+    ])(`withholds failed $route writes from SSE and allows different external content (fsync delay ${delay}ms)`, async ({ route, method, event }) => {
+      const originalState = { stage: "personalized", title: "Original" };
+      const port = await startSample((dir) => {
+        fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify(originalState));
+        fs.writeFileSync(path.join(path.dirname(dir), "data.json"), '{"original":true}');
+      }, undefined, atomicPreload(false, delay));
+      const file = event === "data"
+        ? path.join(path.dirname(tmpDir), "data.json")
+        : path.join(tmpDir, "state.json");
+      const attempted = event === "data" ? { next: true } : { ...originalState, stage: "kept" };
+      const sse = await collectSse(port);
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/${route}`, {
+          method,
+          body: JSON.stringify(event === "data" ? attempted : { stage: "kept" }),
+        });
+        expect(response.status).toBe(500);
+        // The failing directory fsync happens AFTER rename published the file.
+        const failedText = fs.readFileSync(file, "utf8");
+        expect(JSON.parse(failedText)).toEqual(attempted);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(sse.events(event)).toEqual([]);
+
+        // Trigger another watcher notification for the same unconfirmed text.
+        fs.writeFileSync(file, failedText);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(sse.events(event)).toEqual([]);
+
+        const external = { ...attempted, title: "Changed externally" };
+        fs.writeFileSync(file, JSON.stringify(external));
+        const frames = await sse.waitForCount(event, 1);
+        if (event === "state") expect(frames[0]).toContain('"title":"Changed externally"');
+
+        // Different external content clears the record: the old text is now
+        // an ordinary external edit and must no longer be suppressed.
+        fs.writeFileSync(file, failedText);
+        await sse.waitForCount(event, 2);
+      } finally {
+        await sse.close();
+      }
+    }, 20_000);
+  }
+
+  it.skipIf(process.platform === "win32")("clears failed content after a successful PUT and sends no watcher echo", async () => {
+    const port = await startSample(undefined, undefined, atomicPreload(false, 0));
+    const file = path.join(path.dirname(tmpDir), "data.json");
+    const sse = await collectSse(port);
+    try {
+      const put = () => fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: '{"saved":true}' });
+      expect((await put()).status).toBe(500);
+      const failedText = fs.readFileSync(file, "utf8");
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toEqual([]);
+
+      expect((await put()).status).toBe(200);
+      await sse.waitForCount("data", 1);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sse.events("data")).toHaveLength(1);
+
+      fs.writeFileSync(file, failedText);
+      await sse.waitForCount("data", 2);
+    } finally {
+      await sse.close();
+    }
+  }, 15_000);
+
+  it.skipIf(process.platform === "win32")("re-reads after a pending write so an external edit made meanwhile still reaches SSE", async () => {
+    const port = await startSample((dir) => {
+      fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify({ stage: "personalized", title: "Original" }));
+    }, undefined, atomicPreload(false, 800));
+    const file = path.join(tmpDir, "state.json");
+    const sse = await collectSse(port);
+    try {
+      const pending = fetch(`http://127.0.0.1:${port}/stage`, { method: "POST", body: '{"stage":"kept"}' });
+      // Land an external edit while the failing directory fsync is still pending.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      fs.writeFileSync(file, JSON.stringify({ stage: "kept", title: "Edited meanwhile" }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(sse.events("state")).toEqual([]);
+      expect((await pending).status).toBe(500);
+      const frames = await sse.waitForCount("state", 1);
+      expect(frames[0]).toContain('"title":"Edited meanwhile"');
+    } finally {
+      await sse.close();
+    }
+  }, 15_000);
+
+  it("broadcasts different external data immediately after a successful PUT", async () => {
+    const port = await startSample();
+    const sse = await collectSse(port);
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/data`, { method: "PUT", body: '{"saved":true}' });
+      expect(response.status).toBe(200);
+      await sse.waitForCount("data", 1);
+      fs.writeFileSync(path.join(path.dirname(tmpDir), "data.json"), '{"external":true}');
+      await sse.waitForCount("data", 2);
+    } finally {
+      await sse.close();
+    }
+  }, 15_000);
+
   it("serves page, state, records events, pushes SSE on state change", async () => {
     const port = await startSample();
     const base = `http://127.0.0.1:${port}`;

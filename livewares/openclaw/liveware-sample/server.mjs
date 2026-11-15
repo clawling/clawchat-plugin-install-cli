@@ -84,6 +84,28 @@ function writeFileAtomic(file, text, cb) {
   });
 }
 
+// Watchers must not publish a rename until this process knows it is durable.
+// Count overlapping requests and retain all failed texts until a successful
+// write or a different external value supersedes them.
+const fileWrites = new Map();
+function writeFileForBroadcast(file, text, cb) {
+  let writes = fileWrites.get(file);
+  if (!writes) {
+    writes = { pending: 0, unconfirmed: new Set() };
+    fileWrites.set(file, writes);
+  }
+  writes.pending++;
+  writeFileAtomic(file, text, (err) => {
+    writes.pending--;
+    if (err) writes.unconfirmed.add(text);
+    else writes.unconfirmed.clear();
+    cb(err);
+    // Watcher events seen while the write was pending were skipped; re-read
+    // once so an external write that landed meanwhile is not lost.
+    if (writes.pending === 0) recheckWatched(file);
+  });
+}
+
 function stateWithMeta(state) {
   // state.json is agent-writable and the page renders deep links from this
   // field — only the supervisor-provided CLI value may populate it, so strip
@@ -201,19 +223,46 @@ function debounced(ms, fn) {
     timer = setTimeout(fn, ms);
   };
 }
+function readWatchedJson(file) {
+  const writes = fileWrites.get(file);
+  if (writes?.pending) return null;
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    // Removing data.json still tells the page to re-fetch its empty default.
+    return file === DATA_FILE && err.code === "ENOENT" ? { value: null, text: null } : null;
+  }
+  if (writes?.unconfirmed.has(text)) return null;
+  try {
+    const value = JSON.parse(text);
+    if (value == null) return null;
+    writes?.unconfirmed.clear();
+    return { value, text };
+  } catch {
+    return null; // wait for a settled external write
+  }
+}
 const notifyState = debounced(100, () => {
-  const state = readStateJson();
-  if (state != null) broadcast("state", stateWithMeta(state));
+  const state = readWatchedJson(STATE_FILE);
+  if (state) broadcast("state", stateWithMeta(state.value));
 });
 // A /data PUT writes data.json itself and broadcasts right away; the watcher's
 // echo of that same write is swallowed for a short window so clients don't
 // re-fetch twice.
 let selfWriteUntil = 0;
+let selfWriteText = null;
 const notifyData = debounced(100, () => {
-  if (Date.now() < selfWriteUntil) return;
-  if (!fs.existsSync(DATA_FILE) || readJsonFile(DATA_FILE) != null) broadcast("data", {});
+  const data = readWatchedJson(DATA_FILE);
+  if (!data) return;
+  if (Date.now() < selfWriteUntil && data.text === selfWriteText) return;
+  broadcast("data", {});
 });
 const notifyTool = debounced(150, () => broadcast("tool", {}));
+function recheckWatched(file) {
+  if (file === STATE_FILE) notifyState();
+  else if (file === DATA_FILE) notifyData();
+}
 
 fs.watch(dir, (_event, filename) => {
   if (filename === "state.json") notifyState();
@@ -396,12 +445,14 @@ function putData(req, res) {
       res.writeHead(400, { "content-type": "application/json" }).end('{"error":"expected a JSON object"}');
       return;
     }
-    writeFileAtomic(DATA_FILE, JSON.stringify(parsed, null, 2) + "\n", (err) => {
+    const text = JSON.stringify(parsed, null, 2) + "\n";
+    writeFileForBroadcast(DATA_FILE, text, (err) => {
       if (err) {
         res.writeHead(500, { "content-type": "application/json" }).end('{"error":"write failed"}');
         return;
       }
       selfWriteUntil = Date.now() + 500;
+      selfWriteText = text;
       broadcast("data", {});
       res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
     });
@@ -426,7 +477,7 @@ function postStage(req, res) {
       return res.writeHead(409, { "content-type": "application/json" }).end('{"error":"not in personalized stage"}');
     }
     const next = { ...state, stage: "kept" };
-    writeFileAtomic(STATE_FILE, JSON.stringify(next, null, 2) + "\n", (err) => {
+    writeFileForBroadcast(STATE_FILE, JSON.stringify(next, null, 2) + "\n", (err) => {
       if (err) return res.writeHead(500, { "content-type": "application/json" }).end('{"error":"write failed"}');
       capEventsFileIfNeeded();
       fs.appendFile(EVENTS_FILE, JSON.stringify({ ts: Date.now(), type: "keep", payload: { tool: next.tool ?? null } }) + "\n", () => {});
