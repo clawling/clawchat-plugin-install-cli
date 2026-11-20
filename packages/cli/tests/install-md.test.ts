@@ -93,6 +93,13 @@ describe("published runtime guides", () => {
     expect(step2).toContain("`hermes clawchat activate`\nalso needs no Node");
   });
 
+  it("install.md direct OpenClaw installs select the npm source explicitly", () => {
+    const step2 = install.split("## 2. Install")[1]?.split("\n## 3.")[0] ?? "";
+    expect(step2).toContain("openclaw plugins install npm:@clawling/clawchat-plugin-openclaw --force --accept-capabilities");
+    expect(step2).toContain("openclaw plugins install npm:@clawling/clawchat-plugin-openclaw@2026.10.9-2 --force");
+    expect(step2).not.toMatch(/openclaw plugins install @clawling\//);
+  });
+
   it("install.md documents automatic metadata fallback and non-interactive dependency recovery", () => {
     const step2 = install.split("## 2. Install")[1]?.split("\n## 3.")[0] ?? "";
     expect(step2).toContain("automatically uses");

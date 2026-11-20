@@ -1,5 +1,6 @@
 import {
   OPENCLAW_ACCEPT_CAPABILITIES_FLAG,
+  OPENCLAW_NPM_SOURCE_PREFIX,
   OPENCLAW_UNSAFE_INSTALL_FLAG,
 } from "../config";
 import { writeOpenClawBaseUrls } from "../baseurl/write-openclaw";
@@ -44,6 +45,12 @@ async function pluginCommandArgs(
 ): Promise<string[]> {
   const accepts = await hostAcceptsCapabilityFlag(capture);
   return accepts ? [...args, OPENCLAW_ACCEPT_CAPABILITIES_FLAG] : [...args];
+}
+
+function openClawInstallArgs(spec: string): string[] {
+  // Select npm explicitly. OpenClaw 2026.8+ needs --force to confirm a non-ClawHub
+  // source. On older hosts --force allows replacing an existing plugin.
+  return ["plugins", "install", `${OPENCLAW_NPM_SOURCE_PREFIX}${spec}`, "--force", OPENCLAW_UNSAFE_INSTALL_FLAG];
 }
 
 /**
@@ -112,17 +119,7 @@ export async function installOpenClawPlugin(options: InstallerOptions = {}): Pro
   progress?.(force ? "Reinstalling OpenClaw plugin..." : "Installing OpenClaw plugin...");
   const spec = await openClawSpec(capture, options.ref, progress);
   await repairStaleOpenClawWorkspace(run, capture);
-  // --force is unconditional on install: OpenClaw 2026.8 widened it to also mean
-  // "confirm this non-ClawHub source", and the ClawChat plugin is always npm-sourced, so
-  // without it the install is cancelled outright. On older hosts it only means "overwrite
-  // an existing plugin", which is what an idempotent re-install wants anyway.
-  const args = await pluginCommandArgs(capture, [
-    "plugins",
-    "install",
-    spec,
-    "--force",
-    OPENCLAW_UNSAFE_INSTALL_FLAG,
-  ]);
+  const args = await pluginCommandArgs(capture, openClawInstallArgs(spec));
   try {
     await run("openclaw", args);
   } catch (error) {
@@ -154,10 +151,11 @@ export async function updateOpenClawPlugin(options: InstallerOptions = {}): Prom
   progress?.(force ? "Reinstalling OpenClaw plugin..." : "Updating OpenClaw plugin...");
   const spec = await openClawSpec(capture, options.ref, progress);
   await repairStaleOpenClawWorkspace(run, capture);
+  // OpenClaw uses the unprefixed spec to look up the tracked install on update.
   const args = await pluginCommandArgs(
     capture,
     force
-      ? ["plugins", "install", spec, "--force", OPENCLAW_UNSAFE_INSTALL_FLAG]
+      ? openClawInstallArgs(spec)
       : ["plugins", "update", spec, OPENCLAW_UNSAFE_INSTALL_FLAG],
   );
   try {

@@ -264,19 +264,18 @@ put its `bin` on `PATH` in the same call, e.g.
 (`/opt/hermes/.venv/bin` in Docker; PowerShell: prepend the venv's `Scripts`
 to `$env:PATH` as in step 1, in the same call).
 
-The CLI reads `openclaw --version`: 2026.5.4 to <2026.8.1 gets the last compatible
-plugin, `2026.10.9-2`; older hosts stop before config writes with upgrade advice.
-Unreadable versions are reported and use the unpinned spec.
-`--target openclaw@<ref>` skips version selection.
+The CLI checks `openclaw --version` and pins `2026.10.9-2` on 2026.5.4 to
+<2026.8.1. Older hosts stop before config writes with upgrade advice.
+The CLI reports unreadable versions and uses the unpinned spec.
+`--target openclaw@<ref>` skips this check.
 
-The CLI delegates to the host's plugin manager (OpenClaw -> `openclaw plugins
-install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`,
-plus `--accept-capabilities` when advertised; Hermes -> version checks, then
-`hermes plugins install clawling/clawchat-plugin-hermes-agent`). If the metadata
-read fails in transit on a fresh or forced install, the CLI automatically uses
-that host install alone, skipping CLI version / host compatibility checks from
-metadata (excluded Hermes versions stay blocked). An installed plugin without
-`--force` still needs metadata. Invalid metadata stops the CLI. The host's scan gate is unchanged.
+The CLI delegates to the host plugin manager. For OpenClaw it passes
+`--dangerously-force-unsafe-install` and adds `--accept-capabilities` when
+advertised. For Hermes it checks compatibility first. If metadata transport
+fails on a fresh or forced install, the CLI automatically uses the host install,
+skipping CLI version / host compatibility checks from metadata. Excluded Hermes
+versions stay blocked and the host scan still applies. Installed plugins need
+metadata unless forced. Invalid metadata stops the CLI.
 
 **If the CLI still fails on a network / GitHub error**, use the direct host
 path below, never CLI `--force` for a network failure.
@@ -285,14 +284,16 @@ path below, never CLI `--force` for a network failure.
 # Hermes
 hermes plugins install clawling/clawchat-plugin-hermes-agent --enable
 # OpenClaw 2026.8.1 and newer
-openclaw plugins install @clawling/clawchat-plugin-openclaw --force --accept-capabilities
+openclaw plugins install npm:@clawling/clawchat-plugin-openclaw --force --accept-capabilities
 # OpenClaw 2026.5.4 up to (not including) 2026.8.1
-openclaw plugins install @clawling/clawchat-plugin-openclaw@2026.10.9-2 --force --dangerously-force-unsafe-install
+openclaw plugins install npm:@clawling/clawchat-plugin-openclaw@2026.10.9-2 --force --dangerously-force-unsafe-install
 ```
 
-OpenClaw 2026.8+ requires both `--force` (npm/non-ClawHub source) and
-`--accept-capabilities` (declared capabilities); otherwise installation is refused.
-Unsure? `openclaw plugins install --help`.
+OpenClaw 2026.11.5+ looks up unprefixed package names only on ClawHub, so an
+unprefixed ClawChat install fails with "Package not found on ClawHub."
+The `npm:` prefix selects npm on every supported host. OpenClaw 2026.8+
+requires `--force` to confirm the npm source and `--accept-capabilities` for
+consent. See `openclaw plugins install --help`.
 
 Direct Hermes installs need GitHub; never disable certificate verification -
 ask the owner for a reachable source.

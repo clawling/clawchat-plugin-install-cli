@@ -7,6 +7,7 @@ import { ClawchatError } from "../../src/errors";
 import { classifyInstallFailure } from "../../src/progress-report";
 
 const OPENCLAW_PLUGIN_SPEC = "@clawling/clawchat-plugin-openclaw";
+const OPENCLAW_NPM_SPEC = `npm:${OPENCLAW_PLUGIN_SPEC}`;
 const UNSAFE_FLAG = "--dangerously-force-unsafe-install";
 
 // Capability flags are selected from help independently of the version probe.
@@ -31,8 +32,84 @@ const VERSION_PROBE: [string, string[]] = ["openclaw", ["--version"]];
 // Asked after the install to tell a QClaw config from a stock OpenClaw one.
 const CONFIG_FILE_PROBE: [string, string[]] = ["openclaw", ["config", "file"]];
 
+describe("OpenClaw npm source prefix", () => {
+  it("selects npm explicitly on install", async () => {
+    const run = vi.fn(async () => undefined);
+    const capture = mockHostWorkspaceCapture("OpenClaw 2026.11.5");
+
+    await expect(installOpenClawPlugin({ run, capture })).resolves.toMatchObject({
+      kind: "plugin",
+      target: "openclaw",
+      status: "installed",
+    });
+
+    expect(run.mock.calls).toEqual([
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
+    ]);
+    expect(capture.mock.calls).toEqual([
+      VERSION_PROBE,
+      ["openclaw", ["config", "get", "agents.defaults.workspace"]],
+      CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
+    ]);
+  });
+
+  it("uses the unprefixed package name for a normal update", async () => {
+    const run = vi.fn(async () => undefined);
+    const capture = mockHostWorkspaceCapture("OpenClaw 2026.11.5");
+
+    await expect(updateOpenClawPlugin({ run, capture })).resolves.toMatchObject({
+      kind: "plugin",
+      target: "openclaw",
+      status: "updated",
+    });
+
+    expect(run.mock.calls).toEqual([
+      ["openclaw", ["plugins", "update", OPENCLAW_PLUGIN_SPEC, UNSAFE_FLAG]],
+    ]);
+    expect(capture.mock.calls).toEqual([
+      VERSION_PROBE,
+      ["openclaw", ["config", "get", "agents.defaults.workspace"]],
+      CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
+    ]);
+  });
+
+  it("reinstalls from npm on a forced update", async () => {
+    const run = vi.fn(async () => undefined);
+    const capture = mockHostWorkspaceCapture("OpenClaw 2026.11.5");
+
+    await expect(updateOpenClawPlugin({ run, capture, force: true })).resolves.toMatchObject({
+      kind: "plugin",
+      target: "openclaw",
+      status: "updated",
+    });
+
+    expect(run.mock.calls).toEqual([
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
+    ]);
+    expect(capture.mock.calls).toEqual([
+      VERSION_PROBE,
+      ["openclaw", ["config", "get", "agents.defaults.workspace"]],
+      CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
+    ]);
+  });
+
+  it("installs the pinned version from npm on the oldest supported host", async () => {
+    const run = vi.fn(async () => undefined);
+
+    await installOpenClawPlugin({ run, capture: mockHostWorkspaceCapture("OpenClaw 2026.5.4") });
+
+    expect(run.mock.calls).toEqual([
+      ["openclaw", ["plugins", "install", `${OPENCLAW_NPM_SPEC}@2026.10.9-2`, "--force", UNSAFE_FLAG]],
+    ]);
+  });
+});
+
 describe("OpenClaw host compatibility", () => {
   const pinnedSpec = `${OPENCLAW_PLUGIN_SPEC}@2026.10.9-2`;
+  const pinnedNpmSpec = `${OPENCLAW_NPM_SPEC}@2026.10.9-2`;
 
   it.each([installOpenClawPlugin, updateOpenClawPlugin])("stops an unsupported host before any other host command or config write (%s)", async (action) => {
     const capture = mockHostWorkspaceCapture("OpenClaw 2026.4.14");
@@ -54,17 +131,17 @@ describe("OpenClaw host compatibility", () => {
   });
 
   it.each([
-    [installOpenClawPlugin, false, "install"],
-    [updateOpenClawPlugin, false, "update"],
-    [updateOpenClawPlugin, true, "install"],
-  ] as const)("pins the last compatible release for an older supported host (%s, force=%s)", async (action, force, command) => {
+    [installOpenClawPlugin, false, ["install", pinnedNpmSpec, "--force"]],
+    [updateOpenClawPlugin, false, ["update", pinnedSpec]],
+    [updateOpenClawPlugin, true, ["install", pinnedNpmSpec, "--force"]],
+  ] as const)("pins the last compatible release for an older supported host (%s, force=%s)", async (action, force, args) => {
     const run = vi.fn(async () => undefined);
     const capture = mockHostWorkspaceCapture("OpenClaw 2026.6.20");
     const progress = vi.fn();
     await action({ run, capture, force, onProgress: progress });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", command, pinnedSpec, ...(command === "install" ? ["--force"] : []), UNSAFE_FLAG]],
+      ["openclaw", ["plugins", ...args, UNSAFE_FLAG]],
     ]);
     expect(capture.mock.calls).toEqual([
       VERSION_PROBE,
@@ -79,7 +156,7 @@ describe("OpenClaw host compatibility", () => {
     const run = vi.fn(async () => undefined);
     await installOpenClawPlugin({ run, capture: mockHostWorkspaceCapture(version) });
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 
@@ -89,7 +166,7 @@ describe("OpenClaw host compatibility", () => {
     const capture = mockHostWorkspaceCapture(version);
     await installOpenClawPlugin({ run, capture, onProgress: progress });
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
     expect(capture.mock.calls).toEqual([
       VERSION_PROBE,
@@ -100,13 +177,29 @@ describe("OpenClaw host compatibility", () => {
     expect(progress).toHaveBeenCalledWith(expect.stringContaining("version could not be read"));
   });
 
-  it.each([installOpenClawPlugin, updateOpenClawPlugin])("lets an explicit ref win without probing the host version (%s)", async (action) => {
+  it.each([
+    [installOpenClawPlugin, ["install", pinnedNpmSpec, "--force"]],
+    [updateOpenClawPlugin, ["update", pinnedSpec]],
+  ] as const)("lets an explicit ref win without probing the host version (%s)", async (action, args) => {
     const run = vi.fn(async () => undefined);
     const capture = mockHostWorkspaceCapture("OpenClaw 2026.4.14");
     await action({ run, capture, ref: "2026.10.9-2" });
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", action === installOpenClawPlugin ? "install" : "update", pinnedSpec,
-        ...(action === installOpenClawPlugin ? ["--force"] : []), UNSAFE_FLAG]],
+      ["openclaw", ["plugins", ...args, UNSAFE_FLAG]],
+    ]);
+    expect(capture.mock.calls).toEqual([
+      ["openclaw", ["config", "get", "agents.defaults.workspace"]],
+      CAPABILITY_PROBE,
+      CONFIG_FILE_PROBE,
+    ]);
+  });
+
+  it("reinstalls an explicit ref from npm on update --force without probing the host version", async () => {
+    const run = vi.fn(async () => undefined);
+    const capture = mockHostWorkspaceCapture("OpenClaw 2026.4.14");
+    await updateOpenClawPlugin({ run, capture, ref: "2026.10.9-2", force: true });
+    expect(run.mock.calls).toEqual([
+      ["openclaw", ["plugins", "install", pinnedNpmSpec, "--force", UNSAFE_FLAG]],
     ]);
     expect(capture.mock.calls).toEqual([
       ["openclaw", ["config", "get", "agents.defaults.workspace"]],
@@ -117,9 +210,11 @@ describe("OpenClaw host compatibility", () => {
 });
 
 describe("OpenClaw host refusal advice", () => {
-  const prereleaseLine = `Resolved ${OPENCLAW_PLUGIN_SPEC} to prerelease version 2026.10.27-1, but prereleases are only installed when explicitly requested. Use "${OPENCLAW_PLUGIN_SPEC}@beta" (or another prerelease tag) or an exact prerelease version to opt in explicitly.`;
-
-  it.each([installOpenClawPlugin, updateOpenClawPlugin])("explains a host prerelease refusal with upgrade and exact-version advice (%s)", async (action) => {
+  it.each([
+    [installOpenClawPlugin, OPENCLAW_NPM_SPEC],
+    [updateOpenClawPlugin, OPENCLAW_PLUGIN_SPEC],
+  ] as const)("explains a host prerelease refusal with upgrade and exact-version advice (%s)", async (action, spec) => {
+    const prereleaseLine = `Resolved ${spec} to prerelease version 2026.10.27-1, but prereleases are only installed when explicitly requested. Use "${spec}@beta" (or another prerelease tag) or an exact prerelease version to opt in explicitly.`;
     const run = vi.fn(async () => { throw new ClawchatError("SUBPROCESS", `openclaw failed with exit code 1: ${prereleaseLine}`); });
     const error = await action({ run, capture: mockHostWorkspaceCapture("unknown wrapper") }).catch((err) => err);
     expect(error).toBeInstanceOf(ClawchatError);
@@ -168,7 +263,7 @@ describe("OpenClaw host refusal advice", () => {
       expect(error.message).not.toContain(text);
     }
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
     expect(capture.mock.calls).toEqual([
       VERSION_PROBE, ["openclaw", ["config", "get", "agents.defaults.workspace"]], CAPABILITY_PROBE,
@@ -189,27 +284,6 @@ describe("OpenClaw installer", () => {
     vi.unstubAllEnvs();
   });
 
-  it("delegates install to OpenClaw's npm plugin installer", async () => {
-    const run = vi.fn(async () => undefined);
-    const capture = mockHostWorkspaceCapture();
-
-    await expect(installOpenClawPlugin({ run, capture })).resolves.toMatchObject({
-      kind: "plugin",
-      target: "openclaw",
-      status: "installed",
-    });
-
-    expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
-    ]);
-    expect(capture.mock.calls).toEqual([
-      VERSION_PROBE,
-      ["openclaw", ["config", "get", "agents.defaults.workspace"]],
-      CAPABILITY_PROBE,
-      CONFIG_FILE_PROBE,
-    ]);
-  });
-
   it("repairs a stale container workspace before installing on the host", async () => {
     vi.stubEnv("HOME", "/Users/alice");
     const run = vi.fn(async () => undefined);
@@ -228,7 +302,7 @@ describe("OpenClaw installer", () => {
 
     expect(run.mock.calls).toEqual([
       ["openclaw", ["config", "set", "agents.defaults.workspace", "~/.openclaw/workspace"]],
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 
@@ -249,7 +323,7 @@ describe("OpenClaw installer", () => {
     });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 
@@ -269,7 +343,7 @@ describe("OpenClaw installer", () => {
     });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 
@@ -284,49 +358,7 @@ describe("OpenClaw installer", () => {
     });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
-    ]);
-    expect(capture.mock.calls).toEqual([
-      VERSION_PROBE,
-      ["openclaw", ["config", "get", "agents.defaults.workspace"]],
-      CAPABILITY_PROBE,
-      CONFIG_FILE_PROBE,
-    ]);
-  });
-
-  it("delegates update to OpenClaw's npm plugin updater", async () => {
-    const run = vi.fn(async () => undefined);
-    const capture = mockHostWorkspaceCapture();
-
-    await expect(updateOpenClawPlugin({ run, capture })).resolves.toMatchObject({
-      kind: "plugin",
-      target: "openclaw",
-      status: "updated",
-    });
-
-    expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "update", OPENCLAW_PLUGIN_SPEC, UNSAFE_FLAG]],
-    ]);
-    expect(capture.mock.calls).toEqual([
-      VERSION_PROBE,
-      ["openclaw", ["config", "get", "agents.defaults.workspace"]],
-      CAPABILITY_PROBE,
-      CONFIG_FILE_PROBE,
-    ]);
-  });
-
-  it("uses forced install for forced OpenClaw updates", async () => {
-    const run = vi.fn(async () => undefined);
-    const capture = mockHostWorkspaceCapture();
-
-    await expect(updateOpenClawPlugin({ run, capture, force: true })).resolves.toMatchObject({
-      kind: "plugin",
-      target: "openclaw",
-      status: "updated",
-    });
-
-    expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
     expect(capture.mock.calls).toEqual([
       VERSION_PROBE,
@@ -344,7 +376,7 @@ describe("OpenClaw installer", () => {
     await installOpenClawPlugin({ run, capture, ref: "dev", writeBaseUrls });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", "@clawling/clawchat-plugin-openclaw@dev", "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", `${OPENCLAW_NPM_SPEC}@dev`, "--force", UNSAFE_FLAG]],
     ]);
     expect(capture.mock.calls).toEqual([
       ["openclaw", ["config", "get", "agents.defaults.workspace"]],
@@ -450,7 +482,7 @@ describe("OpenClaw installer capability consent", () => {
     expect(run.mock.calls).toEqual([
       [
         "openclaw",
-        ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG, "--accept-capabilities"],
+        ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG, "--accept-capabilities"],
       ],
     ]);
   });
@@ -461,7 +493,7 @@ describe("OpenClaw installer capability consent", () => {
     await installOpenClawPlugin({ run, capture: captureWithHelp(LEGACY_HELP) });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 
@@ -490,7 +522,7 @@ describe("OpenClaw installer capability consent", () => {
     await installOpenClawPlugin({ run, capture });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 });
@@ -507,7 +539,7 @@ describe("OpenClaw installer non-ClawHub source confirmation", () => {
     await installOpenClawPlugin({ run, capture: mockHostWorkspaceCapture() });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 
@@ -517,7 +549,7 @@ describe("OpenClaw installer non-ClawHub source confirmation", () => {
     await installOpenClawPlugin({ run, capture: mockHostWorkspaceCapture(), force: true });
 
     expect(run.mock.calls).toEqual([
-      ["openclaw", ["plugins", "install", OPENCLAW_PLUGIN_SPEC, "--force", UNSAFE_FLAG]],
+      ["openclaw", ["plugins", "install", OPENCLAW_NPM_SPEC, "--force", UNSAFE_FLAG]],
     ]);
   });
 });

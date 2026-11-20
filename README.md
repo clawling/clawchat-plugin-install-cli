@@ -21,9 +21,11 @@ npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
 For OpenClaw, `install` delegates to
-`openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`
+`openclaw plugins install npm:@clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`
 (plus `--accept-capabilities` on OpenClaw >=2026.8, which requires both flags to install
 an npm-sourced plugin at all).
+The `npm:` prefix selects npm on all supported hosts. OpenClaw 2026.11.5+ looks
+up unprefixed install specs on ClawHub only.
 Both `install` and `update` may also rewrite the user's OpenClaw config
 (`OPENCLAW_CONFIG_PATH`, else `<OPENCLAW_STATE_DIR>/openclaw.json`, else `~/.openclaw/openclaw.json`)
 after that call: a config still referencing the pre-rename `openclaw-clawchat`
@@ -93,6 +95,8 @@ npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes
 
 For OpenClaw, `update` delegates to
 `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`.
+The host looks up the tracked install by its unprefixed package spec.
+`update --force` reinstalls with the same `npm:` install command shown above.
 
 For Hermes, `update` requires an installed plugin and delegates to
 `hermes plugins update clawchat` followed by `hermes plugins enable clawchat`,
