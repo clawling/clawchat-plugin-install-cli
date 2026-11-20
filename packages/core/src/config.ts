@@ -1,6 +1,8 @@
 export const DEFAULT_BASE_URL = "https://app.clawling.com";
 export const OPENCLAW_CHANNEL = "clawchat-plugin-openclaw";
 export const OPENCLAW_PLUGIN_SPEC = "@clawling/clawchat-plugin-openclaw";
+// OpenClaw >=2026.11.5 resolves unprefixed specs on ClawHub only. The documented `npm:` source works back to 2026.5.4. `plugins update` needs the bare spec to find the tracked install.
+export const OPENCLAW_NPM_SOURCE_PREFIX = "npm:";
 // Newest first. Keep in sync with the plugin's openclaw.install.minHostVersion
 // whenever a release raises it. Each pin is the last release declaring the lower minimum.
 // An omitted pluginVersion selects the unpinned spec (latest).

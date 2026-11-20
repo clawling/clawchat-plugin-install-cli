@@ -84,6 +84,10 @@ The CLI shells out to `openclaw plugins …` or `hermes plugins …` with the
 package spec from `packages/core/src/config.ts`:
 
 - `OPENCLAW_PLUGIN_SPEC = "@clawling/clawchat-plugin-openclaw"`
+- `OPENCLAW_NPM_SOURCE_PREFIX = "npm:"` selects npm for `plugins install`,
+  including forced updates. OpenClaw 2026.11.5+ only checks ClawHub for
+  unprefixed install specs. `plugins update` uses the unprefixed spec to find
+  the tracked install.
 - `HERMES_PLUGIN_SPEC   = "clawling/clawchat-plugin-hermes-agent"`
 - `HERMES_PLUGIN_NAME   = "clawchat"` (the installed-plugin identifier)
 
@@ -92,11 +96,12 @@ To iterate against an unreleased sibling plugin:
 1. Build or stage the sibling plugin so the host plugin manager can install
    it from a local source (for OpenClaw, this is typically a packed tarball
    or `file:` ref; for Hermes, a local clone path or fork).
-2. Build this CLI: `pnpm --filter @clawling/clawchat-plugin-install-cli build`.
-3. Invoke directly: `node packages/cli/dist/index.cjs install --target <target>`.
-4. If you need the CLI to point at a different package spec, patch
-   `packages/core/src/config.ts` temporarily — there is no environment
-   variable override today.
+2. To try a different remote package, temporarily patch
+   `packages/core/src/config.ts`. For a local OpenClaw source, temporarily pass
+   the local spec in place of the prefixed argument in `openClawInstallArgs`.
+   The CLI has no environment variable override for package specs.
+3. Build this CLI with `pnpm --filter @clawling/clawchat-plugin-install-cli build`.
+4. Invoke it with `node packages/cli/dist/index.cjs install --target <target>`.
 
 The repository contains end-to-end coverage for the bootstrap script in
 `packages/cli/tests/install-script.test.ts`. The tests stand up a temporary

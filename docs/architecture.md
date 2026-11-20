@@ -145,10 +145,8 @@ table in `packages/core/src/config.ts` selects the spec:
 
 A failed or unparseable version probe reports that the version could not be
 read and keeps the unpinned path. Explicit `--target openclaw@<ref>` skips this
-probe and selection; the ref wins. This automatic selection fixes unsupported
-installs while keeping the current spec on supported current hosts. When a
-plugin release raises `openclaw.install.minHostVersion`, update the table and
-pin the last release declaring the previous minimum.
+probe and selection. When a plugin release raises `openclaw.install.minHostVersion`,
+update the table and pin the last release declaring the previous minimum.
 
 Before install or update, the CLI reads
 `openclaw config get agents.defaults.workspace`. If a host process has
@@ -160,15 +158,16 @@ OpenClaw plugin manager remains responsible for reporting that state.
 
 | CLI call | Subprocess |
 |----------|------------|
-| `install --target openclaw` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
+| `install --target openclaw` | `openclaw plugins install npm:@clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
 | `install --target openclaw --force` | same as above (`--force` is already unconditional on install) |
 | `update --target openclaw` | `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install` |
-| `update --target openclaw --force` | `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
+| `update --target openclaw --force` | `openclaw plugins install npm:@clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install` |
 
-The package spec in each row is replaced by the selected pin or explicit ref.
-On a host whose `openclaw plugins install --help` advertises `--accept-capabilities`
-(OpenClaw >=2026.8), that flag is appended to every line above. See
-[capability consent](#capability-consent-and-the-non-clawhub-source-gate).
+Each command uses the selected pin or explicit ref when present. `npm:` selects
+npm even on hosts that only search ClawHub for unprefixed install specs.
+`plugins update` uses the unprefixed spec to find the tracked install.
+All rows add `--accept-capabilities` when the host advertises it.
+See [capability consent](#capability-consent-and-the-non-clawhub-source-gate).
 
 Known `SUBPROCESS` refusals from delegated install/update calls become actionable
 errors: prerelease refusal → `PRERELEASE_REFUSED` (retain the host line, advise
@@ -239,30 +238,26 @@ described above.
 
 #### Capability consent and the non-ClawHub source gate
 
-OpenClaw 2026.8 added two gates that abort a delegated install before the plugin
-lands. Both are handled on the command line built by `pluginCommandArgs`:
+OpenClaw 2026.8 added two gates handled by the delegated commands.
 
 - **Capability consent.** Without `--accept-capabilities`, `plugins install` fails with
-  `Plugin "clawchat-plugin-openclaw" requires capability consent`. The flag cannot be
-  passed unconditionally: 2026.6.x/2026.7.x reject unknown options outright
-  (`OpenClaw does not recognize option "--accept-capabilities"`). The CLI therefore reads
-  the host's own `plugins install --help` and appends the flag only when the host
-  advertises it; a failed probe falls back to the pre-2026.8 command line.
-- **Non-ClawHub source.** 2026.8 widened `--force` to also mean "confirm this
-  non-ClawHub source". Since this plugin is always installed from npm, a plain
-  install without it is cancelled (`Install cancelled; rerun with --force after
-  reviewing the source`). `--force` is therefore unconditional on `install`. On older
-  hosts it only means "overwrite an existing plugin", which is what an idempotent
-  re-install wants anyway. `plugins update` has no such gate and is left unforced.
+  `Plugin "clawchat-plugin-openclaw" requires capability consent`. Versions 2026.6.x
+  and 2026.7.x reject the flag (`OpenClaw does not recognize option "--accept-capabilities"`).
+  The CLI adds it when the host's `plugins install --help` advertises it. On probe
+  failure it uses the pre-2026.8 command line.
+- **Non-ClawHub source.** `--force` confirms the npm source on 2026.8+.
+  Without it the host cancels (`Install cancelled; rerun with --force after
+  reviewing the source`). On older hosts it only allows replacement.
+  All `plugins install` calls pass `--force`. `plugins update` has no source gate.
 
 Verified against OpenClaw 2026.6.34, 2026.7.1, and 2026.8.2.
 
-The npm package name `@clawling/clawchat-plugin-openclaw` is the constant
-`OPENCLAW_PLUGIN_SPEC` in `packages/core/src/config.ts`. Every delegated
-`openclaw plugins install`/`openclaw plugins update` passes
-`--dangerously-force-unsafe-install` (constant `OPENCLAW_UNSAFE_INSTALL_FLAG`).
-The flag is a registered option on both the `install` and `update` subcommands,
-so passing it never errors with "unknown flag".
+In `packages/core/src/config.ts`, `OPENCLAW_PLUGIN_SPEC` holds the package name
+and `OPENCLAW_NPM_SOURCE_PREFIX` holds `npm:`. OpenClaw 2026.11.5+ searches
+ClawHub only for unprefixed install specs. The explicit npm source works back
+to 2026.5.4. `plugins update` resolves the source from the tracked install
+matched by the unprefixed spec. Both subcommands support and receive
+`--dangerously-force-unsafe-install` (`OPENCLAW_UNSAFE_INSTALL_FLAG`).
 
 #### Why the flag, and how it behaves per OpenClaw version
 

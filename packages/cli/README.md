@@ -12,7 +12,18 @@ npx -y @clawling/clawchat-plugin-install-cli@latest install --target openclaw
 npx -y @clawling/clawchat-plugin-install-cli@latest install --target hermes
 ```
 
-For OpenClaw, `install` delegates to `openclaw plugins install @clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`. `--force` is unconditional on install; the CLI also appends `--accept-capabilities` when the host's install help advertises it. ClawChat is a third-party (non-catalog) plugin: on older OpenClaw the unsafe-install flag bypasses the install-time safety scan that would block it, and on newer OpenClaw it is a deprecated no-op (installs allowed by default; operator gating via `security.installPolicy`) — safe on both. For Hermes, `install` first fetches the remote `plugin.yaml`, validates that `hermes --version` satisfies the declared requirement, and only then installs or updates the plugin. ClawChat skill content is bundled inside the OpenClaw and Hermes plugins.
+For OpenClaw, `install` delegates to
+`openclaw plugins install npm:@clawling/clawchat-plugin-openclaw --force --dangerously-force-unsafe-install`.
+The `npm:` prefix selects npm on every supported host. OpenClaw 2026.11.5+ looks
+up unprefixed install specs on ClawHub only. The CLI always passes `--force` on
+install and adds `--accept-capabilities` when the host advertises it. On older
+hosts the unsafe-install flag lets the third-party ClawChat plugin pass the
+install-time gate. On newer hosts it is a deprecated no-op. Operators can gate
+installs with `security.installPolicy`.
+
+For Hermes, `install` first fetches the remote `plugin.yaml`, validates that
+`hermes --version` satisfies the declared requirement, and only then installs or
+updates the plugin. ClawChat skill content is bundled inside both plugins.
 
 Both commands accept `--force` to reinstall the plugin even when the host reports it as current.
 
@@ -32,6 +43,12 @@ npx -y @clawling/clawchat-plugin-install-cli@latest update --target openclaw
 npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes
 ```
 
-For OpenClaw, `update` delegates to `openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`, appending `--accept-capabilities` when supported by the host. For Hermes, `update` requires an installed plugin and delegates to `hermes plugins update clawchat`, even when the installed `plugin.yaml` version already matches the remote version, followed by `hermes plugins enable clawchat` unless the host reports that its scan disabled the plugin (`SCAN_BLOCKED`). `--force` lifts that requirement: `update --target hermes --force` on a host with no ClawChat plugin installs it instead of failing.
+For OpenClaw, `update` delegates to
+`openclaw plugins update @clawling/clawchat-plugin-openclaw --dangerously-force-unsafe-install`,
+appending `--accept-capabilities` when supported by the host. The host uses the
+unprefixed spec to find the tracked install. `update --force` reinstalls using
+the `npm:` spec in the install command above.
+
+For Hermes, `update` requires an installed plugin and delegates to `hermes plugins update clawchat`, even when the installed `plugin.yaml` version already matches the remote version, followed by `hermes plugins enable clawchat` unless the host reports that its scan disabled the plugin (`SCAN_BLOCKED`). `--force` lifts that requirement: `update --target hermes --force` on a host with no ClawChat plugin installs it instead of failing.
 
 Use `--force` as an explicit repair/reinstall path. For Hermes, the first attempt is `hermes plugins install clawling/clawchat-plugin-hermes-agent --enable`, without the host's `--force`. Only after the scan passes and the host reports `already exists` does the CLI retry with `--force --enable` to replace the existing install. Scan refusals stop with `SCAN_BLOCKED`; the CLI's `--force` does not override them. For Hermes update failures caused by dirty local plugin files or Git fast-forward conflicts, repair explicitly with `npx -y @clawling/clawchat-plugin-install-cli@latest update --target hermes --force`.
