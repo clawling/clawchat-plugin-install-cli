@@ -77,7 +77,9 @@ docker run --rm -it \
 | `4010` | 被另一个安装顶替。停止自动重连，需人工确认要保留哪个安装。 |
 
 `hello-fail` 的原因逐字匹配 `authentication failed` 时，发起一次 token 刷新并主动关闭连接。
-关闭路径等待刷新完成，成功后用新 token 按当前退避计数重连；refresh token 被拒（永久失败）则停止自动重连，网络等瞬时失败照常退避重连。
+关闭路径等待刷新完成，成功后用新 token 按当前退避计数重连；refresh token 被拒或刷新出现无法归类的异常则停止自动重连并打印原因，请求发不出去等网络失败照常退避重连。
+刷新到的新 token 必须先写进状态文件：写失败（卷满、只读）时示例把新 token 留在内存里按退避重试写入，写成功之前不重连——服务端已经作废了旧 refresh token，丢掉新的就只能重新配对。
+每次重连上线后会重新拉一次 `agent.behavior`，补上断线期间错过的修改。
 其他 `hello-fail` 原因（包括 `auth service unavailable`）在连接关闭后用原 token 退避重连。
 
 ---

@@ -12,9 +12,14 @@ type Connection = {
   onAuthFailed: (close: () => void) => void;
   onClosed: (close: Close) => Promise<void>;
 };
-type Refresh = () => Promise<{ ok: boolean; permanent?: boolean; code?: number }>;
+type Refresh = () => Promise<{ ok: boolean; permanent?: boolean; code?: number | string }>;
 
 let reconnectDecision: (input: DecisionInput) => Decision;
+let persistUntilSaved: (next: unknown, options: {
+  save: (next: unknown) => void;
+  log: (...args: unknown[]) => void;
+  wait?: (ms: number) => Promise<void>;
+}) => Promise<void>;
 let createReconnector: (options: {
   start: (connection: Connection) => void;
   refresh: Refresh;
@@ -30,6 +35,7 @@ beforeEach(async () => {
     const agent = await import(/* @vite-ignore */ url);
     reconnectDecision = agent.reconnectDecision;
     createReconnector = agent.createReconnector;
+    persistUntilSaved = agent.persistUntilSaved;
     expect(fetch).not.toHaveBeenCalled();
     expect(exit).not.toHaveBeenCalled();
   } finally { fetch.mockRestore(); exit.mockRestore(); }
@@ -218,8 +224,7 @@ describe("cloud agent reconnect scheduling", () => {
   });
 
   it.each([
-    ["returns a transient failure", async () => ({ ok: false, permanent: false })],
-    ["rejects", async () => { throw new Error("network down"); }],
+    ["returns a transient failure", async () => ({ ok: false, permanent: false, code: "network" })],
   ] as const)("keeps backing off if refresh %s", async (_outcome, refresh) => {
     const { start, log, connections } = startAgent(refresh);
     connections[0]!.onAuthFailed(vi.fn());
@@ -227,5 +232,46 @@ describe("cloud agent reconnect scheduling", () => {
     expect(log).not.toHaveBeenCalledWith("refresh 永久失败，停止重连", expect.anything());
     vi.advanceTimersByTime(1_000);
     expect(start).toHaveBeenCalledTimes(2);
+  });
+  it("stops and reports the error if refresh throws unexpectedly", async () => {
+    const { start, log, connections } = startAgent(async () => { throw new Error("bad token payload"); });
+    connections[0]!.onAuthFailed(vi.fn());
+    await connections[0]!.onClosed(abnormalClose);
+    vi.runAllTimers();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith("refresh 永久失败，停止重连", expect.stringContaining("bad token payload"));
+  });
+});
+
+describe("persisting refreshed credentials", () => {
+  it("keeps the rotated credentials and retries the write until it succeeds", async () => {
+    const next = { refreshToken: "rotated" };
+    const save = vi.fn()
+      .mockImplementationOnce(() => { throw new Error("ENOSPC"); })
+      .mockImplementationOnce(() => { throw new Error("EROFS"); })
+      .mockImplementation(() => {});
+    const waits: number[] = [];
+    const log = vi.fn();
+    await persistUntilSaved(next, { save, log, wait: async (ms) => { waits.push(ms); } });
+    expect(save).toHaveBeenCalledTimes(3);
+    for (const call of save.mock.calls) expect(call[0]).toBe(next);
+    expect(waits).toEqual([1_000, 2_000]);
+    expect(log).toHaveBeenCalledTimes(2);
+    expect(log.mock.calls[0]![0]).toContain("状态文件写入失败");
+  });
+
+  it("does not settle while the write keeps failing", async () => {
+    let settled = false;
+    let releaseWait!: () => void;
+    const save = vi.fn(() => { throw new Error("EROFS"); });
+    const wait = vi.fn(() => new Promise<void>((resolve) => { releaseWait = resolve; }));
+    void persistUntilSaved({}, { save, log: vi.fn(), wait }).then(() => { settled = true; });
+    for (let i = 0; i < 3; i += 1) {
+      await Promise.resolve();
+      releaseWait();
+      await Promise.resolve();
+    }
+    expect(save.mock.calls.length).toBeGreaterThan(1);
+    expect(settled).toBe(false);
   });
 });

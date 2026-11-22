@@ -84,6 +84,17 @@ export function reconnectDecision({ attempt, connectedAt, closedAt, code, reason
   return { action: 'wait', delayMs, attempt, ...(notice && { notice: `${notice}${Math.ceil(delayMs / 1_000)}s 后重试。` }) };
 }
 
+// 刷新后的凭据必须先落盘。写失败（卷满 / 只读）就按退避一直重试写，并大声报错；
+// 期间不重连，避免用已作废的旧 token 再去刷新、把身份永久弄丢。
+export async function persistUntilSaved(next, { save, log, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  for (let delay = RECONNECT_BASE_MS; ; delay = Math.min(delay * 2, RECONNECT_MAX_MS)) {
+    try { save(next); return; } catch (e) {
+      log(`状态文件写入失败，新 token 只在内存里，${delay}ms 后重试落盘（写成功前不重连）:`, e?.message ?? e);
+    }
+    await wait(delay);
+  }
+}
+
 export function createReconnector({ start, refresh, now = Date.now, random = Math.random, log }) {
   let attempt = 0;
   let generation = 0;
@@ -118,8 +129,9 @@ export function createReconnector({ start, refresh, now = Date.now, random = Mat
       onAuthFailed(close) {
         if (!isActive() || refreshPromise) return;
         // 先保存刷新 promise，关闭回调负责等待结果和排程。
-        // 网络异常算瞬时失败：照常退避重连，下次 hello-fail 再刷新。
-        refreshPromise = refresh().catch(() => ({ ok: false, permanent: false }));
+        // refresh() 自己把网络失败归为瞬时；走到这里的异常（如服务端回的 token 解不开）
+        // 原因不明，fail-closed：停止重连并把原因打出来，不藏进重试里。
+        refreshPromise = refresh().catch((e) => ({ ok: false, permanent: true, code: `refresh error: ${e?.message ?? e}` }));
         close();
       },
       async onClosed({ code, reason }) {
@@ -298,11 +310,18 @@ async function pullBehavior(state, isActive = () => true) {
 
 // §1.5 刷新：**不带 Authorization**，body 里的 refresh token 就是凭据
 async function refresh(state) {
-  const res = await fetch(`${REST}/v1/auth/refresh`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-device-id': CHANNEL_ID },
-    body: JSON.stringify({ refresh_token: state.refreshToken }),
-  });
+  let res;
+  try {
+    res = await fetch(`${REST}/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-device-id': CHANNEL_ID },
+      body: JSON.stringify({ refresh_token: state.refreshToken }),
+    });
+  } catch (e) {
+    // 请求没发出去 / 没收到响应：瞬时，照常退避重连，下次 hello-fail 再刷新。
+    log('refresh request failed (transient):', e.message);
+    return { ok: false, permanent: false, code: 'network' };
+  }
   const j = await res.json().catch(() => ({}));
   if (j.code !== 0) return { ok: false, permanent: j.code === 10003 || j.code === 400, code: j.code };
   const claims = JSON.parse(Buffer.from(j.data.access_token.split('.')[1], 'base64url').toString());
@@ -311,7 +330,9 @@ async function refresh(state) {
     accessToken: j.data.access_token, refreshToken: j.data.refresh_token,
     exp: claims.exp, iat: claims.iat,
   };
-  saveState(next);                         // 顺序强制：落盘 → 换内存 → 重连 WS
+  // 顺序强制：落盘 → 换内存 → 重连 WS。服务端已经作废了旧 refresh token，
+  // 所以落盘失败时不能重试整个刷新：新 token 留在这里，写成功之前不重连。
+  await persistUntilSaved(next, { save: saveState, log });
   Object.assign(state, next);
   log('token refreshed');
   return { ok: true };
@@ -735,9 +756,12 @@ BEHAVIOR = state.behavior ?? '';
 log('behavior', BEHAVIOR ? `${BEHAVIOR.length} chars 已挂上` : '（主人还没写）');
 
 let greeted = Boolean(loadState().greeted);
+let readyCount = 0;
 function start({ isActive, onReady, onAuthFailed, onClosed }) {
   const api = connect(state, (a) => {
     onReady();
+    // 失效信号不重放：断线期间（或被丢弃的旧连接上）错过的 behavior 修改，重连上线后补拉一次。
+    if (readyCount++ > 0) pullBehavior(state, isActive).then(() => { if (isActive()) BEHAVIOR = state.behavior ?? ''; });
     log(`READY —— 在线，等主人说话${HAS_BRAIN ? `（脑子：${MODEL_NAME}）` : '（无脑子，探针模式）'}`);
     // **只在首次激活时问好。** 每次重连都发一句「我上线了」是刷屏,而重连是常态。
     if (!greeted) {
