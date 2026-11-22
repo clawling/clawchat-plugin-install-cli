@@ -55,9 +55,10 @@ export const RECONNECT_BASE_MS = 1_000;
 export const RECONNECT_MAX_MS = 60_000;
 export const STABLE_CONNECTION_MS = 60_000;
 export const TAKEOVER_MIN_DELAY_MS = 30_000;
-export const THROTTLE_MAX_DELAY_MS = 600_000;
+export const MAX_TIMER_MS = 2_147_483_647;
+export const REFRESH_MIN_INTERVAL_MS = 30_000;
 
-export function reconnectDecision({ attempt, connectedAt, closedAt, code, reason, random }) {
+export function reconnectDecision({ attempt, connectedAt, closedAt, code, reason, random, minDelayMs = 0 }) {
   if (connectedAt !== null && closedAt - connectedAt >= STABLE_CONNECTION_MS) attempt = 0;
   attempt += 1;
 
@@ -75,12 +76,11 @@ export function reconnectDecision({ attempt, connectedAt, closedAt, code, reason
   } else if (code === 4002) {
     let retryAfter;
     try { retryAfter = JSON.parse(reason)?.retry_after_ms; } catch {}
-    delay = Math.max(delay, Number.isFinite(retryAfter) && retryAfter > 0
-      ? Math.min(retryAfter, THROTTLE_MAX_DELAY_MS) : TAKEOVER_MIN_DELAY_MS);
+    delay = Math.max(delay, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : TAKEOVER_MIN_DELAY_MS);
     notice = '握手被限流（关闭码 4002）。';
   }
 
-  const delayMs = Math.ceil(delay);
+  const delayMs = Math.min(MAX_TIMER_MS, Math.ceil(Math.max(delay, minDelayMs)));
   return { action: 'wait', delayMs, attempt, ...(notice && { notice: `${notice}${Math.ceil(delayMs / 1_000)}s 后重试。` }) };
 }
 
@@ -89,17 +89,18 @@ export function reconnectDecision({ attempt, connectedAt, closedAt, code, reason
 export async function persistUntilSaved(next, { save, log, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   for (let delay = RECONNECT_BASE_MS; ; delay = Math.min(delay * 2, RECONNECT_MAX_MS)) {
     try { save(next); return; } catch (e) {
-      log(`状态文件写入失败，新 token 只在内存里，${delay}ms 后重试落盘（写成功前不重连）:`, e?.message ?? e);
+      log(`状态文件写入失败，新 token 只在内存里，${delay}ms 后重试落盘（写成功前不重连）:`, e?.code ?? 'write_failed');
     }
     await wait(delay);
   }
 }
 
-export function createReconnector({ start, refresh, now = Date.now, random = Math.random, log }) {
+export function createReconnector({ start, refresh, now = () => performance.now(), random = Math.random, log }) {
   let attempt = 0;
   let generation = 0;
   let reconnectTimer = null;
   let stopped = false;
+  let lastRefreshAt = null;
 
   function scheduleReconnect(delayMs) {
     const currentGeneration = generation;
@@ -118,6 +119,7 @@ export function createReconnector({ start, refresh, now = Date.now, random = Mat
     const isCurrent = () => !stopped && currentGeneration === generation;
     let connectedAt = null;
     let refreshPromise;
+    let refreshRetryAt = null;
     let closed = false;
     const isActive = () => isCurrent() && !closed;
 
@@ -127,11 +129,15 @@ export function createReconnector({ start, refresh, now = Date.now, random = Mat
         if (isActive()) connectedAt ??= now();
       },
       onAuthFailed(close) {
-        if (!isActive() || refreshPromise) return;
-        // 先保存刷新 promise，关闭回调负责等待结果和排程。
-        // refresh() 自己把网络失败归为瞬时；走到这里的异常（如服务端回的 token 解不开）
-        // 原因不明，fail-closed：停止重连并把原因打出来，不藏进重试里。
-        refreshPromise = refresh().catch((e) => ({ ok: false, permanent: true, code: `refresh error: ${e?.message ?? e}` }));
+        if (!isActive() || refreshPromise || refreshRetryAt !== null) return;
+        const nowMs = now();
+        if (lastRefreshAt !== null && nowMs - lastRefreshAt < REFRESH_MIN_INTERVAL_MS) {
+          refreshRetryAt = lastRefreshAt + REFRESH_MIN_INTERVAL_MS;
+        } else {
+          lastRefreshAt = nowMs;
+          // 关闭回调等待刷新结果后再排程。未分类异常按永久失败处理。
+          refreshPromise = refresh().catch(() => ({ ok: false, permanent: true, code: 'refresh_error' }));
+        }
         close();
       },
       async onClosed({ code, reason }) {
@@ -139,13 +145,15 @@ export function createReconnector({ start, refresh, now = Date.now, random = Mat
         closed = true;
         const closedAt = now();
         const refreshResult = refreshPromise ? await refreshPromise : null;
-        const refreshFailed = Boolean(refreshResult && !refreshResult.ok && refreshResult.permanent);
         if (!isCurrent()) return;
-        const decision = reconnectDecision({ attempt, connectedAt, closedAt, code, reason, random: random() });
+        const refreshFailed = refreshResult && !refreshResult.ok;
+        const permanentFailure = refreshFailed && refreshResult.permanent;
+        const minDelayMs = refreshFailed ? REFRESH_MIN_INTERVAL_MS : (refreshRetryAt ?? closedAt) - closedAt;
+        const decision = reconnectDecision({ attempt, connectedAt, closedAt, code, reason, random: random(), minDelayMs });
         attempt = decision.attempt;
-        if (refreshFailed || decision.action === 'stop') {
+        if (permanentFailure || decision.action === 'stop') {
           stopped = true;
-          if (refreshFailed) log('refresh 永久失败，停止重连', refreshResult.code);
+          if (permanentFailure) log('refresh 永久失败，停止重连', refreshResult.code);
           if (decision.action === 'stop') log(decision.notice);
           return;
         }
@@ -302,52 +310,84 @@ export async function pullBehavior(state, isActive = () => true, { fetchImpl = f
       headers: { authorization: `Bearer ${state.accessToken}`, 'x-device-id': CHANNEL_ID },
     });
     const j = await res.json();
-    if (j.code !== 0 || !isActive()) return;
+    if (j.code !== 0 || !isActive()) return false;
     const b = j.data?.agent?.behavior ?? '';
-    if (b !== state.behavior) { state.behavior = b; save(state); log('behavior updated', `${b.length} chars`); }
-  } catch (e) { log('behavior pull failed (non-fatal):', e.message); }
+    if (b !== state.behavior) {
+      save({ ...state, behavior: b });
+      state.behavior = b;
+      log('behavior updated', `${b.length} chars`);
+    }
+    return true;
+  } catch {
+    log('behavior pull failed (non-fatal)');
+    return false;
+  }
 }
 
-// 失效信号短暂且不重放：旧连接上没拿到结果的那次拉取会被丢弃（isActive 守卫），
-// 所以每次重连上线（首次连接之外，启动时已经拉过）都补拉一次。
-export function createBehaviorSync({ pull, apply }) {
-  let readyCount = 0;
-  const run = (state, isActive) => pull(state, isActive).then(() => { if (isActive()) apply(state); });
+// 失效信号短暂且不重放：上线时补拉，只有启动自读成功且凭据未刷新时才跳过首次补拉。
+// 仅当前连接的最新请求可以更新 behavior，避免较早的响应覆盖较新的结果。
+export function createBehaviorSync({ pull, apply, startupFresh }) {
+  let skipFirstReady = startupFresh;
+  let latest = 0;
+  async function run(state, isActive) {
+    const seq = ++latest;
+    const isLatest = () => isActive() && seq === latest;
+    await pull(state, isLatest);
+    if (isLatest()) apply(state);
+  }
   return {
-    onReady: (state, isActive) => (readyCount++ > 0 ? run(state, isActive) : Promise.resolve()),
+    onReady(state, isActive) {
+      if (!skipFirstReady) return run(state, isActive);
+      skipFirstReady = false;
+      return Promise.resolve();
+    },
     onInvalidated: run,
+    markStale() { skipFirstReady = false; },
   };
 }
-const behaviorSync = createBehaviorSync({ pull: pullBehavior, apply: (state) => { BEHAVIOR = state.behavior ?? ''; } });
 
 // §1.5 刷新：**不带 Authorization**，body 里的 refresh token 就是凭据
-async function refresh(state) {
+const moduleLog = log;
+export async function refresh(state, { fetchImpl = fetch, save = saveState, log = moduleLog, persist = persistUntilSaved } = {}) {
   let res;
   try {
-    res = await fetch(`${REST}/v1/auth/refresh`, {
+    res = await fetchImpl(`${REST}/v1/auth/refresh`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-device-id': CHANNEL_ID },
       body: JSON.stringify({ refresh_token: state.refreshToken }),
     });
-  } catch (e) {
-    // 请求没发出去 / 没收到响应：瞬时，照常退避重连，下次 hello-fail 再刷新。
-    log('refresh request failed (transient):', e.message);
+  } catch {
+    log('refresh request failed (network)');
     return { ok: false, permanent: false, code: 'network' };
   }
-  const j = await res.json().catch(() => ({}));
-  if (j.code !== 0) return { ok: false, permanent: j.code === 10003 || j.code === 400, code: j.code };
-  const claims = JSON.parse(Buffer.from(j.data.access_token.split('.')[1], 'base64url').toString());
+  let j;
+  try { j = await res.json(); } catch {
+    return { ok: false, permanent: [400, 401, 403].includes(res.status), code: `http_${res.status}` };
+  }
+  const code = j?.code;
+  if (code === 10003 || code === 400) return { ok: false, permanent: true, code: `rejected_${code}` };
+  if (code !== 0) return { ok: false, permanent: false, code: Number.isFinite(code) ? `server_${code}` : 'server_unknown' };
+
+  const accessToken = j.data?.access_token;
+  const refreshToken = j.data?.refresh_token;
+  const invalidResponse = { ok: false, permanent: true, code: 'invalid_response' };
+  if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken) return invalidResponse;
+  const payload = accessToken.split('.')[1] ?? '';
+  if (!/^[A-Za-z0-9_-]+$/.test(payload)) return invalidResponse;
+  let claims;
+  try { claims = JSON.parse(Buffer.from(payload, 'base64url').toString()); } catch { return invalidResponse; }
+  if (!Number.isFinite(claims?.exp)) return invalidResponse;
   const next = {
     ...state,
-    accessToken: j.data.access_token, refreshToken: j.data.refresh_token,
+    accessToken, refreshToken,
     exp: claims.exp, iat: claims.iat,
   };
   // 顺序强制：落盘 → 换内存 → 重连 WS。服务端已经作废了旧 refresh token，
   // 所以落盘失败时不能重试整个刷新：新 token 留在这里，写成功之前不重连。
-  await persistUntilSaved(next, { save: saveState, log });
+  await persist(next, { save, log });
   Object.assign(state, next);
   log('token refreshed');
-  return { ok: true };
+  return { ok: true, permanent: false, code: 'ok' };
 }
 
 // ── §2.5 入站过滤链，顺序即契约 ─────────────────────────────────────────────
@@ -626,7 +666,7 @@ async function think(chatId, text) {
   throw new Error('工具循环超过 5 轮还没给出答复');
 }
 
-function connect(state, onReady, isActive) {
+function connect(state, onReady, isActive, behaviorSync) {
   const ws = new WebSocket(WS_URL);
   const pending = new Map();          // trace_id → {resolve, timer}
   let hb = null, pongTimer = null;
@@ -763,8 +803,9 @@ if (!state.accessToken) {
   log('resuming saved identity', JSON.stringify({ agentId: state.agentId, conversationId: state.conversationId }));
 }
 state.wsDeviceId = stableWsDeviceId(state);
-await pullBehavior(state);
+const startupFresh = await pullBehavior(state);
 BEHAVIOR = state.behavior ?? '';
+const behaviorSync = createBehaviorSync({ startupFresh, pull: pullBehavior, apply: (state) => { BEHAVIOR = state.behavior ?? ''; } });
 log('behavior', BEHAVIOR ? `${BEHAVIOR.length} chars 已挂上` : '（主人还没写）');
 
 let greeted = Boolean(loadState().greeted);
@@ -781,7 +822,7 @@ function start({ isActive, onReady, onAuthFailed, onClosed }) {
         : '云端 agent 上线了（容器里跑的协议探针，还没接模型）。')
         .then((r) => log('greeting ack:', r.event));
     }
-  }, isActive);
+  }, isActive, behaviorSync);
   TOOL_CTX = { state, api };
   api.onMessage = async (hit, a) => {
     log(`收到 [${hit.chatId}] ${hit.sender.nick_name ?? hit.sender.id}: ${hit.text}`);
@@ -835,5 +876,13 @@ function start({ isActive, onReady, onAuthFailed, onClosed }) {
   api.onAuthFailed = () => onAuthFailed(api.close);
   api.onClosed = onClosed;
 }
-createReconnector({ start, refresh: () => refresh(state), log }).start();
+createReconnector({
+  start,
+  async refresh() {
+    const result = await refresh(state);
+    if (result.ok) behaviorSync.markStale();
+    return result;
+  },
+  log,
+}).start();
 }

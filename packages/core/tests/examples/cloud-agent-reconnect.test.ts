@@ -12,27 +12,41 @@ type Connection = {
   onAuthFailed: (close: () => void) => void;
   onClosed: (close: Close) => Promise<void>;
 };
-type Refresh = () => Promise<{ ok: boolean; permanent?: boolean; code?: number | string }>;
-
-let reconnectDecision: (input: DecisionInput) => Decision;
-let persistUntilSaved: (next: unknown, options: {
-  save: (next: unknown) => void;
+type RefreshResult = { ok: boolean; permanent: boolean; code: string };
+type Refresh = () => Promise<RefreshResult>;
+type RefreshState = { accessToken: string; refreshToken: string; exp: number; iat?: number };
+type JsonResponse = { json: () => Promise<unknown> };
+type FetchImpl<Response> = (url: string, init?: RequestInit) => Promise<Response>;
+type PersistOptions<State> = {
+  save: (next: State) => void;
   log: (...args: unknown[]) => void;
   wait?: (ms: number) => Promise<void>;
-}) => Promise<void>;
+};
+type Persist = <State>(next: State, options: PersistOptions<State>) => Promise<void>;
+
+let maxTimerMs: number;
+let refreshMinIntervalMs: number;
+let reconnectDecision: (input: DecisionInput) => Decision;
+let persistUntilSaved: Persist;
+let refresh: (state: RefreshState, deps?: Partial<Pick<PersistOptions<RefreshState>, "save" | "log">> & {
+  fetchImpl?: FetchImpl<JsonResponse & { status: number }>;
+  persist?: (next: RefreshState, options: PersistOptions<RefreshState>) => Promise<void>;
+}) => Promise<RefreshResult>;
 type BehaviorState = { agentId: string; accessToken: string; behavior?: string };
 type IsActive = () => boolean;
 type PullBehavior = (state: BehaviorState, isActive: IsActive, deps: {
-  fetchImpl: (url: string, init?: unknown) => Promise<{ json: () => Promise<unknown> }>;
+  fetchImpl: FetchImpl<JsonResponse>;
   save: (state: BehaviorState) => void;
-}) => Promise<void>;
+}) => Promise<boolean>;
 let pullBehavior: PullBehavior;
 let createBehaviorSync: (options: {
-  pull: (state: BehaviorState, isActive: IsActive) => Promise<void>;
+  pull: (state: BehaviorState, isActive: IsActive) => Promise<boolean>;
   apply: (state: BehaviorState) => void;
+  startupFresh: boolean;
 }) => {
   onReady: (state: BehaviorState, isActive: IsActive) => Promise<void>;
   onInvalidated: (state: BehaviorState, isActive: IsActive) => Promise<void>;
+  markStale: () => void;
 };
 let createReconnector: (options: {
   start: (connection: Connection) => void;
@@ -47,9 +61,12 @@ beforeEach(async () => {
   try {
     const url = pathToFileURL(path.resolve(__dirname, "../../../../examples/cloud-agent/agent.mjs")).href;
     const agent = await import(/* @vite-ignore */ url);
+    maxTimerMs = agent.MAX_TIMER_MS;
+    refreshMinIntervalMs = agent.REFRESH_MIN_INTERVAL_MS;
     reconnectDecision = agent.reconnectDecision;
     createReconnector = agent.createReconnector;
     persistUntilSaved = agent.persistUntilSaved;
+    refresh = agent.refresh;
     pullBehavior = agent.pullBehavior;
     createBehaviorSync = agent.createBehaviorSync;
     expect(fetch).not.toHaveBeenCalled();
@@ -60,6 +77,17 @@ beforeEach(async () => {
 const abnormalClose = { code: 1006, reason: "" };
 const takeover = { code: 4001, reason: "" };
 const randomNearOne = 1 - Number.EPSILON;
+const refreshSucceeded: RefreshResult = { ok: true, permanent: false, code: "ok" };
+const placeholderAccess = "eyJ.PLACEHOLDER-ACCESS.sig";
+const placeholderRefresh = "PLACEHOLDER-REFRESH";
+const placeholderUrl = "https://user:PLACEHOLDER-PASS@host";
+
+function expectRedacted(calls: unknown[][]) {
+  const logged = JSON.stringify(calls);
+  for (const secret of ["PLACEHOLDER-ACCESS", placeholderRefresh, "PLACEHOLDER-PASS"]) {
+    expect(logged).not.toContain(secret);
+  }
+}
 
 function decide(input: Partial<DecisionInput> = {}) {
   return reconnectDecision({ attempt: 0, connectedAt: null, closedAt: 0, ...abnormalClose, random: 0, ...input });
@@ -111,7 +139,7 @@ it.each([
   ['{"retry_after_ms":1000}', 0, 1_000],
   ['{"retry_after_ms":45000}', 0, 45_000],
   ['{"retry_after_ms":45000}', 8, 60_000],
-  ['{"retry_after_ms":9000000}', 0, 600_000],
+  ['{"retry_after_ms":9000000}', 0, 9_000_000],
   ['{"retry_after_ms":45000.5}', 0, 45_001],
   ["not JSON", 0, 30_000],
   ["null", 0, 30_000],
@@ -121,6 +149,13 @@ it.each([
 ] as const)("applies the throttling delay for reason %s at attempt %i", (reason, attempt, delayMs) => {
   expect(decide({ code: 4002, reason, attempt, random: randomNearOne })).toMatchObject({
     action: "wait", delayMs, notice: expect.stringContaining("被限流"),
+  });
+});
+
+it("caps oversized server delays at the Node timer limit", () => {
+  expect(maxTimerMs).toBe(2_147_483_647);
+  expect(decide({ code: 4002, reason: '{"retry_after_ms":2147483648}' })).toMatchObject({
+    action: "wait", delayMs: maxTimerMs,
   });
 });
 
@@ -135,10 +170,10 @@ it.each([1000, 1005, 1006, 4000])("uses ordinary backoff for close code %i", (co
 });
 
 describe("cloud agent reconnect scheduling", () => {
-  beforeEach(() => { vi.useFakeTimers(); });
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] }); });
   afterEach(() => { vi.useRealTimers(); });
 
-  function startAgent(refresh: Refresh = async () => ({ ok: true }), random = 0) {
+  function startAgent(refresh: Refresh = async () => refreshSucceeded, random = 0) {
     const connections: Connection[] = [];
     const start = vi.fn((connection: Connection) => { connections.push(connection); });
     const log = vi.fn();
@@ -156,12 +191,13 @@ describe("cloud agent reconnect scheduling", () => {
     expect(start).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the retry count after a brief handshake and resets it after a stable connection", async () => {
+  it("measures connection stability without counting a wall-clock jump", async () => {
     const { log, connections } = startAgent(undefined, 0.5);
     await connections[0]!.onClosed(abnormalClose);
     vi.advanceTimersByTime(1_000);
 
     connections[1]!.onReady();
+    vi.setSystemTime(Date.now() + 60_000);
     vi.advanceTimersByTime(59_999);
     await connections[1]!.onClosed(abnormalClose);
     expect(log).toHaveBeenLastCalledWith("reconnect in", 1_500, "ms", "attempt", 2, "code", 1006);
@@ -183,7 +219,7 @@ describe("cloud agent reconnect scheduling", () => {
   });
 
   it("keeps one timer for repeated closes and ignores callbacks from the replaced connection", async () => {
-    const refresh = vi.fn(async () => ({ ok: true }));
+    const refresh = vi.fn(async () => refreshSucceeded);
     const { start, connections } = startAgent(refresh);
     const first = connections[0]!;
     await first.onClosed(abnormalClose);
@@ -204,8 +240,8 @@ describe("cloud agent reconnect scheduling", () => {
   });
 
   it("waits for one refresh and reuses the accumulated backoff after success", async () => {
-    let completeRefresh!: (result: { ok: boolean }) => void;
-    const refresh = vi.fn(() => new Promise<{ ok: boolean }>((resolve) => { completeRefresh = resolve; }));
+    let completeRefresh!: (result: RefreshResult) => void;
+    const refresh = vi.fn(() => new Promise<RefreshResult>((resolve) => { completeRefresh = resolve; }));
     const { start, log, connections } = startAgent(refresh, 0.5);
     await connections[0]!.onClosed(abnormalClose);
     vi.advanceTimersByTime(1_000);
@@ -220,7 +256,7 @@ describe("cloud agent reconnect scheduling", () => {
     expect(close).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
 
-    completeRefresh({ ok: true });
+    completeRefresh(refreshSucceeded);
     await closing;
     expect(log).toHaveBeenCalledWith("reconnect in", 1_500, "ms", "attempt", 2, "code", 1000);
     expect(vi.getTimerCount()).toBe(1);
@@ -231,40 +267,159 @@ describe("cloud agent reconnect scheduling", () => {
   });
 
   it("stops reconnecting if the refresh token is rejected", async () => {
-    const { start, log, connections } = startAgent(async () => ({ ok: false, permanent: true, code: 10003 }));
+    const { start, log, connections } = startAgent(async () => ({ ok: false, permanent: true, code: "rejected_10003" }));
     connections[0]!.onAuthFailed(vi.fn());
     await connections[0]!.onClosed(abnormalClose);
     vi.runAllTimers();
     expect(start).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith("refresh 永久失败，停止重连", 10003);
+    expect(log).toHaveBeenCalledWith("refresh 永久失败，停止重连", "rejected_10003");
   });
 
-  it.each([
-    ["returns a transient failure", async () => ({ ok: false, permanent: false, code: "network" })],
-  ] as const)("keeps backing off if refresh %s", async (_outcome, refresh) => {
-    const { start, log, connections } = startAgent(refresh);
+  it("waits at least 30 s to reconnect after a transient refresh failure", async () => {
+    const { start, log, connections } = startAgent(async () => ({ ok: false, permanent: false, code: "network" }));
     connections[0]!.onAuthFailed(vi.fn());
     await connections[0]!.onClosed(abnormalClose);
     expect(log).not.toHaveBeenCalledWith("refresh 永久失败，停止重连", expect.anything());
-    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(29_999);
+    expect(start).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
     expect(start).toHaveBeenCalledTimes(2);
   });
-  it("stops and reports the error if refresh throws unexpectedly", async () => {
-    const { start, log, connections } = startAgent(async () => { throw new Error("bad token payload"); });
+
+  it("closes without refreshing during the 30 s interval and waits out the remainder before reconnecting", async () => {
+    const refreshTimes: number[] = [];
+    const refresh = vi.fn(async () => { refreshTimes.push(performance.now()); return refreshSucceeded; });
+    const { start, connections } = startAgent(refresh);
+    expect(refreshMinIntervalMs).toBe(30_000);
+    connections[0]!.onAuthFailed(vi.fn());
+    await connections[0]!.onClosed(abnormalClose);
+    vi.advanceTimersByTime(1_000);
+    expect(start).toHaveBeenCalledTimes(2);
+
+    const close = vi.fn();
+    connections[1]!.onAuthFailed(close);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await connections[1]!.onClosed(abnormalClose);
+    vi.advanceTimersByTime(28_999);
+    expect(start).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(1);
+    expect(start).toHaveBeenCalledTimes(3);
+    connections[2]!.onAuthFailed(vi.fn());
+    await connections[2]!.onClosed(abnormalClose);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refreshTimes[1]! - refreshTimes[0]!).toBe(refreshMinIntervalMs);
+  });
+
+  it("stops and reports a fixed category if refresh throws unexpectedly", async () => {
+    const { start, log, connections } = startAgent(async () => { throw new Error(`bad token payload: ${placeholderAccess}`); });
     connections[0]!.onAuthFailed(vi.fn());
     await connections[0]!.onClosed(abnormalClose);
     vi.runAllTimers();
     expect(start).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith("refresh 永久失败，停止重连", expect.stringContaining("bad token payload"));
+    expect(log).toHaveBeenCalledWith("refresh 永久失败，停止重连", "refresh_error");
+    expectRedacted(log.mock.calls);
+  });
+});
+
+describe("refreshing credentials", () => {
+  const exp = 2_000_000_000;
+  const iat = 1_999_999_000;
+  const accessToken = `eyJ.${Buffer.from(JSON.stringify({ exp, iat })).toString("base64url")}.sig`;
+
+  function fixture() {
+    const state: RefreshState = { accessToken: placeholderAccess, refreshToken: placeholderRefresh, exp: 1 };
+    const original = { ...state };
+    const save = vi.fn<(next: RefreshState) => void>();
+    const log = vi.fn();
+    return { state, original, save, log };
+  }
+
+  function reply(body: unknown) {
+    return async () => ({ status: 200, json: async () => body });
+  }
+
+  it.each([
+    [400, true],
+    [401, true],
+    [403, true],
+    [502, false],
+  ] as const)("classifies a non-JSON HTTP %i response without writing state", async (status, permanent) => {
+    const { state, original, save, log } = fixture();
+    const fetchImpl = async () => ({ status, json: async () => { throw new Error(placeholderAccess); } });
+    expect(await refresh(state, { fetchImpl, save, log })).toEqual({ ok: false, permanent, code: `http_${status}` });
+    expect(save).not.toHaveBeenCalled();
+    expect(state).toEqual(original);
+    expectRedacted(log.mock.calls);
+  });
+
+  it.each([
+    [10003, true, "rejected_10003"],
+    [400, true, "rejected_400"],
+    [1, false, "server_1"],
+    [42, false, "server_42"],
+    [placeholderRefresh, false, "server_unknown"],
+  ] as const)("classifies JSON response code %s without writing state", async (code, permanent, category) => {
+    const { state, original, save, log } = fixture();
+    expect(await refresh(state, { fetchImpl: reply({ code }), save, log })).toEqual({ ok: false, permanent, code: category });
+    expect(save).not.toHaveBeenCalled();
+    expect(state).toEqual(original);
+    expectRedacted(log.mock.calls);
+  });
+
+  it.each([
+    ["a missing refresh token", { access_token: accessToken }],
+    ["an empty access token", { access_token: "", refresh_token: placeholderRefresh }],
+    ["a non-string refresh token", { access_token: accessToken, refresh_token: 12 }],
+    ["an invalid JWT", { access_token: placeholderAccess, refresh_token: placeholderRefresh }],
+    ["a non-numeric JWT expiry", {
+      access_token: `eyJ.${Buffer.from(JSON.stringify({ exp: placeholderRefresh })).toString("base64url")}.sig`,
+      refresh_token: placeholderRefresh,
+    }],
+  ] as const)("rejects a successful response with %s before saving or updating state", async (_condition, data) => {
+    const { state, original, save, log } = fixture();
+    expect(await refresh(state, { fetchImpl: reply({ code: 0, data }), save, log })).toEqual({
+      ok: false, permanent: true, code: "invalid_response",
+    });
+    expect(save).not.toHaveBeenCalled();
+    expect(state).toEqual(original);
+    expect(log).not.toHaveBeenCalledWith("token refreshed");
+    expectRedacted(log.mock.calls);
+  });
+
+  it("reports a network failure without logging details from the request error", async () => {
+    const { state, original, save, log } = fixture();
+    const fetchImpl = async () => { throw new Error(`request to ${placeholderUrl} failed`); };
+    expect(await refresh(state, { fetchImpl, save, log })).toEqual({ ok: false, permanent: false, code: "network" });
+    expect(save).not.toHaveBeenCalled();
+    expect(state).toEqual(original);
+    expect(log.mock.calls).toEqual([["refresh request failed (network)"]]);
+    expectRedacted(log.mock.calls);
+  });
+
+  it("saves the rotated tokens once before changing the live credentials", async () => {
+    const { state, original, save, log } = fixture();
+    const refreshToken = `rotated-${placeholderRefresh}`;
+    const next = { ...state, accessToken, refreshToken, exp, iat };
+    const fetchImpl = reply({ code: 0, data: { access_token: accessToken, refresh_token: refreshToken } });
+    let stateAtSave: RefreshState | undefined;
+    save.mockImplementation(() => { stateAtSave = { ...state }; });
+    expect(await refresh(state, { fetchImpl, save, log })).toEqual(refreshSucceeded);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith(next);
+    expect(stateAtSave).toEqual(original);
+    expect(state).toEqual(next);
+    expect(log.mock.calls).toEqual([["token refreshed"]]);
+    expectRedacted(log.mock.calls);
   });
 });
 
 describe("persisting refreshed credentials", () => {
   it("keeps the rotated credentials and retries the write until it succeeds", async () => {
-    const next = { refreshToken: "rotated" };
-    const save = vi.fn()
-      .mockImplementationOnce(() => { throw new Error("ENOSPC"); })
-      .mockImplementationOnce(() => { throw new Error("EROFS"); })
+    const next = { accessToken: placeholderAccess, refreshToken: placeholderRefresh };
+    const save = vi.fn<(value: typeof next) => void>()
+      .mockImplementationOnce(() => { throw Object.assign(new Error(placeholderRefresh), { code: "ENOSPC" }); })
+      .mockImplementationOnce(() => { throw new Error(placeholderAccess); })
       .mockImplementation(() => {});
     const waits: number[] = [];
     const log = vi.fn();
@@ -274,6 +429,8 @@ describe("persisting refreshed credentials", () => {
     expect(waits).toEqual([1_000, 2_000]);
     expect(log).toHaveBeenCalledTimes(2);
     expect(log.mock.calls[0]![0]).toContain("状态文件写入失败");
+    expect(log.mock.calls.map((call) => call[1])).toEqual(["ENOSPC", "write_failed"]);
+    expectRedacted(log.mock.calls);
   });
 
   it("does not settle while the write keeps failing", async () => {
@@ -293,18 +450,59 @@ describe("persisting refreshed credentials", () => {
 });
 
 describe("behavior recovery after reconnect", () => {
-  it("re-pulls behavior on the replacement connection and ignores the dropped connection's response", async () => {
+  const active = () => true;
+
+  function setupBehaviorSync(startupFresh: boolean) {
     const responses: Array<(behavior: string) => void> = [];
-    const fetchImpl = vi.fn(() => new Promise<{ json: () => Promise<unknown> }>((resolve) => {
+    const fetchImpl = vi.fn(() => new Promise<JsonResponse>((resolve) => {
       responses.push((behavior) => resolve({ json: async () => ({ code: 0, data: { agent: { behavior } } }) }));
     }));
-    const save = vi.fn();
+    const save = vi.fn<(state: BehaviorState) => void>();
     const applied: string[] = [];
     const sync = createBehaviorSync({
+      startupFresh,
       pull: (state, isActive) => pullBehavior(state, isActive, { fetchImpl, save }),
       apply: (state) => { applied.push(state.behavior ?? ""); },
     });
-    const state: BehaviorState = { agentId: "agt_1", accessToken: "token", behavior: "old" };
+    return { sync, fetchImpl, save, applied, responses };
+  }
+
+  function behaviorState(): BehaviorState {
+    return { agentId: "agt_1", accessToken: placeholderAccess, behavior: "old" };
+  }
+
+  it("pulls behavior on the first ready event if the startup read failed", async () => {
+    const state = behaviorState();
+    const startupFresh = await pullBehavior(state, active, {
+      fetchImpl: async () => ({ json: async () => ({ code: 1 }) }),
+      save: vi.fn(),
+    });
+    expect(startupFresh).toBe(false);
+    const { sync, responses, applied } = setupBehaviorSync(startupFresh);
+
+    const ready = sync.onReady(state, active);
+    responses[0]!("edited");
+    await ready;
+    expect(applied).toEqual(["edited"]);
+  });
+
+  it("pulls behavior on the first ready event if startup behavior was marked stale", async () => {
+    const { sync, responses, applied } = setupBehaviorSync(true);
+    sync.markStale();
+    const ready = sync.onReady(behaviorState(), active);
+    responses[0]!("edited");
+    await ready;
+    expect(applied).toEqual(["edited"]);
+  });
+
+  it("skips the first ready pull after a successful startup read and pulls again on the replacement connection", async () => {
+    const state = behaviorState();
+    const startupFresh = await pullBehavior(state, active, {
+      fetchImpl: async () => ({ json: async () => ({ code: 0, data: { agent: { behavior: state.behavior } } }) }),
+      save: vi.fn(),
+    });
+    expect(startupFresh).toBe(true);
+    const { sync, responses, fetchImpl, save, applied } = setupBehaviorSync(startupFresh);
 
     let firstActive = true;
     await sync.onReady(state, () => firstActive);
@@ -314,7 +512,7 @@ describe("behavior recovery after reconnect", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     firstActive = false;
 
-    const fresh = sync.onReady(state, () => true);
+    const fresh = sync.onReady(state, active);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     responses[1]!("edited");
     await fresh;
@@ -326,5 +524,30 @@ describe("behavior recovery after reconnect", () => {
     expect(state.behavior).toBe("edited");
     expect(applied).toEqual(["edited"]);
     expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["older request responds first", "A"],
+    ["newer request responds first", "B"],
+  ] as const)("only saves the latest behavior request on the same connection when the %s", async (_order, first) => {
+    const { sync, responses, save, applied } = setupBehaviorSync(true);
+    const state = behaviorState();
+    const a = sync.onInvalidated(state, active);
+    const b = sync.onInvalidated(state, active);
+    const pending = { A: a, B: b };
+    const second = first === "A" ? "B" : "A";
+    const respond = { A: responses[0]!, B: responses[1]! };
+
+    respond[first](first);
+    await pending[first];
+    expect(state.behavior).toBe(first === "A" ? "old" : "B");
+    expect(save).toHaveBeenCalledTimes(first === "A" ? 0 : 1);
+
+    respond[second](second);
+    await pending[second];
+    expect(state.behavior).toBe("B");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith({ ...state, behavior: "B" });
+    expect(applied).toEqual(["B"]);
   });
 });
