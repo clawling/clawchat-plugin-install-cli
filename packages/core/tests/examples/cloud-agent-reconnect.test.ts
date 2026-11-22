@@ -20,6 +20,20 @@ let persistUntilSaved: (next: unknown, options: {
   log: (...args: unknown[]) => void;
   wait?: (ms: number) => Promise<void>;
 }) => Promise<void>;
+type BehaviorState = { agentId: string; accessToken: string; behavior?: string };
+type IsActive = () => boolean;
+type PullBehavior = (state: BehaviorState, isActive: IsActive, deps: {
+  fetchImpl: (url: string, init?: unknown) => Promise<{ json: () => Promise<unknown> }>;
+  save: (state: BehaviorState) => void;
+}) => Promise<void>;
+let pullBehavior: PullBehavior;
+let createBehaviorSync: (options: {
+  pull: (state: BehaviorState, isActive: IsActive) => Promise<void>;
+  apply: (state: BehaviorState) => void;
+}) => {
+  onReady: (state: BehaviorState, isActive: IsActive) => Promise<void>;
+  onInvalidated: (state: BehaviorState, isActive: IsActive) => Promise<void>;
+};
 let createReconnector: (options: {
   start: (connection: Connection) => void;
   refresh: Refresh;
@@ -36,6 +50,8 @@ beforeEach(async () => {
     reconnectDecision = agent.reconnectDecision;
     createReconnector = agent.createReconnector;
     persistUntilSaved = agent.persistUntilSaved;
+    pullBehavior = agent.pullBehavior;
+    createBehaviorSync = agent.createBehaviorSync;
     expect(fetch).not.toHaveBeenCalled();
     expect(exit).not.toHaveBeenCalled();
   } finally { fetch.mockRestore(); exit.mockRestore(); }
@@ -273,5 +289,42 @@ describe("persisting refreshed credentials", () => {
     }
     expect(save.mock.calls.length).toBeGreaterThan(1);
     expect(settled).toBe(false);
+  });
+});
+
+describe("behavior recovery after reconnect", () => {
+  it("re-pulls behavior on the replacement connection and ignores the dropped connection's response", async () => {
+    const responses: Array<(behavior: string) => void> = [];
+    const fetchImpl = vi.fn(() => new Promise<{ json: () => Promise<unknown> }>((resolve) => {
+      responses.push((behavior) => resolve({ json: async () => ({ code: 0, data: { agent: { behavior } } }) }));
+    }));
+    const save = vi.fn();
+    const applied: string[] = [];
+    const sync = createBehaviorSync({
+      pull: (state, isActive) => pullBehavior(state, isActive, { fetchImpl, save }),
+      apply: (state) => { applied.push(state.behavior ?? ""); },
+    });
+    const state: BehaviorState = { agentId: "agt_1", accessToken: "token", behavior: "old" };
+
+    let firstActive = true;
+    await sync.onReady(state, () => firstActive);
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const stale = sync.onInvalidated(state, () => firstActive);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    firstActive = false;
+
+    const fresh = sync.onReady(state, () => true);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    responses[1]!("edited");
+    await fresh;
+    expect(state.behavior).toBe("edited");
+    expect(applied).toEqual(["edited"]);
+
+    responses[0]!("stale");
+    await stale;
+    expect(state.behavior).toBe("edited");
+    expect(applied).toEqual(["edited"]);
+    expect(save).toHaveBeenCalledTimes(1);
   });
 });

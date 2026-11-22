@@ -296,17 +296,29 @@ async function activate(code) {
 // §7.1：behavior 的**自读**。`GET /v1/agents/:id` 是 owner-or-self 门，而 agent
 // 就是那个 self —— 不需要、也绝不该用主人的凭据（混用两个身份正是 §1.6 那类事故）。
 // 连接时拉一次是真兜底：那个失效信号**短暂且从不重放**，离线期间的编辑只能这样拿到。
-async function pullBehavior(state, isActive = () => true) {
+export async function pullBehavior(state, isActive = () => true, { fetchImpl = fetch, save = saveState } = {}) {
   try {
-    const res = await fetch(`${REST}/v1/agents/${state.agentId}`, {
+    const res = await fetchImpl(`${REST}/v1/agents/${state.agentId}`, {
       headers: { authorization: `Bearer ${state.accessToken}`, 'x-device-id': CHANNEL_ID },
     });
     const j = await res.json();
     if (j.code !== 0 || !isActive()) return;
     const b = j.data?.agent?.behavior ?? '';
-    if (b !== state.behavior) { state.behavior = b; saveState(state); log('behavior updated', `${b.length} chars`); }
+    if (b !== state.behavior) { state.behavior = b; save(state); log('behavior updated', `${b.length} chars`); }
   } catch (e) { log('behavior pull failed (non-fatal):', e.message); }
 }
+
+// 失效信号短暂且不重放：旧连接上没拿到结果的那次拉取会被丢弃（isActive 守卫），
+// 所以每次重连上线（首次连接之外，启动时已经拉过）都补拉一次。
+export function createBehaviorSync({ pull, apply }) {
+  let readyCount = 0;
+  const run = (state, isActive) => pull(state, isActive).then(() => { if (isActive()) apply(state); });
+  return {
+    onReady: (state, isActive) => (readyCount++ > 0 ? run(state, isActive) : Promise.resolve()),
+    onInvalidated: run,
+  };
+}
+const behaviorSync = createBehaviorSync({ pull: pullBehavior, apply: (state) => { BEHAVIOR = state.behavior ?? ''; } });
 
 // §1.5 刷新：**不带 Authorization**，body 里的 refresh token 就是凭据
 async function refresh(state) {
@@ -683,7 +695,7 @@ function connect(state, onReady, isActive) {
     if (f.event === 'chat.metadata.invalidated') {
       const scope = f.payload?.scope;
       if (!scope || (Array.isArray(scope) && scope.includes('behavior'))) {
-        pullBehavior(state, isActive).then(() => { if (isActive()) BEHAVIOR = state.behavior ?? ''; });
+        behaviorSync.onInvalidated(state, isActive);
       }
       return;
     }
@@ -756,12 +768,10 @@ BEHAVIOR = state.behavior ?? '';
 log('behavior', BEHAVIOR ? `${BEHAVIOR.length} chars 已挂上` : '（主人还没写）');
 
 let greeted = Boolean(loadState().greeted);
-let readyCount = 0;
 function start({ isActive, onReady, onAuthFailed, onClosed }) {
   const api = connect(state, (a) => {
     onReady();
-    // 失效信号不重放：断线期间（或被丢弃的旧连接上）错过的 behavior 修改，重连上线后补拉一次。
-    if (readyCount++ > 0) pullBehavior(state, isActive).then(() => { if (isActive()) BEHAVIOR = state.behavior ?? ''; });
+    behaviorSync.onReady(state, isActive);
     log(`READY —— 在线，等主人说话${HAS_BRAIN ? `（脑子：${MODEL_NAME}）` : '（无脑子，探针模式）'}`);
     // **只在首次激活时问好。** 每次重连都发一句「我上线了」是刷屏,而重连是常态。
     if (!greeted) {
