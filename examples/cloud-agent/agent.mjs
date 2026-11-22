@@ -325,15 +325,22 @@ export async function pullBehavior(state, isActive = () => true, { fetchImpl = f
 }
 
 // 失效信号短暂且不重放：上线时补拉，只有启动自读成功且凭据未刷新时才跳过首次补拉。
-// 仅当前连接的最新请求可以更新 behavior，避免较早的响应覆盖较新的结果。
+// 每次拉取带递增序号；响应只有比已采用的结果更新时才能写入，所以较早的响应不会覆盖较新的结果，
+// 而较新的请求失败时，较早那次在途的成功结果仍然有效。pullBehavior 在写入前同步调用一次守卫，
+// 守卫通过即认领该序号，中间没有异步间隙。
 export function createBehaviorSync({ pull, apply, startupFresh }) {
   let skipFirstReady = startupFresh;
   let latest = 0;
+  let applied = 0;
   async function run(state, isActive) {
     const seq = ++latest;
-    const isLatest = () => isActive() && seq === latest;
-    await pull(state, isLatest);
-    if (isLatest()) apply(state);
+    const claim = () => {
+      if (!isActive() || seq <= applied) return false;
+      applied = seq;
+      return true;
+    };
+    await pull(state, claim);
+    if (isActive() && applied === seq) apply(state);
   }
   return {
     onReady(state, isActive) {
@@ -360,9 +367,16 @@ export async function refresh(state, { fetchImpl = fetch, save = saveState, log 
     log('refresh request failed (network)');
     return { ok: false, permanent: false, code: 'network' };
   }
+  // 先看 HTTP 状态：4xx 是请求本身被拒（408 / 429 除外，它们是限流 / 超时），一律停止；
+  // 非 2xx 的响应体无论写了什么都不收 token。
+  const status = res.status;
+  if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+    return { ok: false, permanent: true, code: `http_${status}` };
+  }
+  if (!(status >= 200 && status < 300)) return { ok: false, permanent: false, code: `http_${status}` };
   let j;
   try { j = await res.json(); } catch {
-    return { ok: false, permanent: [400, 401, 403].includes(res.status), code: `http_${res.status}` };
+    return { ok: false, permanent: false, code: `http_${status}` };
   }
   const code = j?.code;
   if (code === 10003 || code === 400) return { ok: false, permanent: true, code: `rejected_${code}` };
@@ -372,8 +386,9 @@ export async function refresh(state, { fetchImpl = fetch, save = saveState, log 
   const refreshToken = j.data?.refresh_token;
   const invalidResponse = { ok: false, permanent: true, code: 'invalid_response' };
   if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken) return invalidResponse;
-  const payload = accessToken.split('.')[1] ?? '';
-  if (!/^[A-Za-z0-9_-]+$/.test(payload)) return invalidResponse;
+  const segments = accessToken.split('.');
+  if (segments.length !== 3 || !segments.every((part) => /^[A-Za-z0-9_-]+$/.test(part))) return invalidResponse;
+  const payload = segments[1];
   let claims;
   try { claims = JSON.parse(Buffer.from(payload, 'base64url').toString()); } catch { return invalidResponse; }
   if (!Number.isFinite(claims?.exp)) return invalidResponse;

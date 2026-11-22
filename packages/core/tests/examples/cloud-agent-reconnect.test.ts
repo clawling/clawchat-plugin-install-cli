@@ -387,6 +387,43 @@ describe("refreshing credentials", () => {
     expectRedacted(log.mock.calls);
   });
 
+  it.each([
+    [400, { code: 1 }],
+    [401, { code: 1 }],
+    [403, { code: 42 }],
+    [401, { code: 0, data: { access_token: accessToken, refresh_token: placeholderRefresh } }],
+    [404, { code: 0, data: { access_token: accessToken, refresh_token: placeholderRefresh } }],
+  ] as const)("stops on HTTP %i whatever the JSON body says, without writing state", async (status, body) => {
+    const { state, original, save, log } = fixture();
+    const fetchImpl = async () => ({ status, json: async () => body });
+    expect(await refresh(state, { fetchImpl, save, log })).toEqual({ ok: false, permanent: true, code: `http_${status}` });
+    expect(save).not.toHaveBeenCalled();
+    expect(state).toEqual(original);
+    expectRedacted(log.mock.calls);
+  });
+
+  it.each([408, 429, 500, 503])("never accepts tokens from a non-2xx HTTP %i response and retries later", async (status) => {
+    const { state, original, save, log } = fixture();
+    const body = { code: 0, data: { access_token: accessToken, refresh_token: `rotated-${placeholderRefresh}` } };
+    const fetchImpl = async () => ({ status, json: async () => body });
+    expect(await refresh(state, { fetchImpl, save, log })).toEqual({ ok: false, permanent: false, code: `http_${status}` });
+    expect(save).not.toHaveBeenCalled();
+    expect(state).toEqual(original);
+    expect(log).not.toHaveBeenCalledWith("token refreshed");
+  });
+
+  it.each([
+    ["two segments", `eyJ.${Buffer.from(JSON.stringify({ exp, iat })).toString("base64url")}`],
+    ["an empty signature", `eyJ.${Buffer.from(JSON.stringify({ exp, iat })).toString("base64url")}.`],
+    ["four segments", `${accessToken}.extra`],
+  ])("rejects an access token with %s as an invalid response", async (_shape, badToken) => {
+    const { state, original, save, log } = fixture();
+    const fetchImpl = reply({ code: 0, data: { access_token: badToken, refresh_token: placeholderRefresh } });
+    expect(await refresh(state, { fetchImpl, save, log })).toEqual({ ok: false, permanent: true, code: "invalid_response" });
+    expect(save).not.toHaveBeenCalled();
+    expect(state).toEqual(original);
+  });
+
   it("reports a network failure without logging details from the request error", async () => {
     const { state, original, save, log } = fixture();
     const fetchImpl = async () => { throw new Error(`request to ${placeholderUrl} failed`); };
@@ -529,7 +566,7 @@ describe("behavior recovery after reconnect", () => {
   it.each([
     ["older request responds first", "A"],
     ["newer request responds first", "B"],
-  ] as const)("only saves the latest behavior request on the same connection when the %s", async (_order, first) => {
+  ] as const)("ends with the latest behavior request on the same connection when the %s", async (_order, first) => {
     const { sync, responses, save, applied } = setupBehaviorSync(true);
     const state = behaviorState();
     const a = sync.onInvalidated(state, active);
@@ -540,14 +577,68 @@ describe("behavior recovery after reconnect", () => {
 
     respond[first](first);
     await pending[first];
-    expect(state.behavior).toBe(first === "A" ? "old" : "B");
-    expect(save).toHaveBeenCalledTimes(first === "A" ? 0 : 1);
+    // An earlier response that arrives first is newer than anything applied yet, so it is kept
+    // (a later failure must not lose it); once B is applied, A can no longer overwrite it.
+    expect(state.behavior).toBe(first);
+    expect(save).toHaveBeenCalledTimes(1);
 
     respond[second](second);
     await pending[second];
     expect(state.behavior).toBe("B");
+    expect(save).toHaveBeenLastCalledWith({ ...state, behavior: "B" });
+    expect(save).toHaveBeenCalledTimes(first === "A" ? 2 : 1);
+    expect(applied).toEqual(first === "A" ? ["A", "B"] : ["B"]);
+  });
+});
+
+describe("behavior pulls on one connection", () => {
+  it("keeps an earlier in-flight success when the later pull fails", async () => {
+    const pending: Array<(body: unknown) => void> = [];
+    const fetchImpl = vi.fn(() => new Promise<JsonResponse>((resolve) => {
+      pending.push((body) => resolve({ json: async () => body }));
+    }));
+    const save = vi.fn<(state: BehaviorState) => void>();
+    const applied: string[] = [];
+    const sync = createBehaviorSync({
+      startupFresh: true,
+      pull: (state, isActive) => pullBehavior(state, isActive, { fetchImpl, save }),
+      apply: (state) => { applied.push(state.behavior ?? ""); },
+    });
+    const state: BehaviorState = { agentId: "agt_1", accessToken: placeholderAccess, behavior: "old" };
+
+    const first = sync.onInvalidated(state, () => true);
+    const second = sync.onInvalidated(state, () => true);
+    pending[1]!({ code: 500 });
+    await second;
+    pending[0]!({ code: 0, data: { agent: { behavior: "edited" } } });
+    await first;
+
+    expect(state.behavior).toBe("edited");
+    expect(applied).toEqual(["edited"]);
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith({ ...state, behavior: "B" });
-    expect(applied).toEqual(["B"]);
+  });
+
+  it("drops an earlier success that resolves in the same tick as a later success", async () => {
+    const pending: Array<(body: unknown) => void> = [];
+    const fetchImpl = vi.fn(() => new Promise<JsonResponse>((resolve) => {
+      pending.push((body) => resolve({ json: async () => body }));
+    }));
+    const save = vi.fn<(state: BehaviorState) => void>();
+    const applied: string[] = [];
+    const sync = createBehaviorSync({
+      startupFresh: true,
+      pull: (state, isActive) => pullBehavior(state, isActive, { fetchImpl, save }),
+      apply: (state) => { applied.push(state.behavior ?? ""); },
+    });
+    const state: BehaviorState = { agentId: "agt_1", accessToken: placeholderAccess, behavior: "old" };
+
+    const first = sync.onInvalidated(state, () => true);
+    const second = sync.onInvalidated(state, () => true);
+    pending[1]!({ code: 0, data: { agent: { behavior: "newer" } } });
+    pending[0]!({ code: 0, data: { agent: { behavior: "older" } } });
+    await Promise.all([first, second]);
+
+    expect(state.behavior).toBe("newer");
+    expect(applied).toEqual(["newer"]);
   });
 });
