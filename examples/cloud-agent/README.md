@@ -61,6 +61,32 @@ docker run --rm -it \
 30 分钟是 2026-08-30 实测：`check` 回的 `expires_at` 距签发 29m56s）。以 `check` 回的
 `expires_at` 为准，别写死。失败的 `/connect` 也可能已经消耗掉它，重试前先用 `check` 确认还 `pairable`。
 
+### 重连与设备号
+
+一个 WebSocket 设备号同一时间只能跑一个实例。`wsDeviceId` 持久化在 `CLAWCHAT_STATE`
+指定的状态文件（默认 `/state/agent.json`）中。复制带有该状态文件的容器，或共享状态卷启动第二个实例，
+会让两边用同一个设备号互顶。需要同时运行时，给每个实例单独配对，使用独立的状态文件和设备号。
+
+默认重连从 1 秒开始，按指数退避并加抖动，上限 60 秒。到达上限后，每次等待 30–60 秒。
+从 `hello-ok` 到关闭满 60 秒才重置退避计数，短暂上线后断开会继续累加。
+
+| 关闭码 | 示例的行为 |
+|---|---|
+| `4001` | 同一设备号被新连接顶掉。日志提示设备号冲突，等待 30–60 秒再试。 |
+| `4002` | 握手被限流。关闭原因里有有效的 `retry_after_ms` 时，等满服务端给的时间；当前退避更长时按退避等。等待时间仅受 Node 定时器上限（2,147,483,647 毫秒）限制。缺少有效值时至少等 30 秒。 |
+| `4010` | 被另一个安装顶替。停止自动重连，需人工确认要保留哪个安装。 |
+
+`hello-fail` 的原因逐字匹配 `authentication failed` 时，发起一次 token 刷新并主动关闭连接。
+刷新同一时间只允许一次，两次尝试至少相隔 30 秒。间隔未满时只关闭连接，重连至少等到间隔期满。
+关闭路径等待刷新完成，成功后用新 token 按当前退避计数重连。其他 `hello-fail` 原因（包括 `auth service unavailable`）在连接关闭后用原 token 退避重连。
+
+- **停止自动重连**：HTTP 状态为 4xx（408、429 除外），不论响应体是什么；HTTP 2xx 且 JSON `code` 为 `10003` 或 `400`；刷新出现未分类异常。`code: 0` 时，两个 token 都必须是非空字符串，access token 必须是三段 JWT，payload 可解析并带有有限数值 `exp`，否则也停止。日志记录固定错误类别。
+- **退避重连**：网络失败、HTTP 408 / 429 / 5xx 等非 2xx 状态（这些响应里的 token 一律不收）、2xx 的非 JSON 响应，以及 JSON `code: 1`、其他未列出的错误码或缺少有效错误码。刷新失败处理完后，重连至少再等 30 秒。
+
+刷新到的新 token 必须先写进状态文件。写失败（卷满、只读）时，示例把新 token 留在内存里按退避重试写入，写成功后才更新运行状态并重连。服务端已经作废了旧 refresh token，丢掉新的就只能重新配对。
+
+每次重连收到 `hello-ok` 后都会补拉 `agent.behavior`，以获取断线期间的修改。首次 `hello-ok` 只有在启动自读成功且之后未刷新凭据时才跳过补拉。收到未指定 scope 或包含 `behavior` 的失效信号时也会重拉，当前连接上只有最新发起的请求可以更新 behavior。
+
 ---
 
 ## 它实现了什么（以及为什么每一条都不能省）
@@ -70,18 +96,18 @@ docker run --rm -it \
 
 | 条 | 做法 |
 |---|---|
-| **两个 device id** | REST 侧永远是字面常量 `clawchat-cloud-agent-probe`；WS 侧是 `sha256(channel\0owner\0user\0hostname)[0:24]` 派生。混淆它们 → refresh 收 `code:10003` → 自动登出 |
+| **两个 device id** | REST 侧永远是字面常量 `clawchat-cloud-agent-probe`；WS 侧是 `sha256(channel\0owner\0user\0hostname)[0:24]` 派生。混淆它们 → refresh 收 `code:10003` → 停止自动重连 |
 | **`message_id`** | `msg-` + 26 字符 Crockford base32 ULID。不是 UUID，不是 nanoid |
 | **自回声守卫 fail closed** | 自己的 userId 取 JWT 的 `sub`；取不到 → 整条入站链不处理。失败开放 = 对生产账号打无限自回复 |
 | **`message_mode: ""` 读作 `normal`** | 服务器下行不给默认值；照字面比对 `"normal"` 会丢掉每一条消息 |
 | **`pong` 原样回显 `emitted_at`** | 重新盖戳是协议违规 |
 | **绝不发给 `usr_…`** | 服务器**静默丢弃且无负 ack**。这里直接抛错拒发 —— 宁可炸也不要静默 |
 | **refresh 顺序** | 落盘 → 换内存 → 重连 WS。顺序错了，崩溃时丢掉新的 refresh token |
-| **`hello-fail` 精确匹配** | 只有逐字 `authentication failed` 是终局；其余（含 `auth service unavailable` 与任何未来新串）一律瞬时、原 token 退避重连 |
+| **`hello-fail` 精确匹配** | 只有逐字 `authentication failed` 才触发刷新；其余（含 `auth service unavailable` 与任何未来新串）一律瞬时、原 token 退避重连。流程见[重连与设备号](#重连与设备号) |
 | **入站过滤链九步顺序** | `notify.signal` / `chat.metadata.invalidated` 必须在业务链**之前**分流出去 —— 它们被「这是不是 message.send？」滤死过三次 |
 | **可选模型与上下文** | `CLAWCHAT_MODEL_BASE` + `CLAWCHAT_MODEL` 启用 OpenAI 兼容模型；每会话 12 轮，只在进程内保存，重启即忘 |
 | **权限门（§2.8，部分实现）** | 21001 翻成 pending 交给模型；`permission_result` 在业务链外分流并回话；尚无完整审批实跑记录 |
-| **refresh（部分实现）** | 只有 `hello-fail` / REST 401 触发的反应式刷新；没有 §1.5 的提前刷新排程 |
+| **refresh（部分实现）** | 由鉴权失败的 `hello-fail` 触发，省略 §1.5 的提前刷新排程 |
 | **群语义（§3，部分实现）** | 识别 mention 后可回复；未实现群合并与完整门控 |
 | **媒体（§4，部分实现）** | 入站 fragment 转文字或 URL；未实现媒体上传 |
 | **`notify.signal`（§2.7）** | 未实现各 type 动作，收到即忽略 |
@@ -131,8 +157,8 @@ owner-only**，这是服务端契约中两种操作的权限差异。一个永�
    上下文与 typing 指示器（§2.6：本端指示器 6s 不见新帧就熄，所以思考期间每 4s 续一帧）。
 2. **`agent.behavior` —— 我原样重犯了 §7.1 点名的那个坑。** connect 响应里就带着它，
    而我丢在地上：**主人账号上配着 1563 个字符的「Agent 行为」，一个字都没进上下文**。
-   现在连接时自读一次（`GET /v1/agents/:id`，owner-or-self 门，用 agent 自己的 token），
-   并在 `chat.metadata.invalidated` 带 `behavior` scope 时重拉。
+   自读用 `GET /v1/agents/:id`（owner-or-self 门，用 agent 自己的 token）。
+   上线和 `chat.metadata.invalidated` 的补拉规则见[重连与设备号](#重连与设备号)。
 3. **device id 不再每次重启换一个。** §1.6 的派生式含 `hostname()`，而**容器的 hostname
    每次 run 都是新的** —— 于是每次重启在服务器眼里都是新设备，触发全量 inbox 重放
    （实测：重启后旧消息又收了一遍）。修法照 §2.3：`hello-ok` 回的 server-resolved id

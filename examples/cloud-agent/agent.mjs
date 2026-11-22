@@ -51,6 +51,122 @@ const CHANNEL_ID = 'clawchat-cloud-agent-probe';
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
+export const RECONNECT_BASE_MS = 1_000;
+export const RECONNECT_MAX_MS = 60_000;
+export const STABLE_CONNECTION_MS = 60_000;
+export const TAKEOVER_MIN_DELAY_MS = 30_000;
+export const MAX_TIMER_MS = 2_147_483_647;
+export const REFRESH_MIN_INTERVAL_MS = 30_000;
+
+export function reconnectDecision({ attempt, connectedAt, closedAt, code, reason, random, minDelayMs = 0 }) {
+  if (connectedAt !== null && closedAt - connectedAt >= STABLE_CONNECTION_MS) attempt = 0;
+  attempt += 1;
+
+  if (code === 4010) {
+    return { action: 'stop', attempt, notice: '已被另一个安装顶替，已停止自动重连。请人工确认要保留哪个安装。' };
+  }
+
+  const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** (attempt - 1));
+  let delay = Math.max(RECONNECT_BASE_MS, base / 2 + random * base / 2);
+  let notice;
+  if (code === 4001) {
+    // 同设备号的两个实例互顶时，短延迟会形成重连风暴。
+    delay = Math.max(delay, TAKEOVER_MIN_DELAY_MS + random * (RECONNECT_MAX_MS - TAKEOVER_MIN_DELAY_MS));
+    notice = '同一设备号在别处在线（被新连接顶掉，关闭码 4001）。一个设备号同一时间只能跑一个实例，请停掉另一个实例，或为这个实例使用独立的状态文件和设备号。';
+  } else if (code === 4002) {
+    let retryAfter;
+    try { retryAfter = JSON.parse(reason)?.retry_after_ms; } catch {}
+    delay = Math.max(delay, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : TAKEOVER_MIN_DELAY_MS);
+    notice = '握手被限流（关闭码 4002）。';
+  }
+
+  const delayMs = Math.min(MAX_TIMER_MS, Math.ceil(Math.max(delay, minDelayMs)));
+  return { action: 'wait', delayMs, attempt, ...(notice && { notice: `${notice}${Math.ceil(delayMs / 1_000)}s 后重试。` }) };
+}
+
+// 刷新后的凭据必须先落盘。写失败（卷满 / 只读）就按退避一直重试写，并大声报错；
+// 期间不重连，避免用已作废的旧 token 再去刷新、把身份永久弄丢。
+export async function persistUntilSaved(next, { save, log, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  for (let delay = RECONNECT_BASE_MS; ; delay = Math.min(delay * 2, RECONNECT_MAX_MS)) {
+    try { save(next); return; } catch (e) {
+      log(`状态文件写入失败，新 token 只在内存里，${delay}ms 后重试落盘（写成功前不重连）:`, e?.code ?? 'write_failed');
+    }
+    await wait(delay);
+  }
+}
+
+export function createReconnector({ start, refresh, now = () => performance.now(), random = Math.random, log }) {
+  let attempt = 0;
+  let generation = 0;
+  let reconnectTimer = null;
+  let stopped = false;
+  let lastRefreshAt = null;
+
+  function scheduleReconnect(delayMs) {
+    const currentGeneration = generation;
+    clearTimeout(reconnectTimer);
+    const timer = setTimeout(() => {
+      if (stopped || currentGeneration !== generation || reconnectTimer !== timer) return;
+      reconnectTimer = null;
+      open();
+    }, delayMs);
+    reconnectTimer = timer;
+  }
+
+  function open() {
+    if (stopped) return;
+    const currentGeneration = ++generation;
+    const isCurrent = () => !stopped && currentGeneration === generation;
+    let connectedAt = null;
+    let refreshPromise;
+    let refreshRetryAt = null;
+    let closed = false;
+    const isActive = () => isCurrent() && !closed;
+
+    start({
+      isActive,
+      onReady() {
+        if (isActive()) connectedAt ??= now();
+      },
+      onAuthFailed(close) {
+        if (!isActive() || refreshPromise || refreshRetryAt !== null) return;
+        const nowMs = now();
+        if (lastRefreshAt !== null && nowMs - lastRefreshAt < REFRESH_MIN_INTERVAL_MS) {
+          refreshRetryAt = lastRefreshAt + REFRESH_MIN_INTERVAL_MS;
+        } else {
+          lastRefreshAt = nowMs;
+          // 关闭回调等待刷新结果后再排程。未分类异常按永久失败处理。
+          refreshPromise = refresh().catch(() => ({ ok: false, permanent: true, code: 'refresh_error' }));
+        }
+        close();
+      },
+      async onClosed({ code, reason }) {
+        if (!isActive()) return;
+        closed = true;
+        const closedAt = now();
+        const refreshResult = refreshPromise ? await refreshPromise : null;
+        if (!isCurrent()) return;
+        const refreshFailed = refreshResult && !refreshResult.ok;
+        const permanentFailure = refreshFailed && refreshResult.permanent;
+        const minDelayMs = refreshFailed ? REFRESH_MIN_INTERVAL_MS : (refreshRetryAt ?? closedAt) - closedAt;
+        const decision = reconnectDecision({ attempt, connectedAt, closedAt, code, reason, random: random(), minDelayMs });
+        attempt = decision.attempt;
+        if (permanentFailure || decision.action === 'stop') {
+          stopped = true;
+          if (permanentFailure) log('refresh 永久失败，停止重连', refreshResult.code);
+          if (decision.action === 'stop') log(decision.notice);
+          return;
+        }
+        if (decision.notice) log(decision.notice);
+        log('reconnect in', decision.delayMs, 'ms', 'attempt', attempt, 'code', code);
+        scheduleReconnect(decision.delayMs);
+      },
+    });
+  }
+
+  return { start: () => { if (generation === 0) open(); } };
+}
+
 // ── 状态：refresh token 是单次性的，必须先落盘再换内存（§1.5 gotcha 3）──────
 function loadState() {
   try { return JSON.parse(readFileSync(STATE_PATH, 'utf8')); } catch { return {}; }
@@ -188,35 +304,105 @@ async function activate(code) {
 // §7.1：behavior 的**自读**。`GET /v1/agents/:id` 是 owner-or-self 门，而 agent
 // 就是那个 self —— 不需要、也绝不该用主人的凭据（混用两个身份正是 §1.6 那类事故）。
 // 连接时拉一次是真兜底：那个失效信号**短暂且从不重放**，离线期间的编辑只能这样拿到。
-async function pullBehavior(state) {
+export async function pullBehavior(state, isActive = () => true, { fetchImpl = fetch, save = saveState } = {}) {
   try {
-    const res = await fetch(`${REST}/v1/agents/${state.agentId}`, {
+    const res = await fetchImpl(`${REST}/v1/agents/${state.agentId}`, {
       headers: { authorization: `Bearer ${state.accessToken}`, 'x-device-id': CHANNEL_ID },
     });
     const j = await res.json();
-    if (j.code !== 0) return;
+    if (j.code !== 0 || !isActive()) return false;
     const b = j.data?.agent?.behavior ?? '';
-    if (b !== state.behavior) { state.behavior = b; saveState(state); log('behavior updated', `${b.length} chars`); }
-  } catch (e) { log('behavior pull failed (non-fatal):', e.message); }
+    if (b !== state.behavior) {
+      save({ ...state, behavior: b });
+      state.behavior = b;
+      log('behavior updated', `${b.length} chars`);
+    }
+    return true;
+  } catch {
+    log('behavior pull failed (non-fatal)');
+    return false;
+  }
+}
+
+// 失效信号短暂且不重放：上线时补拉，只有启动自读成功且凭据未刷新时才跳过首次补拉。
+// 每次拉取带递增序号；响应只有比已采用的结果更新时才能写入，所以较早的响应不会覆盖较新的结果，
+// 而较新的请求失败时，较早那次在途的成功结果仍然有效。pullBehavior 在写入前同步调用一次守卫，
+// 守卫通过即认领该序号，中间没有异步间隙。
+export function createBehaviorSync({ pull, apply, startupFresh }) {
+  let skipFirstReady = startupFresh;
+  let latest = 0;
+  let applied = 0;
+  async function run(state, isActive) {
+    const seq = ++latest;
+    const claim = () => {
+      if (!isActive() || seq <= applied) return false;
+      applied = seq;
+      return true;
+    };
+    await pull(state, claim);
+    if (isActive() && applied === seq) apply(state);
+  }
+  return {
+    onReady(state, isActive) {
+      if (!skipFirstReady) return run(state, isActive);
+      skipFirstReady = false;
+      return Promise.resolve();
+    },
+    onInvalidated: run,
+    markStale() { skipFirstReady = false; },
+  };
 }
 
 // §1.5 刷新：**不带 Authorization**，body 里的 refresh token 就是凭据
-async function refresh(state) {
-  const res = await fetch(`${REST}/v1/auth/refresh`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-device-id': CHANNEL_ID },
-    body: JSON.stringify({ refresh_token: state.refreshToken }),
-  });
-  const j = await res.json().catch(() => ({}));
-  if (j.code !== 0) return { ok: false, permanent: j.code === 10003 || j.code === 400, code: j.code };
-  const claims = JSON.parse(Buffer.from(j.data.access_token.split('.')[1], 'base64url').toString());
-  Object.assign(state, {
-    accessToken: j.data.access_token, refreshToken: j.data.refresh_token,
+const moduleLog = log;
+export async function refresh(state, { fetchImpl = fetch, save = saveState, log = moduleLog, persist = persistUntilSaved } = {}) {
+  let res;
+  try {
+    res = await fetchImpl(`${REST}/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-device-id': CHANNEL_ID },
+      body: JSON.stringify({ refresh_token: state.refreshToken }),
+    });
+  } catch {
+    log('refresh request failed (network)');
+    return { ok: false, permanent: false, code: 'network' };
+  }
+  // 先看 HTTP 状态：4xx 是请求本身被拒（408 / 429 除外，它们是限流 / 超时），一律停止；
+  // 非 2xx 的响应体无论写了什么都不收 token。
+  const status = res.status;
+  if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+    return { ok: false, permanent: true, code: `http_${status}` };
+  }
+  if (!(status >= 200 && status < 300)) return { ok: false, permanent: false, code: `http_${status}` };
+  let j;
+  try { j = await res.json(); } catch {
+    return { ok: false, permanent: false, code: `http_${status}` };
+  }
+  const code = j?.code;
+  if (code === 10003 || code === 400) return { ok: false, permanent: true, code: `rejected_${code}` };
+  if (code !== 0) return { ok: false, permanent: false, code: Number.isFinite(code) ? `server_${code}` : 'server_unknown' };
+
+  const accessToken = j.data?.access_token;
+  const refreshToken = j.data?.refresh_token;
+  const invalidResponse = { ok: false, permanent: true, code: 'invalid_response' };
+  if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken) return invalidResponse;
+  const segments = accessToken.split('.');
+  if (segments.length !== 3 || !segments.every((part) => /^[A-Za-z0-9_-]+$/.test(part))) return invalidResponse;
+  const payload = segments[1];
+  let claims;
+  try { claims = JSON.parse(Buffer.from(payload, 'base64url').toString()); } catch { return invalidResponse; }
+  if (!Number.isFinite(claims?.exp)) return invalidResponse;
+  const next = {
+    ...state,
+    accessToken, refreshToken,
     exp: claims.exp, iat: claims.iat,
-  });
-  saveState(state);                        // 顺序强制：落盘 → 换内存 → 重连 WS
+  };
+  // 顺序强制：落盘 → 换内存 → 重连 WS。服务端已经作废了旧 refresh token，
+  // 所以落盘失败时不能重试整个刷新：新 token 留在这里，写成功之前不重连。
+  await persist(next, { save, log });
+  Object.assign(state, next);
   log('token refreshed');
-  return { ok: true };
+  return { ok: true, permanent: false, code: 'ok' };
 }
 
 // ── §2.5 入站过滤链，顺序即契约 ─────────────────────────────────────────────
@@ -495,7 +681,7 @@ async function think(chatId, text) {
   throw new Error('工具循环超过 5 轮还没给出答复');
 }
 
-function connect(state, onReady) {
+function connect(state, onReady, isActive, behaviorSync) {
   const ws = new WebSocket(WS_URL);
   const pending = new Map();          // trace_id → {resolve, timer}
   let hb = null, pongTimer = null;
@@ -505,6 +691,7 @@ function connect(state, onReady) {
   ws.onopen = () => log('ws open');
 
   ws.onmessage = (ev) => {
+    if (!isActive()) return;
     let f; try { f = JSON.parse(String(ev.data)); } catch { return; }
     if (f.version !== '2' || typeof f.event !== 'string') return;
 
@@ -563,7 +750,7 @@ function connect(state, onReady) {
     if (f.event === 'chat.metadata.invalidated') {
       const scope = f.payload?.scope;
       if (!scope || (Array.isArray(scope) && scope.includes('behavior'))) {
-        pullBehavior(state).then(() => { BEHAVIOR = state.behavior ?? ''; });
+        behaviorSync.onInvalidated(state, isActive);
       }
       return;
     }
@@ -576,7 +763,12 @@ function connect(state, onReady) {
     if (hit) api.onMessage?.(hit, api);
   };
 
-  ws.onclose = (e) => { clearInterval(hb); clearTimeout(pongTimer); log('ws closed', e.code); api.onClosed?.(e.code); };
+  ws.onclose = (e) => {
+    clearInterval(hb);
+    clearTimeout(pongTimer);
+    log('ws closed', e.code);
+    api.onClosed?.({ code: e.code, reason: String(e.reason ?? '') });
+  };
   ws.onerror = () => log('ws error');
 
   const api = {
@@ -626,15 +818,16 @@ if (!state.accessToken) {
   log('resuming saved identity', JSON.stringify({ agentId: state.agentId, conversationId: state.conversationId }));
 }
 state.wsDeviceId = stableWsDeviceId(state);
-await pullBehavior(state);
+const startupFresh = await pullBehavior(state);
 BEHAVIOR = state.behavior ?? '';
+const behaviorSync = createBehaviorSync({ startupFresh, pull: pullBehavior, apply: (state) => { BEHAVIOR = state.behavior ?? ''; } });
 log('behavior', BEHAVIOR ? `${BEHAVIOR.length} chars 已挂上` : '（主人还没写）');
 
-let attempt = 0;
 let greeted = Boolean(loadState().greeted);
-function start() {
+function start({ isActive, onReady, onAuthFailed, onClosed }) {
   const api = connect(state, (a) => {
-    attempt = 0;
+    onReady();
+    behaviorSync.onReady(state, isActive);
     log(`READY —— 在线，等主人说话${HAS_BRAIN ? `（脑子：${MODEL_NAME}）` : '（无脑子，探针模式）'}`);
     // **只在首次激活时问好。** 每次重连都发一句「我上线了」是刷屏,而重连是常态。
     if (!greeted) {
@@ -644,7 +837,7 @@ function start() {
         : '云端 agent 上线了（容器里跑的协议探针，还没接模型）。')
         .then((r) => log('greeting ack:', r.event));
     }
-  });
+  }, isActive, behaviorSync);
   TOOL_CTX = { state, api };
   api.onMessage = async (hit, a) => {
     log(`收到 [${hit.chatId}] ${hit.sender.nick_name ?? hit.sender.id}: ${hit.text}`);
@@ -695,15 +888,16 @@ function start() {
       `关于「${m.operation ?? asked?.operation ?? '刚才那件事'}」：${word}。${m.reason ? `（${m.reason}）` : ''}`);
   };
 
-  api.onAuthFailed = async () => {
-    const r = await refresh(state);
-    if (r.ok) start(); else log('refresh 永久失败，停止重连', r.code);
-  };
-  api.onClosed = () => {
-    attempt++;
-    const delay = Math.min(15000, 500 * 2 ** (attempt - 1));
-    setTimeout(start, delay + Math.random() * delay * 0.3);
-  };
+  api.onAuthFailed = () => onAuthFailed(api.close);
+  api.onClosed = onClosed;
 }
-start();
+createReconnector({
+  start,
+  async refresh() {
+    const result = await refresh(state);
+    if (result.ok) behaviorSync.markStale();
+    return result;
+  },
+  log,
+}).start();
 }
