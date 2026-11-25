@@ -618,6 +618,34 @@ describe("behavior pulls on one connection", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps an earlier in-flight success when the later pull fails to save", async () => {
+    const pending: Array<(body: unknown) => void> = [];
+    const fetchImpl = vi.fn(() => new Promise<JsonResponse>((resolve) => {
+      pending.push((body) => resolve({ json: async () => body }));
+    }));
+    const save = vi.fn<(state: BehaviorState) => void>()
+      .mockImplementationOnce(() => { throw new Error("disk full"); });
+    const applied: string[] = [];
+    const sync = createBehaviorSync({
+      startupFresh: true,
+      pull: (state, isActive) => pullBehavior(state, isActive, { fetchImpl, save }),
+      apply: (state) => { applied.push(state.behavior ?? ""); },
+    });
+    const state: BehaviorState = { agentId: "agt_1", accessToken: placeholderAccess, behavior: "old" };
+
+    const first = sync.onInvalidated(state, () => true);
+    const second = sync.onInvalidated(state, () => true);
+    pending[1]!({ code: 0, data: { agent: { behavior: "newer" } } });
+    await second;
+    expect(state.behavior).toBe("old");
+    pending[0]!({ code: 0, data: { agent: { behavior: "older" } } });
+    await first;
+
+    expect(state.behavior).toBe("older");
+    expect(applied).toEqual(["older"]);
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
   it("drops an earlier success that resolves in the same tick as a later success", async () => {
     const pending: Array<(body: unknown) => void> = [];
     const fetchImpl = vi.fn(() => new Promise<JsonResponse>((resolve) => {
