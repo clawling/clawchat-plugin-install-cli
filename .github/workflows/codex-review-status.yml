@@ -3,9 +3,11 @@
 #   running, old head, incomplete summary/threads; error = read failure, head moved mid-read or write failure.
 # Logic and tests: .github/scripts/codex_review_status.py.
 #
-# workflow_dispatch --ref <branch> and pull_request_target with a non-default base use that branch's YAML;
-# verified 2026-10-28: it still receives statuses:write. The YAML if and script ref guard only prevent
-# stale copies / accidental use; writers can use their own workflow to write any commit status.
+# pull_request_target and issue_comment always run the default branch's YAML, whatever the PR's base
+# (verified 2026-11-11: a PR into pre-release still ran the default-branch workflow).
+# workflow_dispatch --ref <branch> runs that branch's YAML; verified 2026-10-28: it still receives
+# statuses:write. The YAML if and script ref guard only prevent stale copies / accidental use; writers
+# can use their own workflow to write any commit status.
 # Protecting against writers requires a dedicated GitHub App writing statuses and a ruleset integration_id.
 # The script is checked out from the default branch; no PR code is checked out.
 # Codex edits its summary comment when a review starts and ends -> issue_comment.edited.
