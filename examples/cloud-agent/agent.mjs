@@ -317,6 +317,7 @@ export async function pullBehavior(state, isActive = () => true, { fetchImpl = f
       state.behavior = b;
       log('behavior updated', `${b.length} chars`);
     }
+    isActive.commit?.();                  // 落盘成功（或无需落盘）后才认领该序号
     return true;
   } catch {
     log('behavior pull failed (non-fatal)');
@@ -326,8 +327,9 @@ export async function pullBehavior(state, isActive = () => true, { fetchImpl = f
 
 // 失效信号短暂且不重放：上线时补拉，只有启动自读成功且凭据未刷新时才跳过首次补拉。
 // 每次拉取带递增序号；响应只有比已采用的结果更新时才能写入，所以较早的响应不会覆盖较新的结果，
-// 而较新的请求失败时，较早那次在途的成功结果仍然有效。pullBehavior 在写入前同步调用一次守卫，
-// 守卫通过即认领该序号，中间没有异步间隙。
+// 而较新的请求失败时，较早那次在途的成功结果仍然有效。守卫分两步：pullBehavior 在写入前同步调用一次
+// 守卫做检查，落盘成功后再调 commit() 推进 applied；落盘抛错就不推进，较早那次在途的成功结果仍可采用。
+// 检查、落盘、commit 都是同步的，中间没有异步间隙。
 export function createBehaviorSync({ pull, apply, startupFresh }) {
   let skipFirstReady = startupFresh;
   let latest = 0;
@@ -335,10 +337,9 @@ export function createBehaviorSync({ pull, apply, startupFresh }) {
   async function run(state, isActive) {
     const seq = ++latest;
     const claim = () => {
-      if (!isActive() || seq <= applied) return false;
-      applied = seq;
-      return true;
+      return isActive() && seq > applied;
     };
+    claim.commit = () => { if (seq > applied) applied = seq; };
     await pull(state, claim);
     if (isActive() && applied === seq) apply(state);
   }
